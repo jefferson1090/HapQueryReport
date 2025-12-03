@@ -1,0 +1,59 @@
+{
+  "name": "server",
+  "version": "1.1.5",
+  "main": "electron-main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.hap.queryreport",
+    "productName": "Hap Query Report",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!dist/**/*",
+      "!uploads/**/*",
+      "!server_log.txt",
+      "!oracle-builder.exe",
+      "!deploy.ps1",
+      "!start_app.bat"
+    ],
+    "extraResources": [
+      {
+        "from": "instantclient",
+        "to": "instantclient"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": true
+    }
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "csv-parser": "^3.2.0",
+    "express": "^5.1.0",
+    "json2csv": "^6.0.0-alpha.2",
+    "multer": "^2.0.2",
+    "oracledb": "^6.10.0"
+  },
+  "bin": "index.js",
+  "devDependencies": {
+    "electron": "^39.2.4",
+    "electron-builder": "^26.0.12",
+    "nodemon": "^3.1.11",
+    "wait-on": "^9.0.3"
+  }
+}

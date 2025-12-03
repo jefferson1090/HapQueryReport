@@ -1,0 +1,445 @@
+import React, { useState } from 'react';
+
+function CsvImporter() {
+    const [step, setStep] = useState(1); // 1: Upload, 2: Review, 3: Result
+    const [file, setFile] = useState(null);
+    const [delimiter, setDelimiter] = useState(';'); // Changed default to semicolon
+    const [tableName, setTableName] = useState('');
+    const [columns, setColumns] = useState([]);
+    const [importing, setImporting] = useState(false);
+    const [importStatus, setImportStatus] = useState('');
+    const [importProgress, setImportProgress] = useState(0);
+    const [previewData, setPreviewData] = useState([]);
+    const [grantUser, setGrantUser] = useState('');
+    const [importHistory, setImportHistory] = useState([]);
+
+    const [tableExists, setTableExists] = useState(false);
+    const [dropIfExists, setDropIfExists] = useState(false);
+
+    React.useEffect(() => {
+        const savedHistory = localStorage.getItem('hap_csv_history');
+        if (savedHistory) {
+            try {
+                setImportHistory(JSON.parse(savedHistory));
+            } catch (e) {
+                console.error("Failed to parse history", e);
+            }
+        }
+    }, []);
+
+    const saveHistory = (newItem) => {
+        const updated = [newItem, ...importHistory].slice(0, 5); // Keep last 5
+        setImportHistory(updated);
+        localStorage.setItem('hap_csv_history', JSON.stringify(updated));
+    };
+
+    const checkTable = async (name) => {
+        try {
+            const res = await fetch('http://localhost:3001/api/check-table', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tableName: name })
+            });
+            const data = await res.json();
+            setTableExists(data.exists);
+            if (data.exists) {
+                setImportStatus(`A tabela ${name} já existe.`);
+            } else {
+                setImportStatus('');
+            }
+        } catch (err) {
+            console.error("Error checking table:", err);
+        }
+    };
+
+    const [filePath, setFilePath] = useState(null); // Store server file path
+    const [detectedDelimiter, setDetectedDelimiter] = useState(';');
+    const [totalRows, setTotalRows] = useState(0);
+
+    const handleFileUpload = async (e) => {
+        const selectedFile = e.target.files[0];
+        if (!selectedFile) return;
+        setFile(selectedFile);
+
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        formData.append('delimiter', delimiter);
+
+        setImporting(true); // Using importing for initial analysis as well
+        setImportStatus('Analisando arquivo...');
+        setImportProgress(0);
+        try {
+            const res = await fetch('http://localhost:3001/api/upload/csv', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+
+            setPreviewData(data.preview); // Store preview data
+            setTableName(data.tableName);
+            setColumns(data.columns);
+            setFilePath(data.filePath); // Store file path for full import
+            setTotalRows(data.totalEstimatedRows || 0); // Store total rows
+
+            if (data.delimiter) {
+                setDelimiter(data.delimiter);
+                setDetectedDelimiter(data.delimiter);
+            }
+
+            // Check if table exists immediately
+            await checkTable(data.tableName);
+
+            setStep(2);
+            setImporting(false);
+            setImportStatus('');
+        } catch (err) {
+            setImportStatus('Erro ao analisar arquivo: ' + err.message);
+            setImporting(false);
+        }
+    };
+
+    const handleColumnChange = (index, field, value) => {
+        const newCols = [...columns];
+        newCols[index][field] = value;
+        setColumns(newCols);
+    };
+
+    const handleImport = async () => {
+        setImporting(true);
+        setImportStatus('Iniciando importação (Isso pode demorar)...');
+        setImportProgress(0);
+
+        try {
+            const response = await fetch('http://localhost:3001/api/create-table', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tableName,
+                    columns,
+                    data: previewData, // Fallback
+                    filePath: filePath, // Send file path for full import
+                    delimiter: delimiter, // Send confirmed delimiter
+                    grantToUser: grantUser, // Pass the user to grant access to
+                    dropIfExists: dropIfExists
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                setImportStatus('Importação concluída com sucesso!');
+                setImportProgress(100);
+
+                // Save to history
+                saveHistory({
+                    fileName: file.name,
+                    tableName: tableName,
+                    date: new Date().toISOString(),
+                    grantUser: grantUser || 'Nenhum'
+                });
+
+                setTimeout(() => {
+                    setStep(1);
+                    setFile(null);
+                    setPreviewData([]);
+                    setColumns([]);
+                    setTableName('');
+                    setGrantUser('');
+                    setFilePath(null);
+                    setTotalRows(0);
+                    setImporting(false);
+                    setTableExists(false);
+                    setDropIfExists(false);
+                    alert(result.message);
+                }, 1500);
+            } else {
+                setImportStatus('Erro: ' + result.message);
+                setImporting(false);
+            }
+        } catch (error) {
+            setImportStatus('Erro de rede: ' + error.message);
+            setImporting(false);
+        }
+    };
+
+    return (
+        <div className="p-6 bg-white rounded-lg shadow-sm border border-gray-200 h-full flex flex-col">
+            <h2 className="text-2xl font-bold text-[#0054a6] mb-6">Importar Arquivo CSV</h2>
+
+            {/* Steps Indicator */}
+            <div className="flex items-center mb-8">
+                <div className={`flex items-center justify-center w-8 h-8 rounded-full ${step >= 1 ? 'bg-[#f37021] text-white' : 'bg-gray-200 text-gray-600'} font-bold`}>1</div>
+                <div className={`flex-1 h-1 mx-2 ${step >= 2 ? 'bg-[#f37021]' : 'bg-gray-200'}`}></div>
+                <div className={`flex items-center justify-center w-8 h-8 rounded-full ${step >= 2 ? 'bg-[#f37021] text-white' : 'bg-gray-200 text-gray-600'} font-bold`}>2</div>
+                <div className={`flex-1 h-1 mx-2 ${step >= 3 ? 'bg-[#f37021]' : 'bg-gray-200'}`}></div>
+                <div className={`flex items-center justify-center w-8 h-8 rounded-full ${step >= 3 ? 'bg-[#f37021] text-white' : 'bg-gray-200 text-gray-600'} font-bold`}>3</div>
+            </div>
+
+            {step === 1 && (
+                <div className="flex-1 flex flex-col space-y-6 overflow-y-auto">
+                    <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer min-h-[200px]"
+                        onClick={() => document.getElementById('fileInput').click()}>
+                        <input
+                            type="file"
+                            id="fileInput"
+                            accept=".csv"
+                            onChange={handleFileUpload}
+                            className="hidden"
+                        />
+                        <div className="text-6xl mb-4">📄</div>
+                        <p className="text-lg text-gray-600 font-medium">Clique para selecionar um arquivo CSV</p>
+                        <p className="text-sm text-gray-400 mt-2">ou arraste e solte aqui</p>
+                        {importing && <p className="mt-4 text-blue-600">{importStatus}</p>}
+                        {importStatus.startsWith('Erro') && <p className="mt-4 text-red-600">{importStatus}</p>}
+                    </div>
+
+                    {importHistory.length > 0 && (
+                        <div className="border-t border-gray-200 pt-4">
+                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Últimas Importações</h3>
+                            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                                <table className="min-w-full divide-y divide-gray-200">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Arquivo</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tabela</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Data</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Permissão</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-200">
+                                        {importHistory.map((item, idx) => (
+                                            <tr key={idx} className="hover:bg-gray-50">
+                                                <td className="px-4 py-2 text-sm text-gray-900">{item.fileName}</td>
+                                                <td className="px-4 py-2 text-sm text-[#0054a6] font-medium">{item.tableName}</td>
+                                                <td className="px-4 py-2 text-sm text-gray-500">{new Date(item.date).toLocaleDateString()} {new Date(item.date).toLocaleTimeString()}</td>
+                                                <td className="px-4 py-2 text-sm text-gray-500">{item.grantUser}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {step === 2 && (
+                <div className="flex-1 flex flex-col overflow-hidden">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-semibold text-gray-700">Pré-visualização e Estrutura</h3>
+                        <div className="flex items-center space-x-2">
+                            <label className="text-sm font-medium text-gray-700">Delimitador:</label>
+                            <select
+                                value={delimiter}
+                                onChange={(e) => {
+                                    setDelimiter(e.target.value);
+                                    // Re-analyze with new delimiter (would require refetching/reparsing in a real app)
+                                    // For now, we'd need to re-upload or re-parse the file content
+                                    alert("Para alterar o delimitador, por favor, reenvie o arquivo.");
+                                    setStep(1);
+                                    setFile(null);
+                                }}
+                                className="border border-gray-300 rounded-md p-1 text-sm focus:ring-[#0054a6] focus:border-[#0054a6]"
+                            >
+                                <option value=",">Vírgula (,)</option>
+                                <option value=";">Ponto e Vírgula (;)</option>
+                                <option value="|">Pipe (|)</option>
+                                <option value="\t">Tabulação (\t)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Nome da Tabela de Destino</label>
+                        <input
+                            type="text"
+                            value={tableName}
+                            onChange={(e) => {
+                                const val = e.target.value.toUpperCase();
+                                setTableName(val);
+                                checkTable(val);
+                            }}
+                            className={`w-full p-2 border ${tableExists ? 'border-orange-500 focus:ring-orange-500' : 'border-gray-300 focus:ring-[#0054a6]'} rounded-md outline-none`}
+                        />
+                        {tableExists && (
+                            <p className="text-xs text-orange-600 mt-1">⚠️ Esta tabela já existe. Você poderá optar por recriá-la no próximo passo.</p>
+                        )}
+                    </div>
+
+                    <div className="flex-1 overflow-auto border border-gray-200 rounded-lg">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50 sticky top-0">
+                                <tr>
+                                    {columns.map((col, idx) => (
+                                        <th key={idx} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            <div className="flex flex-col space-y-1">
+                                                <input
+                                                    type="text"
+                                                    value={col.name}
+                                                    onChange={(e) => {
+                                                        const newCols = [...columns];
+                                                        newCols[idx].name = e.target.value.toUpperCase();
+                                                        setColumns(newCols);
+                                                    }}
+                                                    className="bg-transparent border-b border-gray-300 focus:border-[#0054a6] outline-none text-xs font-bold"
+                                                />
+                                                <select
+                                                    value={col.type}
+                                                    onChange={(e) => {
+                                                        const newCols = [...columns];
+                                                        newCols[idx].type = e.target.value;
+                                                        setColumns(newCols);
+                                                    }}
+                                                    className="text-xs border-none bg-transparent focus:ring-0 p-0 text-gray-500"
+                                                >
+                                                    <option value="VARCHAR2(255)">VARCHAR2(255)</option>
+                                                    <option value="NUMBER">NUMBER</option>
+                                                    <option value="DATE">DATE</option>
+                                                    <option value="CLOB">CLOB</option>
+                                                </select>
+                                            </div>
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {previewData.slice(0, 5).map((row, rowIdx) => (
+                                    <tr key={rowIdx}>
+                                        {columns.map((col, colIdx) => (
+                                            <td key={colIdx} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {row[Object.keys(row)[colIdx]]}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="mt-4 flex justify-end space-x-3">
+                        <button
+                            onClick={() => setStep(1)}
+                            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                        >
+                            Voltar
+                        </button>
+                        <button
+                            onClick={() => setStep(3)}
+                            className="px-4 py-2 bg-[#0054a6] text-white rounded-md hover:bg-blue-800"
+                        >
+                            Próximo
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {step === 3 && (
+                <div className="flex-1 flex flex-col items-center justify-center max-w-lg mx-auto w-full">
+                    <h3 className="text-xl font-bold text-gray-800 mb-6">Confirmar Importação</h3>
+
+                    <div className="bg-gray-50 p-6 rounded-lg w-full mb-6 border border-gray-200">
+                        <div className="flex justify-between mb-2">
+                            <span className="text-gray-600">Arquivo:</span>
+                            <span className="font-medium">{file?.name}</span>
+                        </div>
+                        <div className="flex justify-between mb-2">
+                            <span className="text-gray-600">Tabela Destino:</span>
+                            <span className="font-medium text-[#0054a6]">{tableName}</span>
+                        </div>
+                        <div className="flex justify-between mb-2">
+                            <span className="text-gray-600">Colunas:</span>
+                            <span className="font-medium">{columns.length}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-gray-600">Linhas Estimadas:</span>
+                            <span className="font-medium">{totalRows > 0 ? totalRows : 'Calculando...'}</span>
+                        </div>
+                    </div>
+
+                    {tableExists && (
+                        <div className="w-full mb-6 bg-orange-50 border border-orange-200 p-4 rounded-lg">
+                            <h4 className="text-orange-800 font-bold mb-2 flex items-center">
+                                <span className="mr-2">⚠️</span> Tabela Existente
+                            </h4>
+                            <p className="text-sm text-orange-700 mb-3">
+                                A tabela <strong>{tableName}</strong> já existe no banco de dados. O que você deseja fazer?
+                            </p>
+                            <div className="flex space-x-3">
+                                <label className="flex items-center space-x-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        checked={!dropIfExists}
+                                        onChange={() => setDropIfExists(false)}
+                                        className="text-orange-600 focus:ring-orange-500"
+                                    />
+                                    <span className="text-sm text-gray-700">Cancelar e Renomear (Voltar)</span>
+                                </label>
+                                <label className="flex items-center space-x-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        checked={dropIfExists}
+                                        onChange={() => setDropIfExists(true)}
+                                        className="text-red-600 focus:ring-red-500"
+                                    />
+                                    <span className="text-sm text-red-700 font-medium">Recriar Tabela (Apagar dados antigos)</span>
+                                </label>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="w-full mb-6">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Conceder Permissão de Acesso (GRANT ALL) para outro usuário (Opcional):
+                        </label>
+                        <input
+                            type="text"
+                            value={grantUser}
+                            onChange={(e) => setGrantUser(e.target.value.toUpperCase())}
+                            placeholder="Ex: OUTRO_USUARIO"
+                            className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0054a6] outline-none"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                            Se preenchido, executará: <code>GRANT ALL ON {tableName} TO {grantUser || 'USUARIO'}</code>
+                        </p>
+                    </div>
+
+                    {importing ? (
+                        <div className="w-full text-center">
+                            <div className="mb-2 flex justify-between text-sm font-medium text-gray-700">
+                                <span>{importStatus}</span>
+                                <span>{importProgress}%</span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-2.5">
+                                <div className="bg-[#0054a6] h-2.5 rounded-full transition-all duration-500" style={{ width: `${importProgress}%` }}></div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex space-x-3 w-full">
+                            <button
+                                onClick={() => setStep(2)}
+                                className="flex-1 px-4 py-3 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 font-medium"
+                            >
+                                Voltar
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (tableExists && !dropIfExists) {
+                                        setStep(2); // Go back to rename
+                                        alert("Por favor, renomeie a tabela para continuar.");
+                                    } else {
+                                        handleImport();
+                                    }
+                                }}
+                                className={`flex-1 px-4 py-3 text-white rounded-md font-bold shadow-md ${tableExists && !dropIfExists ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#f37021] hover:bg-orange-600'}`}
+                                disabled={tableExists && !dropIfExists}
+                            >
+                                {tableExists && dropIfExists ? 'Recriar e Importar' : 'Iniciar Importação'}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+export default CsvImporter;

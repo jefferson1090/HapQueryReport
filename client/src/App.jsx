@@ -1,0 +1,257 @@
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import ConnectionForm from './components/ConnectionForm';
+import QueryBuilder from './components/QueryBuilder';
+import SqlRunner from './components/SqlRunner';
+import CsvImporter from './components/CsvImporter';
+import Reminders from './components/Reminders';
+import hapLogo from './assets/hap_full_logo.jpg';
+
+// --- Theme Context & Definitions ---
+export const ThemeContext = createContext();
+
+export const THEMES = {
+    default: {
+        name: 'Padrão (Azul)',
+        bg: 'bg-gray-100',
+        sidebar: 'bg-white',
+        sidebarText: 'text-gray-700',
+        primaryBtn: 'bg-blue-600 hover:bg-blue-700 text-white',
+        secondaryBtn: 'bg-gray-100 hover:bg-gray-200 text-gray-600',
+        accent: 'text-blue-600',
+        header: 'bg-white border-b',
+        tableHeader: 'bg-gray-50 text-gray-500',
+        tableRowHover: 'hover:bg-blue-50',
+        border: 'border-gray-200',
+        input: 'bg-white text-gray-900',
+        panel: 'bg-white'
+    },
+    dark: {
+        name: 'Modo Escuro',
+        bg: 'bg-gray-900',
+        sidebar: 'bg-gray-800',
+        sidebarText: 'text-gray-200',
+        primaryBtn: 'bg-indigo-600 hover:bg-indigo-700 text-white',
+        secondaryBtn: 'bg-gray-700 hover:bg-gray-600 text-gray-200',
+        accent: 'text-indigo-400',
+        header: 'bg-gray-800 border-gray-700 border-b',
+        tableHeader: 'bg-gray-700 text-gray-300',
+        tableRowHover: 'hover:bg-gray-700',
+        border: 'border-gray-700',
+        input: 'bg-gray-700 text-white border-gray-600',
+        panel: 'bg-gray-800'
+    },
+    ubuntu: {
+        name: 'Ubuntu',
+        bg: 'bg-[#fdf6e3]', // Solarized light-ish
+        sidebar: 'bg-[#300a24]', // Ubuntu purple
+        sidebarText: 'text-white',
+        primaryBtn: 'bg-[#e95420] hover:bg-[#c7461b] text-white', // Ubuntu orange
+        secondaryBtn: 'bg-[#aea79f] hover:bg-[#9e968d] text-white',
+        accent: 'text-[#e95420]',
+        header: 'bg-[#300a24] border-b border-[#5e2750]',
+        tableHeader: 'bg-[#aea79f] text-white',
+        tableRowHover: 'hover:bg-[#f2d7d0]',
+        border: 'border-[#aea79f]',
+        input: 'bg-white text-[#300a24]',
+        panel: 'bg-white'
+    },
+    forest: {
+        name: 'Floresta',
+        bg: 'bg-stone-100',
+        sidebar: 'bg-[#1c2e1f]',
+        sidebarText: 'text-stone-200',
+        primaryBtn: 'bg-[#2d4a33] hover:bg-[#3a5e42] text-white',
+        secondaryBtn: 'bg-stone-200 hover:bg-stone-300 text-stone-700',
+        accent: 'text-[#2d4a33]',
+        header: 'bg-white border-stone-200 border-b',
+        tableHeader: 'bg-stone-100 text-stone-600',
+        tableRowHover: 'hover:bg-[#e8f5e9]',
+        border: 'border-stone-200',
+        input: 'bg-white text-stone-800',
+        panel: 'bg-[#fdfbf7]'
+    },
+    ocean: {
+        name: 'Oceano',
+        bg: 'bg-cyan-50',
+        sidebar: 'bg-white',
+        sidebarText: 'text-slate-700',
+        primaryBtn: 'bg-cyan-600 hover:bg-cyan-700 text-white',
+        secondaryBtn: 'bg-cyan-100 hover:bg-cyan-200 text-cyan-800',
+        accent: 'text-cyan-600',
+        header: 'bg-white border-cyan-100 border-b',
+        tableHeader: 'bg-cyan-50 text-cyan-700',
+        tableRowHover: 'hover:bg-cyan-50',
+        border: 'border-cyan-200',
+        input: 'bg-white text-slate-700',
+        panel: 'bg-white'
+    },
+    dracula: {
+        name: 'Dracula',
+        bg: 'bg-[#282a36]',
+        sidebar: 'bg-[#44475a]',
+        sidebarText: 'text-[#f8f8f2]',
+        primaryBtn: 'bg-[#bd93f9] hover:bg-[#ff79c6] text-[#282a36] font-bold',
+        secondaryBtn: 'bg-[#6272a4] hover:bg-[#50fa7b] text-white',
+        accent: 'text-[#ff79c6]',
+        header: 'bg-[#44475a] border-[#6272a4] border-b',
+        tableHeader: 'bg-[#44475a] text-[#8be9fd]',
+        tableRowHover: 'hover:bg-[#44475a]',
+        border: 'border-[#6272a4]',
+        input: 'bg-[#282a36] text-[#f8f8f2] border-[#6272a4]',
+        panel: 'bg-[#282a36]'
+    }
+};
+
+function App() {
+    const [connection, setConnection] = useState(null);
+    const [activeTab, setActiveTab] = useState('query-builder');
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+    // Theme State
+    const [currentThemeName, setCurrentThemeName] = useState(() => localStorage.getItem('app_theme') || 'default');
+    const theme = THEMES[currentThemeName] || THEMES.default;
+
+    const changeTheme = (name) => {
+        setCurrentThemeName(name);
+        localStorage.setItem('app_theme', name);
+    };
+
+    const handleConnect = (connData) => {
+        setConnection(connData);
+    };
+
+    const handleDisconnect = () => {
+        setConnection(null);
+        setActiveTab('query-builder');
+    };
+
+    if (!connection) {
+        return <ConnectionForm onConnect={handleConnect} />;
+    }
+
+    return (
+        <ThemeContext.Provider value={{ theme, currentThemeName, changeTheme }}>
+            <div className={`flex h-screen ${theme.bg} font-sans overflow-hidden transition-colors duration-300`}>
+                {/* Sidebar */}
+                <div className={`${isSidebarOpen ? 'w-64' : 'w-0'} ${theme.sidebar} shadow-lg flex flex-col z-20 transition-all duration-300 overflow-hidden relative border-r ${theme.border}`}>
+                    <div className={`p-6 flex flex-col items-center border-b ${theme.border} min-w-[16rem]`}>
+                        <img src={hapLogo} alt="Hap Query Report" className="h-20 object-contain mb-3 transition-transform hover:scale-105" />
+                        <h1 className={`text-lg font-bold tracking-tight text-center leading-tight ${theme.sidebarText}`}>
+                            Hap Query Report
+                        </h1>
+                    </div>
+
+                    <nav className="flex-1 py-6 space-y-1 px-3 overflow-y-auto min-w-[16rem]">
+                        <button
+                            onClick={() => setActiveTab('query-builder')}
+                            className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'query-builder'
+                                ? `${theme.primaryBtn} shadow-sm`
+                                : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
+                                }`}
+                        >
+                            <span className="mr-3 text-lg">📊</span>
+                            Construtor de Consultas
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('sql-runner')}
+                            className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'sql-runner'
+                                ? `${theme.primaryBtn} shadow-sm`
+                                : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
+                                }`}
+                        >
+                            <span className="mr-3 text-lg">💻</span>
+                            Editor SQL
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('csv-importer')}
+                            className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'csv-importer'
+                                ? `${theme.primaryBtn} shadow-sm`
+                                : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
+                                }`}
+                        >
+                            <span className="mr-3 text-lg">📂</span>
+                            Importar CSV
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('reminders')}
+                            className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'reminders'
+                                ? `${theme.primaryBtn} shadow-sm`
+                                : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
+                                }`}
+                        >
+                            <span className="mr-3 text-lg">🔔</span>
+                            Lembretes
+                        </button>
+
+                        {/* Theme Switcher in Sidebar */}
+                        <div className="mt-6 px-1">
+                            <label className={`block text-xs font-bold uppercase mb-2 ${theme.sidebarText} opacity-70`}>Tema</label>
+                            <select
+                                value={currentThemeName}
+                                onChange={(e) => changeTheme(e.target.value)}
+                                className={`w-full text-xs p-2 rounded border outline-none ${theme.input} ${theme.border}`}
+                            >
+                                {Object.entries(THEMES).map(([key, val]) => (
+                                    <option key={key} value={key}>{val.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </nav>
+
+                    <div className={`p-4 border-t ${theme.border} min-w-[16rem]`}>
+                        <div className="flex items-center mb-3 px-2">
+                            <div className="w-8 h-8 rounded-full bg-[#f37021] flex items-center justify-center text-white font-bold text-xs shadow-sm">
+                                {connection.user.substring(0, 2).toUpperCase()}
+                            </div>
+                            <div className="ml-3 overflow-hidden">
+                                <p className={`text-sm font-medium truncate ${theme.sidebarText}`}>{connection.user}</p>
+                                <p className={`text-xs truncate opacity-70 ${theme.sidebarText}`}>{connection.connectString}</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleDisconnect}
+                            className={`w-full flex items-center justify-center px-4 py-2 border shadow-sm text-sm font-medium rounded-md transition-colors duration-200 ${theme.secondaryBtn} ${theme.border}`}
+                        >
+                            Desconectar
+                        </button>
+                        <div className="mt-4 text-center">
+                            <p className="text-[10px] text-gray-400">Desenvolvido por:</p>
+                            <p className="text-xs font-semibold text-gray-500">Jefferson Oliveira</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Main Content */}
+                <div className="flex-1 overflow-hidden relative flex flex-col">
+                    {/* Toggle Button */}
+                    <div className={`${theme.header} p-2 flex items-center shadow-sm z-10`}>
+                        <button
+                            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                            className={`p-2 rounded-md hover:bg-opacity-10 hover:bg-black focus:outline-none ${theme.sidebarText}`}
+                            title={isSidebarOpen ? "Recolher Menu" : "Expandir Menu"}
+                        >
+                            {isSidebarOpen ? '◀️' : '▶️'}
+                        </button>
+                        {!isSidebarOpen && (
+                            <div className="ml-4 flex items-center">
+                                <img src={hapLogo} alt="Logo" className="h-8 object-contain mr-2" />
+                                <span className={`font-bold ${theme.accent}`}>Hap Query Report</span>
+                            </div>
+                        )}
+                    </div>
+
+                    <main className="flex-1 overflow-auto p-2 sm:p-6 transition-all duration-300">
+                        <div className="max-w-7xl mx-auto h-full flex flex-col">
+                            {activeTab === 'query-builder' && <QueryBuilder />}
+                            {activeTab === 'sql-runner' && <SqlRunner />}
+                            {activeTab === 'csv-importer' && <CsvImporter />}
+                            {activeTab === 'reminders' && <Reminders />}
+                        </div>
+                    </main>
+                </div>
+            </div>
+        </ThemeContext.Provider>
+    );
+}
+
+export default App;
