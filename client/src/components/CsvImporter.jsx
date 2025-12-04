@@ -90,37 +90,58 @@ function CsvImporter({ isVisible }) {
     const [totalRows, setTotalRows] = useState(0);
 
     const handleFileUpload = async (e) => {
-        const selectedFile = e.target.files[0];
-        if (!selectedFile) return;
-        setFile(selectedFile);
+        let selectedPath = null;
+        let selectedName = null;
 
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-        formData.append('delimiter', delimiter);
+        // Handle Drag & Drop
+        if (e && e.target && e.target.files && e.target.files[0]) {
+            const file = e.target.files[0];
+            selectedPath = file.path; // Electron exposes path on File object
+            selectedName = file.name;
+        }
+        // Handle Native Dialog (Click)
+        else {
+            if (!window.electronAPI) {
+                alert("Funcionalidade disponível apenas no App Desktop.");
+                return;
+            }
+            selectedPath = await window.electronAPI.selectFile();
+            if (selectedPath) {
+                selectedName = selectedPath.split(/[/\\]/).pop();
+            }
+        }
 
-        setImporting(true); // Using importing for initial analysis as well
+        if (!selectedPath) return;
+
+        setFilePath(selectedPath);
+        setFile({ name: selectedName, path: selectedPath });
+
+        setImporting(true);
         setImportStatus('Analisando arquivo...');
-        setImportProgress(0);
+        setImportProgress(10);
+
         try {
-            const res = await fetch('http://localhost:3001/api/upload/csv', {
+            // Use the new Local CSV Analysis endpoint
+            const res = await fetch('http://127.0.0.1:3001/api/analyze-local-csv', {
                 method: 'POST',
-                body: formData
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filePath: selectedPath, delimiter })
             });
+
             const data = await res.json();
             if (data.error) throw new Error(data.error);
 
-            setPreviewData(data.preview); // Store preview data
+            setPreviewData(data.preview);
             setTableName(data.tableName);
             setColumns(data.columns);
-            setFilePath(data.filePath); // Store file path for full import
-            setTotalRows(data.totalEstimatedRows || 0); // Store total rows
+            setFilePath(data.filePath);
+            setTotalRows(data.totalEstimatedRows || 0);
 
             if (data.delimiter) {
                 setDelimiter(data.delimiter);
                 setDetectedDelimiter(data.delimiter);
             }
 
-            // Check if table exists immediately
             await checkTable(data.tableName);
 
             setStep(2);
@@ -144,16 +165,16 @@ function CsvImporter({ isVisible }) {
         setImportProgress(0);
 
         try {
-            const response = await fetch('http://localhost:3001/api/create-table', {
+            const response = await fetch('http://127.0.0.1:3001/api/create-table', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     tableName,
                     columns,
-                    data: previewData, // Fallback
-                    filePath: filePath, // Send file path for full import
-                    delimiter: delimiter, // Send confirmed delimiter
-                    grantToUser: grantUser, // Pass the user to grant access to
+                    data: previewData,
+                    filePath: filePath,
+                    delimiter: delimiter,
+                    grantToUser: grantUser,
                     dropIfExists: dropIfExists
                 })
             });
@@ -163,7 +184,6 @@ function CsvImporter({ isVisible }) {
                 setImportStatus('Importação concluída com sucesso!');
                 setImportProgress(100);
 
-                // Save to history
                 saveHistory({
                     fileName: file.name,
                     tableName: tableName,
@@ -212,7 +232,7 @@ function CsvImporter({ isVisible }) {
             {step === 1 && (
                 <div className="flex-1 flex flex-col space-y-6 overflow-y-auto">
                     <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer min-h-[200px]"
-                        onClick={() => document.getElementById('fileInput').click()}
+                        onClick={() => handleFileUpload()}
                         onDragOver={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -225,13 +245,7 @@ function CsvImporter({ isVisible }) {
                             }
                         }}
                     >
-                        <input
-                            type="file"
-                            id="fileInput"
-                            accept=".csv"
-                            onChange={handleFileUpload}
-                            className="hidden"
-                        />
+                        {/* Native Dialog - No Input Needed */}
                         <div className="text-6xl mb-4">📄</div>
                         <p className="text-lg text-gray-600 font-medium">Clique para selecionar um arquivo CSV</p>
                         <p className="text-sm text-gray-400 mt-2">ou arraste e solte aqui</p>

@@ -428,6 +428,61 @@ app.post('/api/upload/csv', upload.single('file'), async (req, res) => {
   }
 });
 
+// 6.1 Analyze Local CSV (IPC/Native Dialog)
+app.post('/api/analyze-local-csv', async (req, res) => {
+  const { filePath } = req.body;
+  if (!filePath) {
+    return res.status(400).json({ error: 'No file path provided' });
+  }
+
+  const results = [];
+  const headers = [];
+  let rowCount = 0;
+
+  try {
+    let delimiter = req.body.delimiter;
+    if (!delimiter || delimiter === 'auto') {
+      delimiter = detectDelimiter(filePath);
+    }
+
+    if (delimiter === '\\t') delimiter = '\t';
+
+    console.log(`Analyzing local file: ${filePath} with delimiter: '${delimiter}'`);
+
+    fs.createReadStream(filePath)
+      .pipe(csv({ separator: delimiter }))
+      .on('headers', (headerList) => {
+        headerList.forEach(h => headers.push(h));
+      })
+      .on('data', (data) => {
+        if (rowCount < 100) {
+          results.push(data);
+        }
+        rowCount++;
+      })
+      .on('end', () => {
+        const suggestions = analyzeCsvStructure(headers, results);
+        const tableName = suggestTableName(path.basename(filePath));
+
+        res.json({
+          tableName,
+          columns: suggestions,
+          preview: results.slice(0, 5),
+          filePath: filePath,
+          delimiter: delimiter,
+          totalEstimatedRows: rowCount
+        });
+      })
+      .on('error', (err) => {
+        console.error("CSV Parse Error:", err);
+        res.status(500).json({ error: "Failed to parse CSV file." });
+      });
+  } catch (err) {
+    console.error("Analyze Error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 7. Check Table Exists
 app.post('/api/check-table', async (req, res) => {
   const { tableName } = req.body;

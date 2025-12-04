@@ -35,6 +35,21 @@ ipcMain.on('reset-focus', () => {
     }
 });
 
+const { dialog } = require('electron');
+const fs = require('fs');
+
+ipcMain.handle('select-file', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile'],
+        filters: [{ name: 'CSV Files', extensions: ['csv', 'txt'] }]
+    });
+    return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle('read-file', async (event, path) => {
+    return await fs.promises.readFile(path, 'utf-8');
+});
+
 app.on('ready', createWindow);
 
 app.on('window-all-closed', function () {
