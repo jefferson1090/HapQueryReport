@@ -217,13 +217,14 @@ function App() {
                     <div className={`p-6 flex flex-col items-center border-b ${theme.border} min-w-[16rem] bg-white`}>
                         <img src={hapLogo} alt="Hap Query Report" className="w-full h-auto max-h-32 object-contain mb-3 transition-transform hover:scale-105" />
                         <h1 className={`text-lg font-bold tracking-tight text-center leading-tight text-gray-800`}>
-                            Hap Query Report <span className="text-xs font-normal text-gray-500 block">v1.1.31</span>
+                            Hap Query Report <span className="text-xs font-normal text-gray-500 block">v1.1.32</span>
                         </h1>
                     </div>
 
                     <nav className="flex-1 py-6 space-y-1 px-3 overflow-y-auto min-w-[16rem]">
                         <button
                             onClick={() => {
+                                window.electronAPI?.resetFocus();
                                 window.focus();
                                 if (document.activeElement) document.activeElement.blur();
                                 setActiveTab('query-builder');
@@ -238,6 +239,7 @@ function App() {
                         </button>
                         <button
                             onClick={() => {
+                                window.electronAPI?.resetFocus();
                                 window.focus();
                                 if (document.activeElement) document.activeElement.blur();
                                 setActiveTab('sql-runner');
@@ -252,6 +254,7 @@ function App() {
                         </button>
                         <button
                             onClick={() => {
+                                window.electronAPI?.resetFocus();
                                 window.focus();
                                 if (document.activeElement) document.activeElement.blur();
                                 setActiveTab('csv-importer');
@@ -266,6 +269,7 @@ function App() {
                         </button>
                         <button
                             onClick={() => {
+                                window.electronAPI?.resetFocus();
                                 window.focus();
                                 if (document.activeElement) document.activeElement.blur();
                                 setActiveTab('reminders');
@@ -331,7 +335,7 @@ function App() {
                         {!isSidebarOpen && (
                             <div className="ml-4 flex items-center">
                                 <img src={hapLogo} alt="Logo" className="h-8 object-contain mr-2" />
-                                <span className={`font-bold ${theme.accent}`}>Hap Query Report <span className="text-xs font-normal text-gray-500 ml-1">v1.1.31</span></span>
+                                <span className={`font-bold ${theme.accent}`}>Hap Query Report <span className="text-xs font-normal text-gray-500 ml-1">v1.1.32</span></span>
                             </div>
                         )}
                     </div>

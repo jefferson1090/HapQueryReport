@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 console.log('ELECTRON_RUN_AS_NODE:', process.env.ELECTRON_RUN_AS_NODE);
 console.log('App type:', typeof app);
 const path = require('path');
@@ -13,6 +13,7 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
         },
         icon: path.join(__dirname, 'public', 'vite.svg') // Optional: Add an icon
     });
@@ -25,6 +26,14 @@ function createWindow() {
         mainWindow = null;
     });
 }
+
+// IPC Handler for Radical Focus Fix
+ipcMain.on('reset-focus', () => {
+    if (mainWindow) {
+        mainWindow.blur();
+        mainWindow.focus();
+    }
+});
 
 app.on('ready', createWindow);
 
