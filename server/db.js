@@ -22,7 +22,7 @@ let connectionParams = null;
 
 async function getConnection() {
     if (!connectionParams) {
-        throw new Error("Not connected to database. Please connect first.");
+        throw new Error("Não conectado ao banco de dados. Por favor, conecte-se primeiro.");
     }
     return await oracledb.getConnection(connectionParams);
 }
@@ -223,8 +223,18 @@ module.exports = {
     createTable,
     insertData,
     checkTableExists,
-    dropTable
+    dropTable,
+    getStream
 };
+
+async function getStream(sql, params = []) {
+    const conn = await getConnection();
+    // Return both stream and connection so caller can manage lifecycle
+    return {
+        stream: conn.queryStream(sql, params),
+        connection: conn
+    };
+}
 
 async function checkTableExists(tableName) {
     let conn;

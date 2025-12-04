@@ -386,7 +386,7 @@ function QueryBuilder() {
                                     <div
                                         key={t}
                                         onClick={() => handleTableSelect(t)}
-                                        className={`px-3 py-2 cursor-pointer text-sm border-b last:border-b-0 transition-colors ${theme.border} ${primaryTable === t ? `${theme.primaryBtn} font-semibold` : `hover:bg-gray-100 ${theme.sidebarText}`}`}
+                                        className={`px-3 py-2 cursor-pointer text-sm border-b last:border-b-0 transition-colors ${theme.border} ${primaryTable === t ? `${theme.primaryBtn} font-semibold` : `hover:bg-gray-100 ${theme.text}`}`}
                                     >
                                         {t}
                                     </div>
@@ -505,7 +505,7 @@ function QueryBuilder() {
                                 <div className={`max-h-48 overflow-y-auto border rounded p-2 space-y-2 ${theme.bg} ${theme.border}`}>
                                     {/* Primary Table Columns */}
                                     <div>
-                                        <div className={`font-bold text-xs mb-1 sticky top-0 py-1 ${theme.sidebarText} ${theme.bg}`}>{primaryTable}</div>
+                                        <div className={`font-bold text-xs mb-1 sticky top-0 py-1 ${theme.text} ${theme.bg}`}>{primaryTable}</div>
                                         {columns[primaryTable]?.map(col => (
                                             <label key={`${primaryTable}.${col.name}`} className="flex items-center px-2 py-1 hover:bg-gray-200 rounded cursor-pointer">
                                                 <input
@@ -514,7 +514,7 @@ function QueryBuilder() {
                                                     onChange={() => handleColumnToggle(primaryTable, col.name)}
                                                     className="mr-2 rounded text-blue-600 focus:ring-blue-500"
                                                 />
-                                                <span className={`text-xs ${theme.sidebarText}`}>{col.name}</span>
+                                                <span className={`text-xs ${theme.text}`}>{col.name}</span>
                                             </label>
                                         ))}
                                     </div>
@@ -523,7 +523,7 @@ function QueryBuilder() {
                                     {joins.map((join, idx) => (
                                         join.table && columns[join.table] && (
                                             <div key={idx} className={`border-t pt-2 mt-2 ${theme.border}`}>
-                                                <div className={`font-bold text-xs mb-1 sticky top-0 py-1 ${theme.sidebarText} ${theme.bg}`}>{join.table}</div>
+                                                <div className={`font-bold text-xs mb-1 sticky top-0 py-1 ${theme.text} ${theme.bg}`}>{join.table}</div>
                                                 {columns[join.table].map(col => (
                                                     <label key={`${join.table}.${col.name}`} className="flex items-center px-2 py-1 hover:bg-gray-200 rounded cursor-pointer">
                                                         <input
@@ -532,7 +532,7 @@ function QueryBuilder() {
                                                             onChange={() => handleColumnToggle(join.table, col.name)}
                                                             className="mr-2 rounded text-blue-600 focus:ring-blue-500"
                                                         />
-                                                        <span className={`text-xs ${theme.sidebarText}`}>{col.name}</span>
+                                                        <span className={`text-xs ${theme.text}`}>{col.name}</span>
                                                     </label>
                                                 ))}
                                             </div>
@@ -611,7 +611,7 @@ function QueryBuilder() {
             <div className="flex-1 flex flex-col h-full overflow-hidden relative">
                 {/* Header */}
                 <div className={`p-4 shadow-sm flex justify-between items-center z-10 ${theme.header}`}>
-                    <h1 className={`text-xl font-bold ${theme.sidebarText}`}>Results Explorer</h1>
+                    <h1 className={`text-xl font-bold ${theme.headerText}`}>Results Explorer</h1>
                     {results && (
                         <div className="flex space-x-2">
                             <button onClick={() => handleExport('csv')} className={`flex items-center space-x-1 px-3 py-1.5 rounded shadow-sm transition-colors text-sm font-medium border ${theme.secondaryBtn} border-gray-300`}>
@@ -749,12 +749,9 @@ function QueryBuilder() {
                             </div>
                         </div>
                     ) : (
-                        <div className={`h-full flex flex-col items-center justify-center ${theme.sidebarText} ${theme.sidebar} rounded-lg border border-dashed ${theme.border}`}>
-                            <svg className="w-16 h-16 mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                            </svg>
-                            <p className="text-lg font-medium">No results to display</p>
-                            <p className="text-sm">Select a table and run a query to get started.</p>
+                        <div className={`text-center p-8 rounded-lg shadow-md ${theme.sidebar} ${theme.border}`}>
+                            <p className={`text-lg font-semibold ${theme.sidebarText}`}>No results to display.</p>
+                            <p className={`text-sm text-gray-500 mt-2`}>Run a query to see results here.</p>
                         </div>
                     )}
                 </div>

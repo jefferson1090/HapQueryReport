@@ -4,7 +4,7 @@ import QueryBuilder from './components/QueryBuilder';
 import SqlRunner from './components/SqlRunner';
 import CsvImporter from './components/CsvImporter';
 import Reminders from './components/Reminders';
-import hapLogo from './assets/hap_full_logo.jpg';
+import hapLogo from './assets/hap_logo_v4.png';
 
 // --- Theme Context & Definitions ---
 export const ThemeContext = createContext();
@@ -15,8 +15,10 @@ export const THEMES = {
         bg: 'bg-gray-100',
         sidebar: 'bg-white',
         sidebarText: 'text-gray-700',
-        primaryBtn: 'bg-blue-600 hover:bg-blue-700 text-white',
-        secondaryBtn: 'bg-gray-100 hover:bg-gray-200 text-gray-600',
+        text: 'text-gray-700',
+        headerText: 'text-gray-700',
+        primaryBtn: 'bg-blue-600 hover:bg-blue-700 text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        secondaryBtn: 'bg-gray-100 hover:bg-gray-200 text-gray-600 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
         accent: 'text-blue-600',
         header: 'bg-white border-b',
         tableHeader: 'bg-gray-50 text-gray-500',
@@ -30,8 +32,10 @@ export const THEMES = {
         bg: 'bg-gray-900',
         sidebar: 'bg-gray-800',
         sidebarText: 'text-gray-200',
-        primaryBtn: 'bg-indigo-600 hover:bg-indigo-700 text-white',
-        secondaryBtn: 'bg-gray-700 hover:bg-gray-600 text-gray-200',
+        text: 'text-gray-200',
+        headerText: 'text-gray-200',
+        primaryBtn: 'bg-indigo-600 hover:bg-indigo-700 text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        secondaryBtn: 'bg-gray-700 hover:bg-gray-600 text-gray-200 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
         accent: 'text-indigo-400',
         header: 'bg-gray-800 border-gray-700 border-b',
         tableHeader: 'bg-gray-700 text-gray-300',
@@ -45,8 +49,10 @@ export const THEMES = {
         bg: 'bg-[#fdf6e3]', // Solarized light-ish
         sidebar: 'bg-[#300a24]', // Ubuntu purple
         sidebarText: 'text-white',
-        primaryBtn: 'bg-[#e95420] hover:bg-[#c7461b] text-white', // Ubuntu orange
-        secondaryBtn: 'bg-[#aea79f] hover:bg-[#9e968d] text-white',
+        text: 'text-[#300a24]',
+        headerText: 'text-white',
+        primaryBtn: 'bg-[#e95420] hover:bg-[#c7461b] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        secondaryBtn: 'bg-[#aea79f] hover:bg-[#9e968d] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
         accent: 'text-[#e95420]',
         header: 'bg-[#300a24] border-b border-[#5e2750]',
         tableHeader: 'bg-[#aea79f] text-white',
@@ -60,8 +66,10 @@ export const THEMES = {
         bg: 'bg-stone-100',
         sidebar: 'bg-[#1c2e1f]',
         sidebarText: 'text-stone-200',
-        primaryBtn: 'bg-[#2d4a33] hover:bg-[#3a5e42] text-white',
-        secondaryBtn: 'bg-stone-200 hover:bg-stone-300 text-stone-700',
+        text: 'text-[#1c2e1f]',
+        headerText: 'text-[#1c2e1f]',
+        primaryBtn: 'bg-[#2d4a33] hover:bg-[#3a5e42] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        secondaryBtn: 'bg-stone-200 hover:bg-stone-300 text-stone-700 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
         accent: 'text-[#2d4a33]',
         header: 'bg-white border-stone-200 border-b',
         tableHeader: 'bg-stone-100 text-stone-600',
@@ -75,8 +83,10 @@ export const THEMES = {
         bg: 'bg-cyan-50',
         sidebar: 'bg-white',
         sidebarText: 'text-slate-700',
-        primaryBtn: 'bg-cyan-600 hover:bg-cyan-700 text-white',
-        secondaryBtn: 'bg-cyan-100 hover:bg-cyan-200 text-cyan-800',
+        text: 'text-slate-700',
+        headerText: 'text-slate-700',
+        primaryBtn: 'bg-cyan-600 hover:bg-cyan-700 text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        secondaryBtn: 'bg-cyan-100 hover:bg-cyan-200 text-cyan-800 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
         accent: 'text-cyan-600',
         header: 'bg-white border-cyan-100 border-b',
         tableHeader: 'bg-cyan-50 text-cyan-700',
@@ -90,8 +100,10 @@ export const THEMES = {
         bg: 'bg-[#282a36]',
         sidebar: 'bg-[#44475a]',
         sidebarText: 'text-[#f8f8f2]',
-        primaryBtn: 'bg-[#bd93f9] hover:bg-[#ff79c6] text-[#282a36] font-bold',
-        secondaryBtn: 'bg-[#6272a4] hover:bg-[#50fa7b] text-white',
+        text: 'text-[#f8f8f2]',
+        headerText: 'text-[#f8f8f2]',
+        primaryBtn: 'bg-[#bd93f9] hover:bg-[#ff79c6] text-[#282a36] font-bold hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        secondaryBtn: 'bg-[#6272a4] hover:bg-[#50fa7b] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
         accent: 'text-[#ff79c6]',
         header: 'bg-[#44475a] border-[#6272a4] border-b',
         tableHeader: 'bg-[#44475a] text-[#8be9fd]',
@@ -99,6 +111,23 @@ export const THEMES = {
         border: 'border-[#6272a4]',
         input: 'bg-[#282a36] text-[#f8f8f2] border-[#6272a4]',
         panel: 'bg-[#282a36]'
+    },
+    military: {
+        name: 'Militar',
+        bg: 'bg-[#f5f5f5]',
+        sidebar: 'bg-[#3e2723]', // Dark Wood
+        sidebarText: 'text-[#efebe9]',
+        text: 'text-[#3e2723]',
+        headerText: 'text-[#3e2723]',
+        primaryBtn: 'bg-[#558b2f] hover:bg-[#33691e] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        secondaryBtn: 'bg-[#795548] hover:bg-[#5d4037] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        accent: 'text-[#33691e]',
+        header: 'bg-white border-[#3e2723] border-b',
+        tableHeader: 'bg-[#d7ccc8] text-[#3e2723]',
+        tableRowHover: 'hover:bg-[#e8f5e9]',
+        border: 'border-[#8d6e63]',
+        input: 'bg-white text-gray-900 border-[#8d6e63]',
+        panel: 'bg-[#fafafa]'
     }
 };
 
@@ -115,6 +144,57 @@ function App() {
         setCurrentThemeName(name);
         localStorage.setItem('app_theme', name);
     };
+
+    // --- Lifted SQL Runner State ---
+    const [sqlTabs, setSqlTabs] = useState(() => {
+        const saved = localStorage.getItem('hap_sql_tabs');
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch (e) {
+                console.error("Failed to parse saved tabs", e);
+            }
+        }
+        return [{ id: 1, title: 'Query 1', sqlContent: '', results: null, error: null, loading: false }];
+    });
+
+    const [activeSqlTabId, setActiveSqlTabId] = useState(() => {
+        const saved = localStorage.getItem('hap_sql_active_tab');
+        return saved ? Number(saved) : 1;
+    });
+
+    const [savedSqlQueries, setSavedSqlQueries] = useState(() => {
+        const saved = localStorage.getItem('hap_saved_queries');
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch (e) {
+                console.error("Failed to parse saved queries", e);
+            }
+        }
+        return [];
+    });
+
+    // Persist SQL Tabs
+    useEffect(() => {
+        const tabsToSave = sqlTabs.map(t => ({
+            ...t,
+            results: null, // Don't save results to avoid localStorage limits
+            error: null,
+            loading: false
+        }));
+        localStorage.setItem('hap_sql_tabs', JSON.stringify(tabsToSave));
+    }, [sqlTabs]);
+
+    // Persist Active SQL Tab ID
+    useEffect(() => {
+        localStorage.setItem('hap_sql_active_tab', activeSqlTabId);
+    }, [activeSqlTabId]);
+
+    // Persist Saved Queries
+    useEffect(() => {
+        localStorage.setItem('hap_saved_queries', JSON.stringify(savedSqlQueries));
+    }, [savedSqlQueries]);
 
     const handleConnect = (connData) => {
         setConnection(connData);
@@ -134,10 +214,10 @@ function App() {
             <div className={`flex h-screen ${theme.bg} font-sans overflow-hidden transition-colors duration-300`}>
                 {/* Sidebar */}
                 <div className={`${isSidebarOpen ? 'w-64' : 'w-0'} ${theme.sidebar} shadow-lg flex flex-col z-20 transition-all duration-300 overflow-hidden relative border-r ${theme.border}`}>
-                    <div className={`p-6 flex flex-col items-center border-b ${theme.border} min-w-[16rem]`}>
-                        <img src={hapLogo} alt="Hap Query Report" className="h-20 object-contain mb-3 transition-transform hover:scale-105" />
-                        <h1 className={`text-lg font-bold tracking-tight text-center leading-tight ${theme.sidebarText}`}>
-                            Hap Query Report
+                    <div className={`p-6 flex flex-col items-center border-b ${theme.border} min-w-[16rem] bg-white`}>
+                        <img src={hapLogo} alt="Hap Query Report" className="w-full h-auto max-h-32 object-contain mb-3 transition-transform hover:scale-105" />
+                        <h1 className={`text-lg font-bold tracking-tight text-center leading-tight text-gray-800`}>
+                            Hap Query Report <span className="text-xs font-normal text-gray-500 block">v1.1.28</span>
                         </h1>
                     </div>
 
@@ -235,17 +315,53 @@ function App() {
                         {!isSidebarOpen && (
                             <div className="ml-4 flex items-center">
                                 <img src={hapLogo} alt="Logo" className="h-8 object-contain mr-2" />
-                                <span className={`font-bold ${theme.accent}`}>Hap Query Report</span>
+                                <span className={`font-bold ${theme.accent}`}>Hap Query Report <span className="text-xs font-normal text-gray-500 ml-1">v1.1.28</span></span>
                             </div>
                         )}
                     </div>
 
-                    <main className="flex-1 overflow-auto p-2 sm:p-6 transition-all duration-300">
-                        <div className="max-w-7xl mx-auto h-full flex flex-col">
-                            {activeTab === 'query-builder' && <QueryBuilder />}
-                            {activeTab === 'sql-runner' && <SqlRunner />}
-                            {activeTab === 'csv-importer' && <CsvImporter />}
-                            {activeTab === 'reminders' && <Reminders />}
+                    <main className="flex-1 overflow-auto p-2 sm:p-6 transition-all duration-300 relative">
+                        <div className="max-w-7xl mx-auto h-full flex flex-col relative">
+                            <div style={{
+                                visibility: activeTab === 'query-builder' ? 'visible' : 'hidden',
+                                position: activeTab === 'query-builder' ? 'relative' : 'absolute',
+                                top: 0, left: 0, width: '100%', height: '100%',
+                                zIndex: activeTab === 'query-builder' ? 10 : -1
+                            }}>
+                                <QueryBuilder />
+                            </div>
+                            <div style={{
+                                visibility: activeTab === 'sql-runner' ? 'visible' : 'hidden',
+                                position: activeTab === 'sql-runner' ? 'relative' : 'absolute',
+                                top: 0, left: 0, width: '100%', height: '100%',
+                                zIndex: activeTab === 'sql-runner' ? 10 : -1
+                            }}>
+                                <SqlRunner
+                                    isVisible={activeTab === 'sql-runner'}
+                                    tabs={sqlTabs}
+                                    setTabs={setSqlTabs}
+                                    activeTabId={activeSqlTabId}
+                                    setActiveTabId={setActiveSqlTabId}
+                                    savedQueries={savedSqlQueries}
+                                    setSavedQueries={setSavedSqlQueries}
+                                />
+                            </div>
+                            <div style={{
+                                visibility: activeTab === 'csv-importer' ? 'visible' : 'hidden',
+                                position: activeTab === 'csv-importer' ? 'relative' : 'absolute',
+                                top: 0, left: 0, width: '100%', height: '100%',
+                                zIndex: activeTab === 'csv-importer' ? 10 : -1
+                            }}>
+                                <CsvImporter />
+                            </div>
+                            <div style={{
+                                visibility: activeTab === 'reminders' ? 'visible' : 'hidden',
+                                position: activeTab === 'reminders' ? 'relative' : 'absolute',
+                                top: 0, left: 0, width: '100%', height: '100%',
+                                zIndex: activeTab === 'reminders' ? 10 : -1
+                            }}>
+                                <Reminders />
+                            </div>
                         </div>
                     </main>
                 </div>

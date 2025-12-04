@@ -27,10 +27,41 @@ function CsvImporter() {
         }
     }, []);
 
+    const [historyLimit, setHistoryLimit] = useState(5);
+
     const saveHistory = (newItem) => {
-        const updated = [newItem, ...importHistory].slice(0, 5); // Keep last 5
+        const updated = [newItem, ...importHistory].slice(0, 50); // Keep last 50
         setImportHistory(updated);
         localStorage.setItem('hap_csv_history', JSON.stringify(updated));
+    };
+
+    const handleDeleteHistory = async (item, index) => {
+        if (!window.confirm(`Tem certeza que deseja excluir o histórico e a tabela "${item.tableName}"?`)) return;
+
+        try {
+            // Drop Table
+            const res = await fetch('http://localhost:3001/api/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql: `DROP TABLE "${item.tableName}"` })
+            });
+
+            const data = await res.json();
+            // Ignore "table does not exist" error (ORA-00942)
+            if (data.error && !data.error.includes('ORA-00942')) {
+                alert('Erro ao excluir tabela: ' + data.error);
+                return;
+            }
+
+            // Remove from history
+            const newHistory = [...importHistory];
+            newHistory.splice(index, 1);
+            setImportHistory(newHistory);
+            localStorage.setItem('hap_csv_history', JSON.stringify(newHistory));
+
+        } catch (err) {
+            alert('Erro de rede: ' + err.message);
+        }
     };
 
     const checkTable = async (name) => {
@@ -135,7 +166,8 @@ function CsvImporter() {
                     fileName: file.name,
                     tableName: tableName,
                     date: new Date().toISOString(),
-                    grantUser: grantUser || 'Nenhum'
+                    grantUser: grantUser || 'Nenhum',
+                    rowCount: result.totalInserted
                 });
 
                 setTimeout(() => {
@@ -178,7 +210,19 @@ function CsvImporter() {
             {step === 1 && (
                 <div className="flex-1 flex flex-col space-y-6 overflow-y-auto">
                     <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer min-h-[200px]"
-                        onClick={() => document.getElementById('fileInput').click()}>
+                        onClick={() => document.getElementById('fileInput').click()}
+                        onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }}
+                        onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                                handleFileUpload({ target: { files: e.dataTransfer.files } });
+                            }
+                        }}
+                    >
                         <input
                             type="file"
                             id="fileInput"
@@ -203,21 +247,43 @@ function CsvImporter() {
                                             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Arquivo</th>
                                             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tabela</th>
                                             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Data</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Registros</th>
                                             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Permissão</th>
+                                            <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Ações</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-200">
-                                        {importHistory.map((item, idx) => (
+                                        {importHistory.slice(0, historyLimit).map((item, idx) => (
                                             <tr key={idx} className="hover:bg-gray-50">
                                                 <td className="px-4 py-2 text-sm text-gray-900">{item.fileName}</td>
                                                 <td className="px-4 py-2 text-sm text-[#0054a6] font-medium">{item.tableName}</td>
                                                 <td className="px-4 py-2 text-sm text-gray-500">{new Date(item.date).toLocaleDateString()} {new Date(item.date).toLocaleTimeString()}</td>
+                                                <td className="px-4 py-2 text-sm text-gray-500">{item.rowCount || '-'}</td>
                                                 <td className="px-4 py-2 text-sm text-gray-500">{item.grantUser}</td>
+                                                <td className="px-4 py-2 text-center">
+                                                    <button
+                                                        onClick={() => handleDeleteHistory(item, idx)}
+                                                        className="text-red-600 hover:text-red-800 hover:bg-red-50 p-1 rounded transition-colors"
+                                                        title="Excluir Histórico e Tabela"
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
                             </div>
+                            {importHistory.length > historyLimit && (
+                                <div className="mt-2 text-center">
+                                    <button
+                                        onClick={() => setHistoryLimit(prev => prev + 5)}
+                                        className="text-sm text-[#0054a6] hover:underline font-medium"
+                                    >
+                                        Ver mais...
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

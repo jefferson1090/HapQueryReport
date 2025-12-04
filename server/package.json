@@ -1,18 +1,24 @@
 {
   "name": "server",
-  "version": "1.1.5",
+  "version": "1.1.28",
   "main": "electron-main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron .",
+    "copy-client": "powershell -Command \"Copy-Item -Path '../client/dist/*' -Destination './public' -Recurse -Force\"",
+    "prebuild": "npm run copy-client",
     "dist": "electron-builder"
   },
   "build": {
     "appId": "com.hap.queryreport",
     "productName": "Hap Query Report",
+    "npmRebuild": false,
     "directories": {
       "output": "dist"
     },
+    "extraResources": [
+      "instantclient/**/*"
+    ],
     "files": [
       "**/*",
       "!dist/**/*",
@@ -22,19 +28,15 @@
       "!deploy.ps1",
       "!start_app.bat"
     ],
-    "extraResources": [
-      {
-        "from": "instantclient",
-        "to": "instantclient"
-      }
-    ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "public/icon.png"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "deleteAppDataOnUninstall": true
+      "deleteAppDataOnUninstall": true,
+      "runAfterFinish": false
     }
   },
   "keywords": [],
@@ -52,7 +54,7 @@
   "bin": "index.js",
   "devDependencies": {
     "electron": "^39.2.4",
-    "electron-builder": "^26.0.12",
+    "electron-builder": "^24.13.3",
     "nodemon": "^3.1.11",
     "wait-on": "^9.0.3"
   }

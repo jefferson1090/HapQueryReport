@@ -9,6 +9,20 @@ const upload = multer({ dest: path.join(os.tmpdir(), 'oracle-lowcode-uploads') }
 const fs = require('fs');
 const csv = require('csv-parser');
 
+const debugLogPath = path.join(os.tmpdir(), 'hap_debug.log');
+function debugLog(msg) {
+  try {
+    fs.appendFileSync(debugLogPath, new Date().toISOString() + ': ' + msg + '\n');
+  } catch (e) {
+    // ignore
+  }
+}
+
+debugLog('Starting server...');
+debugLog('Node version: ' + process.version);
+debugLog('Electron version: ' + process.versions.electron);
+
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -18,12 +32,50 @@ app.use(express.json({ limit: '50mb' })); // Increased limit for data import
 // Determine root directory (handles both dev and pkg executable)
 const rootDir = process.pkg ? path.dirname(process.execPath) : __dirname;
 
-console.log("--------------------------------------------------");
-console.log("Server Root Directory:", rootDir);
-console.log("Serving static files from:", path.join(rootDir, 'public'));
-console.log("--------------------------------------------------");
+// Determine Uploads Directory
+let uploadsDir;
+if (process.versions.electron || process.env.ELECTRON_RUN_AS_NODE) {
+  // If running in Electron, use userData directory (writable)
+  try {
+    // Fallback to APPDATA if electron module isn't available in this process
+    const appData = process.env.APPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share");
+    uploadsDir = path.join(appData, 'HapQueryReport', 'uploads');
+  } catch (e) {
+    console.error("Failed to determine Electron path, falling back to temp", e);
+    uploadsDir = path.join(os.tmpdir(), 'hap-query-report-uploads');
+  }
+} else {
+  // Dev mode or standard Node
+  uploadsDir = path.join(rootDir, 'public', 'uploads');
+}
 
-app.use(express.static(path.join(rootDir, 'public')));
+console.log(`Using uploads directory: ${uploadsDir}`);
+
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Serve uploads statically
+app.use('/uploads', express.static(uploadsDir));
+
+// Configure storage for attachments
+const attachmentStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    // Sanitize filename and add timestamp to prevent collisions
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    const name = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9]/g, '_');
+    cb(null, name + '-' + uniqueSuffix + ext);
+  }
+});
+
+const uploadAttachment = multer({
+  storage: attachmentStorage,
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+});
 
 // Initialize Oracle Client (Thick Mode)
 // Uses bundled Instant Client for compatibility with older DBs (NJS-116)
@@ -49,9 +101,12 @@ try {
     }
   }
 
-  console.log(`Initializing Oracle Client from: ${clientPath}`);
+  debugLog(`Initializing Oracle Client from: ${clientPath}`);
   oracledb.initOracleClient({ libDir: clientPath });
+  debugLog('Oracle Client initialized successfully');
 } catch (err) {
+  debugLog('Whoops, you need the Oracle Instant Client installed!');
+  debugLog(err.message);
   console.error('Whoops, you need the Oracle Instant Client installed!');
   console.error(err);
 }
@@ -63,7 +118,7 @@ app.post('/api/connect', async (req, res) => {
   const { user, password, connectString } = req.body;
   try {
     const result = await db.checkConnection({ user, password, connectString });
-    res.json({ success: true, message: 'Connected successfully!' });
+    res.json({ success: true, message: 'Conexão realizada com sucesso!' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -131,10 +186,57 @@ app.post('/api/export', async (req, res) => {
 });
 
 app.post('/api/query', async (req, res) => {
-  const { sql, params, limit } = req.body;
+  const { sql, params, limit, filter } = req.body;
   try {
-    const result = await db.executeQuery(sql, params || [], limit);
+    let finalSql = sql;
+
+    // Server-side filtering (Global search)
+    if (filter && typeof filter === 'string' && filter.trim() !== '') {
+      // We don't know columns here easily, so we can't do a smart "WHERE col LIKE %val%".
+      // But we can try to wrap. However, without column names, we can't construct the WHERE clause.
+      // The client needs to send column names or we need to fetch them first.
+      // Fetching columns for every query is slow.
+      // Alternative: The client sends the filter as a simple string, and we accept it ONLY if we also get a list of columns?
+      // Or, we just support the "Column Filters" sent from the UI.
+    }
+
+    // Support structured column filters from UI
+    if (filter && typeof filter === 'object') {
+      const whereClauses = [];
+      Object.entries(filter).forEach(([col, val]) => {
+        if (val && typeof val === 'string' && val.trim() !== '') {
+          // Sanitize column name (basic)
+          const safeCol = col.replace(/[^a-zA-Z0-9_]/g, '');
+          // Use bind parameters for values would be best, but for now we'll use sanitized injection for simplicity in this wrapper
+          // OR better: use a subquery with string matching?
+          // Let's use simple string concatenation for the wrapper, assuming the inner query is valid.
+          // We need to be careful about SQL injection here.
+          // Since we are wrapping, we can use: UPPER("col") LIKE UPPER('%val%')
+          // We should escape single quotes in val.
+          const safeVal = val.replace(/'/g, "''");
+          whereClauses.push(`UPPER("${safeCol}") LIKE UPPER('%${safeVal}%')`);
+        }
+      });
+
+      if (whereClauses.length > 0) {
+        finalSql = `SELECT * FROM (${sql}) WHERE ${whereClauses.join(' AND ')}`;
+      }
+    }
+
+    const result = await db.executeQuery(finalSql, params || [], limit);
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/query/count', async (req, res) => {
+  const { sql, params } = req.body;
+  try {
+    const cleanSql = sql.trim().replace(/;$/, '');
+    const countSql = `SELECT COUNT(*) FROM (${cleanSql})`;
+    const result = await db.executeQuery(countSql, params || []);
+    res.json({ count: result.rows[0][0] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -143,7 +245,7 @@ app.post('/api/query', async (req, res) => {
 // 5. Upload SQL
 app.post('/api/upload/sql', upload.single('file'), async (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
+    return res.status(400).json({ error: 'Nenhum arquivo enviado' });
   }
 
   try {
@@ -154,6 +256,82 @@ app.post('/api/upload/sql', upload.single('file'), async (req, res) => {
   } finally {
     try { fs.unlinkSync(req.file.path); } catch (e) { }
   }
+});
+
+// Streaming CSV Export
+app.post('/api/export/csv', async (req, res) => {
+  const { sql, params, filter } = req.body;
+  let conn;
+  try {
+    let finalSql = sql;
+
+    // Apply Server-side filtering (Same logic as /api/query)
+    if (filter && typeof filter === 'object') {
+      const whereClauses = [];
+      Object.entries(filter).forEach(([col, val]) => {
+        if (val && typeof val === 'string' && val.trim() !== '') {
+          const safeCol = col.replace(/[^a-zA-Z0-9_]/g, '');
+          const safeVal = val.replace(/'/g, "''");
+          whereClauses.push(`UPPER("${safeCol}") LIKE UPPER('%${safeVal}%')`);
+        }
+      });
+
+      if (whereClauses.length > 0) {
+        finalSql = `SELECT * FROM (${sql}) WHERE ${whereClauses.join(' AND ')}`;
+      }
+    }
+
+    const { stream, connection } = await db.getStream(finalSql, params || []);
+    conn = connection;
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="export_${Date.now()}.csv"`);
+    res.write('\ufeff'); // BOM
+
+    stream.on('metadata', (meta) => {
+      const headers = meta.map(m => m.name).join(';') + '\n';
+      res.write(headers);
+    });
+
+    stream.on('data', (row) => {
+      const csvRow = row.map(val => {
+        if (val === null || val === undefined) return '';
+        if (val instanceof Date) return val.toISOString();
+        const str = String(val);
+        if (str.includes(';') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      }).join(';') + '\n';
+      res.write(csvRow);
+    });
+
+    stream.on('end', () => {
+      res.end();
+      conn.close();
+    });
+
+    stream.on('error', (err) => {
+      console.error("Stream Error:", err);
+      if (!res.headersSent) res.status(500).send(err.message);
+      try { conn.close(); } catch (e) { }
+    });
+
+  } catch (err) {
+    console.error("Export Error:", err);
+    if (conn) try { await conn.close(); } catch (e) { }
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
+});
+
+// 5.1 Upload Attachment
+app.post('/api/upload/attachment', uploadAttachment.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  // Return relative path for frontend use
+  const relativePath = `/uploads/${req.file.filename}`;
+  res.json({ url: relativePath, filename: req.file.originalname, size: req.file.size });
 });
 
 // Helper: Detect Delimiter
@@ -349,7 +527,7 @@ app.post('/api/create-table', async (req, res) => {
       }
     }
 
-    res.json({ success: true, message: `Tabela criada e ${totalInserted} linhas importadas.` });
+    res.json({ success: true, message: `Tabela criada e ${totalInserted} linhas importadas.`, totalInserted: totalInserted });
   } catch (err) {
     console.error("Create Table Error:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -423,6 +601,9 @@ function suggestTableName(filename) {
   if (!/^[A-Z]/.test(name)) name = 'T_' + name;
   return name.substring(0, 30);
 }
+
+// Serve static files from the public directory
+app.use(express.static(path.join(rootDir, 'public')));
 
 // Use a regex to avoid path-to-regexp issues in bundled environment
 app.get(/.*/, (req, res) => {
