@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 
-function CsvImporter() {
+function CsvImporter({ isVisible }) {
+    if (!isVisible) return null;
+
     const [step, setStep] = useState(1); // 1: Upload, 2: Review, 3: Result
     const [file, setFile] = useState(null);
     const [delimiter, setDelimiter] = useState(';'); // Changed default to semicolon

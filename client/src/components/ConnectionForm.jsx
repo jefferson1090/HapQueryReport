@@ -104,7 +104,7 @@ function ConnectionForm({ onConnect }) {
     const handleTest = async () => {
         setStatus({ type: 'info', message: 'Testando conexão...' });
         try {
-            const response = await fetch('http://localhost:3001/api/connect', {
+            const response = await fetch('http://127.0.0.1:3001/api/connect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
@@ -213,7 +213,7 @@ function ConnectionForm({ onConnect }) {
     const handleConnect = async () => {
         setStatus({ type: 'info', message: 'Conectando...' });
         try {
-            const response = await fetch('http://localhost:3001/api/connect', {
+            const response = await fetch('http://127.0.0.1:3001/api/connect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)

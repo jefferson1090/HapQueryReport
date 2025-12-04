@@ -1,4 +1,6 @@
 const { app, BrowserWindow } = require('electron');
+console.log('ELECTRON_RUN_AS_NODE:', process.env.ELECTRON_RUN_AS_NODE);
+console.log('App type:', typeof app);
 const path = require('path');
 const server = require('./index'); // This starts the Express server
 

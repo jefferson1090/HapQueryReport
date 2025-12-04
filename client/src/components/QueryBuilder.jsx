@@ -17,9 +17,11 @@ const useDebounce = (value, delay) => {
     return debouncedValue;
 };
 
-function QueryBuilder() {
+function QueryBuilder({ isVisible }) {
     // Theme State
     const { theme } = useContext(ThemeContext);
+
+    if (!isVisible) return null;
 
     // Layout State
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -57,7 +59,7 @@ function QueryBuilder() {
 
     const fetchTables = async (search = '') => {
         try {
-            const res = await fetch(`http://localhost:3001/api/tables?search=${encodeURIComponent(search)}`);
+            const res = await fetch(`http://127.0.0.1:3001/api/tables?search=${encodeURIComponent(search)}`);
             const data = await res.json();
             setTables(data);
         } catch (err) {
@@ -79,7 +81,7 @@ function QueryBuilder() {
     const fetchColumns = async (table) => {
         if (!table || columns[table]) return; // Already fetched or invalid
         try {
-            const res = await fetch(`http://localhost:3001/api/columns/${encodeURIComponent(table)}`);
+            const res = await fetch(`http://127.0.0.1:3001/api/columns/${encodeURIComponent(table)}`);
             const data = await res.json();
             setColumns(prev => ({ ...prev, [table]: data }));
         } catch (err) {
@@ -235,7 +237,7 @@ function QueryBuilder() {
             const query = buildQuery();
             if (!query) return;
 
-            const res = await fetch('http://localhost:3001/api/query', {
+            const res = await fetch('http://127.0.0.1:3001/api/query', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(query)

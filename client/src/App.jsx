@@ -217,13 +217,17 @@ function App() {
                     <div className={`p-6 flex flex-col items-center border-b ${theme.border} min-w-[16rem] bg-white`}>
                         <img src={hapLogo} alt="Hap Query Report" className="w-full h-auto max-h-32 object-contain mb-3 transition-transform hover:scale-105" />
                         <h1 className={`text-lg font-bold tracking-tight text-center leading-tight text-gray-800`}>
-                            Hap Query Report <span className="text-xs font-normal text-gray-500 block">v1.1.28</span>
+                            Hap Query Report <span className="text-xs font-normal text-gray-500 block">v1.1.31</span>
                         </h1>
                     </div>
 
                     <nav className="flex-1 py-6 space-y-1 px-3 overflow-y-auto min-w-[16rem]">
                         <button
-                            onClick={() => setActiveTab('query-builder')}
+                            onClick={() => {
+                                window.focus();
+                                if (document.activeElement) document.activeElement.blur();
+                                setActiveTab('query-builder');
+                            }}
                             className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'query-builder'
                                 ? `${theme.primaryBtn} shadow-sm`
                                 : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
@@ -233,7 +237,11 @@ function App() {
                             Construtor de Consultas
                         </button>
                         <button
-                            onClick={() => setActiveTab('sql-runner')}
+                            onClick={() => {
+                                window.focus();
+                                if (document.activeElement) document.activeElement.blur();
+                                setActiveTab('sql-runner');
+                            }}
                             className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'sql-runner'
                                 ? `${theme.primaryBtn} shadow-sm`
                                 : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
@@ -243,7 +251,11 @@ function App() {
                             Editor SQL
                         </button>
                         <button
-                            onClick={() => setActiveTab('csv-importer')}
+                            onClick={() => {
+                                window.focus();
+                                if (document.activeElement) document.activeElement.blur();
+                                setActiveTab('csv-importer');
+                            }}
                             className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'csv-importer'
                                 ? `${theme.primaryBtn} shadow-sm`
                                 : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
@@ -253,7 +265,11 @@ function App() {
                             Importar CSV
                         </button>
                         <button
-                            onClick={() => setActiveTab('reminders')}
+                            onClick={() => {
+                                window.focus();
+                                if (document.activeElement) document.activeElement.blur();
+                                setActiveTab('reminders');
+                            }}
                             className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'reminders'
                                 ? `${theme.primaryBtn} shadow-sm`
                                 : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
@@ -315,7 +331,7 @@ function App() {
                         {!isSidebarOpen && (
                             <div className="ml-4 flex items-center">
                                 <img src={hapLogo} alt="Logo" className="h-8 object-contain mr-2" />
-                                <span className={`font-bold ${theme.accent}`}>Hap Query Report <span className="text-xs font-normal text-gray-500 ml-1">v1.1.28</span></span>
+                                <span className={`font-bold ${theme.accent}`}>Hap Query Report <span className="text-xs font-normal text-gray-500 ml-1">v1.1.31</span></span>
                             </div>
                         )}
                     </div>
@@ -323,18 +339,14 @@ function App() {
                     <main className="flex-1 overflow-auto p-2 sm:p-6 transition-all duration-300 relative">
                         <div className="max-w-7xl mx-auto h-full flex flex-col relative">
                             <div style={{
-                                visibility: activeTab === 'query-builder' ? 'visible' : 'hidden',
-                                position: activeTab === 'query-builder' ? 'relative' : 'absolute',
-                                top: 0, left: 0, width: '100%', height: '100%',
-                                zIndex: activeTab === 'query-builder' ? 10 : -1
+                                display: activeTab === 'query-builder' ? 'block' : 'none',
+                                width: '100%', height: '100%'
                             }}>
-                                <QueryBuilder />
+                                <QueryBuilder isVisible={activeTab === 'query-builder'} />
                             </div>
                             <div style={{
-                                visibility: activeTab === 'sql-runner' ? 'visible' : 'hidden',
-                                position: activeTab === 'sql-runner' ? 'relative' : 'absolute',
-                                top: 0, left: 0, width: '100%', height: '100%',
-                                zIndex: activeTab === 'sql-runner' ? 10 : -1
+                                display: activeTab === 'sql-runner' ? 'block' : 'none',
+                                width: '100%', height: '100%'
                             }}>
                                 <SqlRunner
                                     isVisible={activeTab === 'sql-runner'}
@@ -347,20 +359,16 @@ function App() {
                                 />
                             </div>
                             <div style={{
-                                visibility: activeTab === 'csv-importer' ? 'visible' : 'hidden',
-                                position: activeTab === 'csv-importer' ? 'relative' : 'absolute',
-                                top: 0, left: 0, width: '100%', height: '100%',
-                                zIndex: activeTab === 'csv-importer' ? 10 : -1
+                                display: activeTab === 'csv-importer' ? 'block' : 'none',
+                                width: '100%', height: '100%'
                             }}>
-                                <CsvImporter />
+                                <CsvImporter isVisible={activeTab === 'csv-importer'} />
                             </div>
                             <div style={{
-                                visibility: activeTab === 'reminders' ? 'visible' : 'hidden',
-                                position: activeTab === 'reminders' ? 'relative' : 'absolute',
-                                top: 0, left: 0, width: '100%', height: '100%',
-                                zIndex: activeTab === 'reminders' ? 10 : -1
+                                display: activeTab === 'reminders' ? 'block' : 'none',
+                                width: '100%', height: '100%'
                             }}>
-                                <Reminders />
+                                <Reminders isVisible={activeTab === 'reminders'} />
                             </div>
                         </div>
                     </main>

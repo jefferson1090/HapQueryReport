@@ -133,6 +133,21 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         };
     }, []); // Run once on mount
 
+    // 3. Focus when component becomes visible (fixes tab switching issue)
+    useEffect(() => {
+        if (isVisible) {
+            // Try to focus multiple times to ensure it catches
+            const timers = [
+                setTimeout(() => viewRef.current?.focus(), 50),
+                setTimeout(() => viewRef.current?.focus(), 200),
+                setTimeout(() => viewRef.current?.focus(), 500)
+            ];
+            return () => timers.forEach(t => clearTimeout(t));
+        }
+    }, [isVisible]);
+
+
+
     // Toast Helper
     const showToast = (message, type = 'success') => {
         setToast({ message, type });
@@ -144,7 +159,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
 
     // Helper to update active tab
     const updateActiveTab = (updates) => {
-        setTabs(tabs.map(t => t.id === activeTabId ? { ...t, ...updates } : t));
+        setTabs(prevTabs => prevTabs.map(t => t.id === activeTabId ? { ...t, ...updates } : t));
     };
 
     const [isExporting, setIsExporting] = useState(false);
@@ -253,11 +268,13 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     };
 
     const executeQuery = async () => {
-        updateActiveTab({ loading: true, error: null });
+        // Clear previous results to indicate new execution
+        updateActiveTab({ loading: true, error: null, results: null, totalRecords: undefined });
         try {
-            const cleanSql = activeTab.sqlContent.trim().replace(/;$/, '');
+            const cleanSql = activeTab.sqlContent.trim().replace(/;+\s*$/, '');
 
-            const res = await fetch('http://localhost:3001/api/query', {
+            // 1. Execute Main Query
+            const res = await fetch('http://127.0.0.1:3001/api/query', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -268,21 +285,27 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
             });
             const data = await res.json();
             if (data.error) throw new Error(data.error);
-            updateActiveTab({ results: data, loading: false });
 
-            // Fetch total count in background
-            fetch('http://localhost:3001/api/query/count', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sql: cleanSql })
-            })
-                .then(res => res.json())
-                .then(countData => {
-                    if (countData.count !== undefined) {
-                        updateActiveTab({ totalRecords: countData.count });
-                    }
-                })
-                .catch(err => console.error("Failed to fetch count", err));
+            // 2. Show Results IMMEDIATELY
+            updateActiveTab({
+                results: data,
+                loading: false
+            });
+
+            // 3. Fetch Total Count (Asynchronously)
+            try {
+                const countRes = await fetch('http://127.0.0.1:3001/api/query/count', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sql: cleanSql })
+                });
+                const countData = await countRes.json();
+                if (countData.count !== undefined) {
+                    updateActiveTab({ totalRecords: countData.count });
+                }
+            } catch (countErr) {
+                console.error("Failed to fetch count", countErr);
+            }
 
         } catch (err) {
             updateActiveTab({ error: err.message, loading: false });
@@ -414,7 +437,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                     setIsExporting(true);
                     try {
                         const cleanSql = activeTab.sqlContent.trim().replace(/;$/, '');
-                        const res = await fetch('http://localhost:3001/api/query', {
+                        const res = await fetch('http://127.0.0.1:3001/api/query', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -612,18 +635,20 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
 
                     <div className="flex-none">
                         <div ref={containerRef} onClick={handleContainerClick} className={`border rounded overflow-hidden ${theme.border} cursor-text`}>
-                            <CodeMirror
-                                value={activeTab.sqlContent}
-                                height="200px"
-                                extensions={[sql({ schema: schemaData })]}
-                                onChange={(value) => updateActiveTab({ sqlContent: value })}
-                                theme={theme.name === 'Modo Escuro' || theme.name === 'Dracula' ? 'dark' : 'light'}
-                                className="text-sm"
-                                autoFocus={true}
-                                onCreateEditor={(view) => {
-                                    viewRef.current = view;
-                                }}
-                            />
+                            {isVisible && (
+                                <CodeMirror
+                                    value={activeTab.sqlContent}
+                                    height="200px"
+                                    extensions={[sql({ schema: schemaData })]}
+                                    onChange={(value) => updateActiveTab({ sqlContent: value })}
+                                    theme={theme.name === 'Modo Escuro' || theme.name === 'Dracula' ? 'dark' : 'light'}
+                                    className="text-sm"
+                                    onCreateEditor={(view) => {
+                                        viewRef.current = view;
+                                        view.focus();
+                                    }}
+                                />
+                            )}
                         </div>
                         <div className={`mt-2 flex items-center justify-between p-2 rounded border ${theme.panel} ${theme.border}`}>
                             <div className="flex items-center space-x-3">

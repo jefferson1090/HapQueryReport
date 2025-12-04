@@ -138,7 +138,9 @@ function KanbanColumn({ id, title, reminders, color, headerColor, borderColor, t
     );
 }
 
-function Reminders() {
+function Reminders({ isVisible }) {
+    if (!isVisible) return null;
+
     const [reminders, setReminders] = useState([]);
     const [showModal, setShowModal] = useState(false);
     const [viewModal, setViewModal] = useState(null); // For viewing details
