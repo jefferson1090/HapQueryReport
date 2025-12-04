@@ -494,9 +494,17 @@ app.post('/api/check-table', async (req, res) => {
   }
 });
 
+// Global state for active import jobs
+const activeJobs = {};
+
 // 8. Create Table & Import Data
 app.post('/api/create-table', async (req, res) => {
-  const { tableName, columns, data, dropIfExists, grantToUser, filePath, delimiter } = req.body;
+  const { tableName, columns, data, dropIfExists, grantToUser, filePath, delimiter, jobId } = req.body;
+
+  if (jobId) {
+    activeJobs[jobId] = { progress: 0, status: 'Starting', cancelled: false, totalRows: 0, insertedRows: 0 };
+  }
+
   try {
     if (dropIfExists) {
       await db.dropTable(tableName);
@@ -508,69 +516,75 @@ app.post('/api/create-table', async (req, res) => {
     let totalInserted = 0;
 
     if (filePath) {
-      // FULL IMPORT FROM FILE
-      console.log(`Starting full import from ${filePath} into ${tableName}`);
+      // FULL IMPORT FROM FILE (STREAMING)
+      console.log(`Starting full streaming import from ${filePath} into ${tableName}`);
 
-      const batchSize = 1000;
+      const batchSize = 2000;
       let batch = [];
 
-      await new Promise((resolve, reject) => {
-        fs.createReadStream(filePath)
-          .pipe(csv({ separator: delimiter || ';' })) // Use provided delimiter
-          .on('data', async (row) => {
-            batch.push(row);
-            if (batch.length >= batchSize) {
-              // Pause stream? csv-parser doesn't easily pause/resume async.
-              // Better to accumulate and insert. 
-              // WARNING: Async inside 'data' event is tricky.
-              // We might flood the DB.
-              // Alternative: Use a transform stream or just accumulate and hope for best?
-              // For 100k rows, memory might be okay if we don't store ALL.
-              // But we can't await inside 'data' easily without pausing.
-              // Let's use a simple accumulation and insert at end? No, memory.
+      const stream = fs.createReadStream(filePath)
+        .pipe(csv({ separator: delimiter || ';' }));
 
-              // We will just push to a big array? No.
-              // We need to handle backpressure.
-              // Since we can't easily do backpressure with this simple setup, 
-              // we will accumulate all and insert in chunks? 
-              // 100k rows * 1KB = 100MB. It's manageable in memory for Node.js.
-              // Let's try reading all into memory and then inserting in batches.
-            }
-          })
-          .on('end', async () => {
-            // Actually, let's read everything into memory first to be safe with async inserts
-            // This is not ideal for HUGE files (GBs), but for 100k rows it's fine.
-            resolve();
-          })
-          .on('error', reject);
-      });
+      for await (const row of stream) {
+        // Check Cancellation
+        if (jobId && activeJobs[jobId].cancelled) {
+          console.log(`Job ${jobId} cancelled.`);
+          stream.destroy();
+          if (jobId) activeJobs[jobId].status = 'Cancelled';
+          return res.json({ success: false, message: 'Importação cancelada pelo usuário.' });
+        }
 
-      // Re-reading to process (simpler than handling async stream backpressure manually)
-      const allRows = [];
-      await new Promise((resolve, reject) => {
-        fs.createReadStream(filePath)
-          .pipe(csv({ separator: delimiter || ';' }))
-          .on('data', (row) => allRows.push(row))
-          .on('end', resolve)
-          .on('error', reject);
-      });
+        batch.push(row);
 
-      console.log(`Read ${allRows.length} rows. Inserting in batches...`);
+        if (batch.length >= batchSize) {
+          await db.insertData(tableName, columns, batch);
+          totalInserted += batch.length;
+          batch = [];
 
-      for (let i = 0; i < allRows.length; i += batchSize) {
-        const chunk = allRows.slice(i, i + batchSize);
-        await db.insertData(tableName, columns, chunk);
-        totalInserted += chunk.length;
-        if (i % 10000 === 0) console.log(`Inserted ${i} rows...`);
+          if (jobId) {
+            activeJobs[jobId].insertedRows = totalInserted;
+            activeJobs[jobId].status = `Inserindo dados... (${totalInserted} linhas)`;
+          }
+
+          if (totalInserted % 10000 === 0) console.log(`Inserted ${totalInserted} rows...`);
+        }
       }
 
-      // Clean up file
-      try { fs.unlinkSync(filePath); } catch (e) { console.error("Failed to delete temp file", e); }
+      // Insert remaining rows
+      if (batch.length > 0) {
+        await db.insertData(tableName, columns, batch);
+        totalInserted += batch.length;
+        if (jobId) activeJobs[jobId].insertedRows = totalInserted;
+      }
+
+      console.log(`Finished import. Total rows: ${totalInserted}`);
+
+      // Clean up file if it's in uploads directory
+      if (filePath.includes('oracle-lowcode-uploads') || filePath.includes('hap-query-report-uploads')) {
+        try { fs.unlinkSync(filePath); } catch (e) { console.error("Failed to delete temp file", e); }
+      }
 
     } else if (data && data.length > 0) {
       // Legacy/Preview import
       await db.insertData(tableName, columns, data);
       totalInserted = data.length;
+    }
+
+    // CREATE INDICES (New Feature)
+    if (jobId) activeJobs[jobId].status = 'Criando índices...';
+    console.log(`Creating indices for table ${tableName}...`);
+
+    for (const col of columns) {
+      const shortTable = tableName.substring(0, 10);
+      const shortCol = col.name.substring(0, 10);
+      const rand = Math.floor(Math.random() * 1000);
+      const indexName = `IDX_${shortTable}_${shortCol}_${rand}`.toUpperCase().substring(0, 30);
+
+      try {
+        await db.executeQuery(`CREATE INDEX "${indexName}" ON "${tableName}" ("${col.name}")`);
+      } catch (idxErr) {
+        console.warn(`Failed to create index on ${col.name}:`, idxErr.message);
+      }
     }
 
     // Grant Access (Optional)
@@ -582,10 +596,40 @@ app.post('/api/create-table', async (req, res) => {
       }
     }
 
-    res.json({ success: true, message: `Tabela criada e ${totalInserted} linhas importadas.`, totalInserted: totalInserted });
+    if (jobId) {
+      activeJobs[jobId].status = 'Concluído';
+      activeJobs[jobId].progress = 100;
+    }
+
+    res.json({ success: true, message: `Tabela criada, ${totalInserted} linhas importadas e índices gerados.`, totalInserted: totalInserted });
   } catch (err) {
     console.error("Create Table Error:", err);
+    if (jobId) {
+      activeJobs[jobId].status = 'Erro';
+      activeJobs[jobId].error = err.message;
+    }
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 8.1 Import Status Endpoint
+app.get('/api/import-status/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  if (activeJobs[jobId]) {
+    res.json(activeJobs[jobId]);
+  } else {
+    res.status(404).json({ error: 'Job not found' });
+  }
+});
+
+// 8.2 Cancel Import Endpoint
+app.post('/api/cancel-import/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  if (activeJobs[jobId]) {
+    activeJobs[jobId].cancelled = true;
+    res.json({ success: true, message: 'Cancelamento solicitado.' });
+  } else {
+    res.status(404).json({ error: 'Job not found' });
   }
 });
 
@@ -653,7 +697,10 @@ function suggestTableName(filename) {
   // Remove extension and sanitize
   let name = filename.split('.').slice(0, -1).join('.');
   name = name.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
-  if (!/^[A-Z]/.test(name)) name = 'T_' + name;
+
+  // Prefix with TT_ as requested
+  name = 'TT_' + name;
+
   return name.substring(0, 30);
 }
 

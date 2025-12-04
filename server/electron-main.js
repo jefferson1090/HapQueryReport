@@ -50,7 +50,25 @@ ipcMain.handle('read-file', async (event, path) => {
     return await fs.promises.readFile(path, 'utf-8');
 });
 
-app.on('ready', createWindow);
+const { autoUpdater } = require('electron-updater');
+
+// Auto-updater events
+autoUpdater.on('update-available', () => {
+    if (mainWindow) mainWindow.webContents.send('update_available');
+});
+
+autoUpdater.on('update-downloaded', () => {
+    if (mainWindow) mainWindow.webContents.send('update_downloaded');
+});
+
+ipcMain.on('restart_app', () => {
+    autoUpdater.quitAndInstall();
+});
+
+app.on('ready', () => {
+    createWindow();
+    autoUpdater.checkForUpdatesAndNotify();
+});
 
 app.on('window-all-closed', function () {
     if (process.platform !== 'darwin') {

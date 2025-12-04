@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import { ThemeContext } from '../App';
 import CodeMirror from '@uiw/react-codemirror';
-import { sql } from '@codemirror/lang-sql';
+import { sql, PLSQL } from '@codemirror/lang-sql';
 import PropTypes from 'prop-types';
 
 // Custom AutoSizer to avoid build issues with the library
@@ -147,6 +147,36 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     }, [isVisible]);
 
 
+
+    // --- Column Resizing State ---
+    const [columnWidths, setColumnWidths] = useState({});
+    const resizingRef = useRef(null);
+
+    const startResizing = (e, colName) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resizingRef.current = {
+            colName,
+            startX: e.clientX,
+            startWidth: columnWidths[colName] || 150
+        };
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    };
+
+    const handleMouseMove = (e) => {
+        if (!resizingRef.current) return;
+        const { colName, startX, startWidth } = resizingRef.current;
+        const diff = e.clientX - startX;
+        const newWidth = Math.max(50, startWidth + diff); // Min width 50px
+        setColumnWidths(prev => ({ ...prev, [colName]: newWidth }));
+    };
+
+    const handleMouseUp = () => {
+        resizingRef.current = null;
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+    };
 
     // Toast Helper
     const showToast = (message, type = 'success') => {
@@ -537,8 +567,9 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                 {columnOrder.map(colName => {
                     if (!visibleColumns[colName]) return null;
                     const originalIdx = activeTab.results.metaData.findIndex(m => m.name === colName);
+                    const width = columnWidths[colName] || 150;
                     return (
-                        <div key={colName} className={`px-6 py-2 whitespace-nowrap text-sm ${theme.sidebarText} flex-1 overflow-hidden text-ellipsis`} style={{ minWidth: '150px' }}>
+                        <div key={colName} className={`px-2 py-2 text-sm ${theme.sidebarText} overflow-hidden text-ellipsis whitespace-nowrap`} style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }} title={row[originalIdx]}>
                             {row[originalIdx]}
                         </div>
                     );
@@ -639,7 +670,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                 <CodeMirror
                                     value={activeTab.sqlContent}
                                     height="200px"
-                                    extensions={[sql({ schema: schemaData })]}
+                                    extensions={[sql({ schema: schemaData, dialect: PLSQL })]}
                                     onChange={(value) => updateActiveTab({ sqlContent: value })}
                                     theme={theme.name === 'Modo Escuro' || theme.name === 'Dracula' ? 'dark' : 'light'}
                                     className="text-sm"
@@ -790,42 +821,58 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                 <AutoSizer>
                                     {({ height, width }) => {
                                         const visibleCount = columnOrder.filter(c => visibleColumns[c]).length;
-                                        const totalMinWidth = visibleCount * 150; // 150px per column
+                                        // Calculate total width based on individual column widths
+                                        const totalMinWidth = columnOrder.reduce((acc, col) => {
+                                            if (visibleColumns[col]) {
+                                                return acc + (columnWidths[col] || 150);
+                                            }
+                                            return acc;
+                                        }, 0);
 
                                         // Prepare Header Row
                                         const headerRow = (
                                             <div className={`flex divide-x ${theme.border} ${theme.tableHeader} border-b font-bold text-xs uppercase tracking-wider h-full items-center bg-gray-50`}>
-                                                {columnOrder.map(colName => visibleColumns[colName] && (
-                                                    <div
-                                                        key={colName}
-                                                        draggable
-                                                        onDragStart={(e) => handleDragStart(e, colName)}
-                                                        onDragOver={(e) => handleDragOver(e, colName)}
-                                                        onDragEnd={handleDragEnd}
-                                                        className={`px-6 py-3 flex-1 overflow-hidden text-ellipsis whitespace-nowrap cursor-move transition-colors ${draggingCol === colName ? 'opacity-50 bg-blue-50' : ''}`}
-                                                        style={{ minWidth: '150px' }}
-                                                    >
-                                                        <div className="flex flex-col space-y-2">
-                                                            <span>{colName}</span>
-                                                            {showFilters && (
-                                                                <input
-                                                                    type="text"
-                                                                    placeholder={serverSideFilter ? "Filtrar (Enter)..." : "Filtrar..."}
-                                                                    value={columnFilters[colName] || ''}
-                                                                    onChange={(e) => setColumnFilters({ ...columnFilters, [colName]: e.target.value })}
-                                                                    onKeyDown={(e) => {
-                                                                        if (e.key === 'Enter' && serverSideFilter) {
-                                                                            executeQuery();
-                                                                        }
-                                                                    }}
-                                                                    className={`w-full text-xs p-1 border rounded font-normal normal-case ${theme.input} ${theme.border} ${serverSideFilter ? 'border-blue-400 bg-blue-50' : ''}`}
-                                                                    onClick={(e) => e.stopPropagation()}
-                                                                    title={serverSideFilter ? "Pressione Enter para buscar no servidor" : "Filtragem local"}
-                                                                />
-                                                            )}
+                                                {columnOrder.map(colName => {
+                                                    if (!visibleColumns[colName]) return null;
+                                                    const width = columnWidths[colName] || 150;
+                                                    return (
+                                                        <div
+                                                            key={colName}
+                                                            draggable
+                                                            onDragStart={(e) => handleDragStart(e, colName)}
+                                                            onDragOver={(e) => handleDragOver(e, colName)}
+                                                            onDragEnd={handleDragEnd}
+                                                            className={`relative px-2 py-3 flex-none overflow-hidden text-ellipsis cursor-move transition-colors ${draggingCol === colName ? 'opacity-50 bg-blue-50' : ''}`}
+                                                            style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
+                                                        >
+                                                            <div className="flex flex-col space-y-2">
+                                                                <span className="whitespace-normal break-words leading-tight">{colName}</span>
+                                                                {showFilters && (
+                                                                    <input
+                                                                        type="text"
+                                                                        placeholder={serverSideFilter ? "Filtrar (Enter)..." : "Filtrar..."}
+                                                                        value={columnFilters[colName] || ''}
+                                                                        onChange={(e) => setColumnFilters({ ...columnFilters, [colName]: e.target.value })}
+                                                                        onKeyDown={(e) => {
+                                                                            if (e.key === 'Enter' && serverSideFilter) {
+                                                                                executeQuery();
+                                                                            }
+                                                                        }}
+                                                                        className={`w-full text-xs p-1 border rounded font-normal normal-case ${theme.input} ${theme.border} ${serverSideFilter ? 'border-blue-400 bg-blue-50' : ''}`}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        title={serverSideFilter ? "Pressione Enter para buscar no servidor" : "Filtragem local"}
+                                                                    />
+                                                                )}
+                                                            </div>
+                                                            {/* Resizer Handle */}
+                                                            <div
+                                                                className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 z-10"
+                                                                onMouseDown={(e) => startResizing(e, colName)}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            />
                                                         </div>
-                                                    </div>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
                                         );
 

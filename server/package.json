@@ -1,6 +1,6 @@
 {
   "name": "server",
-  "version": "1.1.33",
+  "version": "1.1.42",
   "main": "electron-main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -46,6 +46,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
+    "electron-updater": "^6.6.2",
     "express": "^5.1.0",
     "json2csv": "^6.0.0-alpha.2",
     "multer": "^2.0.2",
@@ -54,7 +55,7 @@
   },
   "bin": "index.js",
   "devDependencies": {
-    "electron": "^39.2.5",
+    "electron": "^33.2.1",
     "electron-builder": "^24.13.3",
     "nodemon": "^3.1.11",
     "wait-on": "^9.0.3"

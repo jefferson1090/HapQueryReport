@@ -1,11 +1,14 @@
-const electron = require('electron');
+const { app } = require('electron');
+console.log('ENV ELECTRON_RUN_AS_NODE:', process.env.ELECTRON_RUN_AS_NODE);
+console.log('Electron Version:', process.versions.electron);
 console.log('Process Type:', process.type);
-console.log('Electron keys:', Object.keys(electron));
-console.log('App from electron:', electron.app);
-if (electron.app) {
-    console.log('App is defined');
-    electron.app.quit();
+const electron = require('electron');
+console.log('Electron Module Keys:', Object.keys(electron));
+console.log('Electron App Object (from require):', electron.app);
+if (app) {
+    console.log('Electron is working!');
+    app.quit();
 } else {
-    console.log('App is undefined');
+    console.error('Electron is NOT working properly.');
     process.exit(1);
 }

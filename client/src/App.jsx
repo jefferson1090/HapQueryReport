@@ -175,6 +175,26 @@ function App() {
         return [];
     });
 
+    // Auto-Update State
+    const [updateAvailable, setUpdateAvailable] = useState(false);
+    const [updateDownloaded, setUpdateDownloaded] = useState(false);
+
+    useEffect(() => {
+        if (window.electronAPI) {
+            window.electronAPI.onUpdateAvailable(() => setUpdateAvailable(true));
+            window.electronAPI.onUpdateDownloaded(() => {
+                setUpdateDownloaded(true);
+                setUpdateAvailable(false);
+            });
+        }
+    }, []);
+
+    const restartApp = () => {
+        if (window.electronAPI) {
+            window.electronAPI.restartApp();
+        }
+    };
+
     // Persist SQL Tabs
     useEffect(() => {
         const tabsToSave = sqlTabs.map(t => ({
@@ -212,12 +232,36 @@ function App() {
     return (
         <ThemeContext.Provider value={{ theme, currentThemeName, changeTheme }}>
             <div className={`flex h-screen ${theme.bg} font-sans overflow-hidden transition-colors duration-300`}>
+
+                {/* Update Notification */}
+                {(updateAvailable || updateDownloaded) && (
+                    <div className="fixed top-4 right-4 z-50 bg-white border border-blue-200 shadow-lg rounded-lg p-4 flex items-center space-x-4 animate-fade-in-down">
+                        <div className="bg-blue-100 p-2 rounded-full">
+                            <span className="text-xl">🚀</span>
+                        </div>
+                        <div>
+                            <h4 className="font-bold text-gray-800">Nova versão disponível!</h4>
+                            <p className="text-sm text-gray-600">
+                                {updateDownloaded ? 'Pronto para instalar.' : 'Baixando atualização...'}
+                            </p>
+                        </div>
+                        {updateDownloaded && (
+                            <button
+                                onClick={restartApp}
+                                className="bg-green-600 text-white px-3 py-1 rounded-md text-sm font-bold hover:bg-green-700 transition-colors"
+                            >
+                                Reiniciar
+                            </button>
+                        )}
+                    </div>
+                )}
+
                 {/* Sidebar */}
                 <div className={`${isSidebarOpen ? 'w-64' : 'w-0'} ${theme.sidebar} shadow-lg flex flex-col z-20 transition-all duration-300 overflow-hidden relative border-r ${theme.border}`}>
-                    <div className={`p-6 flex flex-col items-center border-b ${theme.border} min-w-[16rem] bg-white`}>
-                        <img src={hapLogo} alt="Hap Query Report" className="w-full h-auto max-h-32 object-contain mb-3 transition-transform hover:scale-105" />
+                    <div className={`p-4 flex flex-col items-center border-b ${theme.border} min-w-[16rem] bg-white`}>
+                        <img src={hapLogo} alt="Hap Query Report" className="w-full h-auto max-h-20 object-contain mb-2 transition-transform hover:scale-105" />
                         <h1 className={`text-lg font-bold tracking-tight text-center leading-tight text-gray-800`}>
-                            Hap Query Report <span className="text-xs font-normal text-gray-500 block">v1.1.33</span>
+                            Hap Query Report <span className="text-xs font-normal text-gray-500 block">v1.1.42</span>
                         </h1>
                     </div>
 

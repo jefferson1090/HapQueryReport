@@ -17,6 +17,56 @@ function CsvImporter({ isVisible }) {
 
     const [tableExists, setTableExists] = useState(false);
     const [dropIfExists, setDropIfExists] = useState(false);
+    const [jobId, setJobId] = useState(null);
+
+    // --- Editable History State ---
+    const [editingHistoryIdx, setEditingHistoryIdx] = useState(null);
+    const [editingGrantUser, setEditingGrantUser] = useState('');
+
+    const handleStartEdit = (item, idx) => {
+        setEditingHistoryIdx(idx);
+        setEditingGrantUser(item.grantUser || '');
+    };
+
+    const handleCancelEdit = () => {
+        setEditingHistoryIdx(null);
+        setEditingGrantUser('');
+    };
+
+    const handleSavePermission = async (item, idx) => {
+        if (!editingGrantUser.trim()) {
+            alert("Por favor, informe um usuário.");
+            return;
+        }
+
+        try {
+            // Grant Permission
+            const res = await fetch('http://localhost:3001/api/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql: `GRANT SELECT ON "${item.tableName}" TO "${editingGrantUser.toUpperCase()}"` })
+            });
+
+            const data = await res.json();
+            if (data.error) {
+                alert('Erro ao conceder permissão: ' + data.error);
+                return;
+            }
+
+            // Update History
+            const newHistory = [...importHistory];
+            newHistory[idx].grantUser = editingGrantUser.toUpperCase();
+            setImportHistory(newHistory);
+            localStorage.setItem('hap_csv_history', JSON.stringify(newHistory));
+
+            setEditingHistoryIdx(null);
+            setEditingGrantUser('');
+            alert(`Permissão concedida para ${editingGrantUser.toUpperCase()} com sucesso!`);
+
+        } catch (err) {
+            alert('Erro de rede: ' + err.message);
+        }
+    };
 
     React.useEffect(() => {
         const savedHistory = localStorage.getItem('hap_csv_history');
@@ -160,9 +210,31 @@ function CsvImporter({ isVisible }) {
     };
 
     const handleImport = async () => {
+        const newJobId = 'job_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+        setJobId(newJobId);
         setImporting(true);
-        setImportStatus('Iniciando importação (Isso pode demorar)...');
+        setImportStatus('Iniciando importação...');
         setImportProgress(0);
+
+        // Start Polling
+        const pollInterval = setInterval(async () => {
+            try {
+                const res = await fetch(`http://127.0.0.1:3001/api/import-status/${newJobId}`);
+                if (res.ok) {
+                    const status = await res.json();
+                    if (status.status) setImportStatus(status.status);
+                    if (status.insertedRows && totalRows > 0) {
+                        const pct = Math.min(Math.round((status.insertedRows / totalRows) * 100), 99);
+                        setImportProgress(pct);
+                    }
+                    if (status.progress) {
+                        setImportProgress(status.progress);
+                    }
+                }
+            } catch (e) {
+                console.error("Polling error", e);
+            }
+        }, 1000);
 
         try {
             const response = await fetch('http://127.0.0.1:3001/api/create-table', {
@@ -175,11 +247,14 @@ function CsvImporter({ isVisible }) {
                     filePath: filePath,
                     delimiter: delimiter,
                     grantToUser: grantUser,
-                    dropIfExists: dropIfExists
+                    dropIfExists: dropIfExists,
+                    jobId: newJobId
                 })
             });
 
+            clearInterval(pollInterval);
             const result = await response.json();
+
             if (result.success) {
                 setImportStatus('Importação concluída com sucesso!');
                 setImportProgress(100);
@@ -204,15 +279,29 @@ function CsvImporter({ isVisible }) {
                     setImporting(false);
                     setTableExists(false);
                     setDropIfExists(false);
+                    setJobId(null);
                     alert(result.message);
                 }, 1500);
             } else {
                 setImportStatus('Erro: ' + result.message);
                 setImporting(false);
+                setJobId(null);
             }
         } catch (error) {
+            clearInterval(pollInterval);
             setImportStatus('Erro de rede: ' + error.message);
             setImporting(false);
+            setJobId(null);
+        }
+    };
+
+    const handleCancel = async () => {
+        if (!jobId) return;
+        try {
+            await fetch(`http://127.0.0.1:3001/api/cancel-import/${jobId}`, { method: 'POST' });
+            setImportStatus('Cancelando...');
+        } catch (e) {
+            console.error("Cancel error", e);
         }
     };
 
@@ -250,33 +339,54 @@ function CsvImporter({ isVisible }) {
                         <p className="text-lg text-gray-600 font-medium">Clique para selecionar um arquivo CSV</p>
                         <p className="text-sm text-gray-400 mt-2">ou arraste e solte aqui</p>
                         {importing && <p className="mt-4 text-blue-600">{importStatus}</p>}
-                        {importStatus.startsWith('Erro') && <p className="mt-4 text-red-600">{importStatus}</p>}
+                        {importStatus && importStatus.startsWith('Erro') && <p className="mt-4 text-red-600">{importStatus}</p>}
                     </div>
 
                     {importHistory.length > 0 && (
                         <div className="border-t border-gray-200 pt-4">
                             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Últimas Importações</h3>
-                            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden overflow-x-auto">
                                 <table className="min-w-full divide-y divide-gray-200">
                                     <thead className="bg-gray-50">
                                         <tr>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Arquivo</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tabela</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Data</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Registros</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Permissão</th>
-                                            <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Ações</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Arquivo</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Tabela</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Data</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Registros</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Permissão</th>
+                                            <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Ações</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-200">
                                         {importHistory.slice(0, historyLimit).map((item, idx) => (
                                             <tr key={idx} className="hover:bg-gray-50">
-                                                <td className="px-4 py-2 text-sm text-gray-900">{item.fileName}</td>
-                                                <td className="px-4 py-2 text-sm text-[#0054a6] font-medium">{item.tableName}</td>
-                                                <td className="px-4 py-2 text-sm text-gray-500">{new Date(item.date).toLocaleDateString()} {new Date(item.date).toLocaleTimeString()}</td>
-                                                <td className="px-4 py-2 text-sm text-gray-500">{item.rowCount || '-'}</td>
-                                                <td className="px-4 py-2 text-sm text-gray-500">{item.grantUser}</td>
-                                                <td className="px-4 py-2 text-center">
+                                                <td className="px-4 py-2 text-sm text-gray-900 whitespace-nowrap">{item.fileName}</td>
+                                                <td className="px-4 py-2 text-sm text-[#0054a6] font-medium whitespace-nowrap">{item.tableName}</td>
+                                                <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">{new Date(item.date).toLocaleDateString()} {new Date(item.date).toLocaleTimeString()}</td>
+                                                <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">{item.rowCount || '-'}</td>
+                                                <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">
+                                                    {editingHistoryIdx === idx ? (
+                                                        <div className="flex items-center space-x-2">
+                                                            <input
+                                                                type="text"
+                                                                value={editingGrantUser}
+                                                                onChange={(e) => setEditingGrantUser(e.target.value)}
+                                                                className="border rounded px-2 py-1 text-xs w-24 uppercase"
+                                                                placeholder="USUÁRIO"
+                                                            />
+                                                            <button onClick={() => handleSavePermission(item, idx)} className="text-green-600 hover:text-green-800" title="Salvar">✅</button>
+                                                            <button onClick={handleCancelEdit} className="text-red-600 hover:text-red-800" title="Cancelar">❌</button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center space-x-2">
+                                                            <span>{item.grantUser || '-'}</span>
+                                                            <button onClick={() => handleStartEdit(item, idx)} className="text-blue-600 hover:text-blue-800 opacity-0 group-hover:opacity-100 transition-opacity" title="Editar Permissão">
+                                                                ✏️
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-2 text-center whitespace-nowrap">
                                                     <button
                                                         onClick={() => handleDeleteHistory(item, idx)}
                                                         className="text-red-600 hover:text-red-800 hover:bg-red-50 p-1 rounded transition-colors"
@@ -308,44 +418,23 @@ function CsvImporter({ isVisible }) {
             {step === 2 && (
                 <div className="flex-1 flex flex-col overflow-hidden">
                     <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-semibold text-gray-700">Pré-visualização e Estrutura</h3>
-                        <div className="flex items-center space-x-2">
-                            <label className="text-sm font-medium text-gray-700">Delimitador:</label>
-                            <select
-                                value={delimiter}
-                                onChange={(e) => {
-                                    setDelimiter(e.target.value);
-                                    // Re-analyze with new delimiter (would require refetching/reparsing in a real app)
-                                    // For now, we'd need to re-upload or re-parse the file content
-                                    alert("Para alterar o delimitador, por favor, reenvie o arquivo.");
-                                    setStep(1);
-                                    setFile(null);
-                                }}
-                                className="border border-gray-300 rounded-md p-1 text-sm focus:ring-[#0054a6] focus:border-[#0054a6]"
-                            >
-                                <option value=",">Vírgula (,)</option>
-                                <option value=";">Ponto e Vírgula (;)</option>
-                                <option value="|">Pipe (|)</option>
-                                <option value="\t">Tabulação (\t)</option>
-                            </select>
+                        <div className="flex items-center space-x-4">
+                            <h3 className="text-xl font-bold text-gray-800">Visualizar e Editar Colunas</h3>
+                            <div className="flex items-center space-x-2 bg-blue-50 px-3 py-1 rounded border border-blue-100">
+                                <span className="text-sm font-medium text-blue-700">Tabela:</span>
+                                <input
+                                    type="text"
+                                    value={tableName}
+                                    onChange={(e) => setTableName(e.target.value.toUpperCase())}
+                                    onBlur={() => checkTable(tableName)}
+                                    className="bg-white border border-blue-200 rounded px-2 py-0.5 text-sm font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 uppercase"
+                                    placeholder="NOME_DA_TABELA"
+                                />
+                            </div>
                         </div>
-                    </div>
-
-                    <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Nome da Tabela de Destino</label>
-                        <input
-                            type="text"
-                            value={tableName}
-                            onChange={(e) => {
-                                const val = e.target.value.toUpperCase();
-                                setTableName(val);
-                                checkTable(val);
-                            }}
-                            className={`w-full p-2 border ${tableExists ? 'border-orange-500 focus:ring-orange-500' : 'border-gray-300 focus:ring-[#0054a6]'} rounded-md outline-none`}
-                        />
-                        {tableExists && (
-                            <p className="text-xs text-orange-600 mt-1">⚠️ Esta tabela já existe. Você poderá optar por recriá-la no próximo passo.</p>
-                        )}
+                        <div className="text-sm text-gray-500">
+                            Total estimado: <span className="font-bold">{totalRows}</span> linhas
+                        </div>
                     </div>
 
                     <div className="flex-1 overflow-auto border border-gray-200 rounded-lg">
@@ -490,32 +579,43 @@ function CsvImporter({ isVisible }) {
                                 <span>{importStatus}</span>
                                 <span>{importProgress}%</span>
                             </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2.5">
+                            <div className="w-full bg-gray-200 rounded-full h-2.5 mb-4">
                                 <div className="bg-[#0054a6] h-2.5 rounded-full transition-all duration-500" style={{ width: `${importProgress}%` }}></div>
                             </div>
+                            <button
+                                onClick={handleCancel}
+                                className="px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm font-medium"
+                            >
+                                Cancelar Importação
+                            </button>
                         </div>
                     ) : (
-                        <div className="flex space-x-3 w-full">
-                            <button
-                                onClick={() => setStep(2)}
-                                className="flex-1 px-4 py-3 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 font-medium"
-                            >
-                                Voltar
-                            </button>
-                            <button
-                                onClick={() => {
-                                    if (tableExists && !dropIfExists) {
-                                        setStep(2); // Go back to rename
-                                        alert("Por favor, renomeie a tabela para continuar.");
-                                    } else {
-                                        handleImport();
-                                    }
-                                }}
-                                className={`flex-1 px-4 py-3 text-white rounded-md font-bold shadow-md ${tableExists && !dropIfExists ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#f37021] hover:bg-orange-600'}`}
-                                disabled={tableExists && !dropIfExists}
-                            >
-                                {tableExists && dropIfExists ? 'Recriar e Importar' : 'Iniciar Importação'}
-                            </button>
+                        <div className="flex flex-col w-full">
+                            <div className="flex space-x-3 w-full">
+                                <button
+                                    onClick={() => setStep(2)}
+                                    className="flex-1 px-4 py-3 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 font-medium"
+                                >
+                                    Voltar
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (tableExists && !dropIfExists) {
+                                            setStep(2); // Go back to rename
+                                            alert("Por favor, renomeie a tabela para continuar.");
+                                        } else {
+                                            handleImport();
+                                        }
+                                    }}
+                                    className={`flex-1 px-4 py-3 text-white rounded-md font-bold shadow-md ${tableExists && !dropIfExists ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#f37021] hover:bg-orange-600'}`}
+                                    disabled={tableExists && !dropIfExists}
+                                >
+                                    {tableExists && dropIfExists ? 'Recriar e Importar' : 'Iniciar Importação'}
+                                </button>
+                            </div>
+                            {importStatus && importStatus.startsWith('Erro') && (
+                                <p className="mt-4 text-red-600 text-center font-medium">{importStatus}</p>
+                            )}
                         </div>
                     )}
                 </div>
