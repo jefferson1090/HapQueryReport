@@ -1,9 +1,12 @@
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
 const oracledb = require('oracledb');
 const db = require('./db');
+const aiService = require('./services/aiService');
 const multer = require('multer');
-const path = require('path');
+// const path = require('path'); // Already imported at top
 const os = require('os');
 const upload = multer({ dest: path.join(os.tmpdir(), 'oracle-lowcode-uploads') });
 const fs = require('fs');
@@ -181,6 +184,28 @@ app.post('/api/export', async (req, res) => {
     }
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/ai/create-table-confirm', async (req, res) => {
+  try {
+    const { tableName, columns, indices, grants } = req.body;
+    if (!tableName || !columns) throw new Error("Dados incompletos.");
+
+    await db.createTable(tableName, columns, indices, grants);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/ai/chat', async (req, res) => {
+  try {
+    const { message, mode } = req.body;
+    const result = await aiService.processMessage(message, mode);
+    res.json(result);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

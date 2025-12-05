@@ -91,18 +91,52 @@ async function getColumns(tableNameInput) {
         }
 
         conn = await getConnection();
+
+        // 1. Try to get View Definition first (if it's a view)
+        // We can check if it's a view by querying ALL_VIEWS
+        let viewText = null;
+        try {
+            // Only check if it's a view if we are looking for structure
+            const viewResult = await conn.execute(
+                `SELECT TEXT FROM ALL_VIEWS WHERE UPPER(OWNER) = UPPER(:owner) AND UPPER(VIEW_NAME) = UPPER(:tableName)`,
+                [owner, tableName],
+                { fetchInfo: { TEXT: { type: oracledb.STRING } } } // Long columns need specific fetch info
+            );
+            if (viewResult.rows.length > 0) {
+                viewText = viewResult.rows[0][0];
+            }
+        } catch (e) {
+            // Ignore view check errors
+        }
+
         const result = await conn.execute(
-            `SELECT column_name, data_type, data_length 
+            `SELECT column_name, data_type, data_length, nullable, data_default
              FROM ALL_TAB_COLUMNS 
              WHERE UPPER(OWNER) = UPPER(:owner) AND UPPER(TABLE_NAME) = UPPER(:tableName) 
              ORDER BY column_id`,
-            [owner, tableName]
+            [owner, tableName],
+            { outFormat: oracledb.OUT_FORMAT_OBJECT } // Return objects!
         );
-        return result.rows.map(row => ({
-            name: row[0],
-            type: row[1],
-            length: row[2]
+
+        // Map to ensure uppercase keys (just in case) and add view definition if exists
+        const structure = result.rows.map(row => ({
+            COLUMN_NAME: row.COLUMN_NAME,
+            DATA_TYPE: row.DATA_TYPE,
+            DATA_LENGTH: row.DATA_LENGTH,
+            NULLABLE: row.NULLABLE,
+            DATA_DEFAULT: row.DATA_DEFAULT
         }));
+
+        if (viewText) {
+            // Attach view text to the array as a special property (or handle elsewhere)
+            // But getColumns returns an array. Let's return the array, but with a hidden prop? 
+            // Better: Let the caller handle it. But we need to return it.
+            // Let's attach it to the first column or return an object wrapper?
+            // Existing code expects array. Let's stick to array but maybe add a property to the array itself.
+            structure.viewDefinition = viewText;
+        }
+
+        return structure;
     } finally {
         if (conn) await conn.close();
     }
@@ -124,20 +158,33 @@ async function executeQuery(sql, params = [], limit = 1000) {
     }
 }
 
-async function createTable(tableName, columns) {
+async function createTable(tableName, columns, indices = [], grants = []) {
     let conn;
     try {
         conn = await getConnection();
-        // columns: [{name: 'ID', type: 'NUMBER'}, ...]
-        // Sanitize identifiers to prevent ORA-00911 if they contain special chars (though we tried to clean them)
-        // Ideally we should use double quotes if we want to preserve case/chars, but for now let's trust our sanitization 
-        // or wrap in quotes if needed. Let's wrap in quotes to be safe against keywords.
 
+        // 1. Create Table
         const colDefs = columns.map(c => `"${c.name}" ${c.type}`).join(', ');
-        const sql = `CREATE TABLE "${tableName}" (${colDefs})`;
-
-        log("Executing Create Table SQL: " + sql);
+        const sql = `CREATE TABLE "${tableName.toUpperCase()}" (${colDefs})`;
+        log("Executing Create Table: " + sql);
         await conn.execute(sql);
+
+        // 2. Add Indices / Constraints
+        for (const idx of indices) {
+            if (columns.some(c => c.name === idx)) {
+                const indexSql = `CREATE INDEX "IDX_${tableName}_${idx}" ON "${tableName}" ("${idx}")`;
+                log("Creating Index: " + indexSql);
+                try { await conn.execute(indexSql); } catch (e) { log("Index Error: " + e.message); }
+            }
+        }
+
+        // 3. Grants
+        for (const user of grants) {
+            const grantSql = `GRANT ALL ON "${tableName}" TO "${user.toUpperCase()}"`;
+            log("Granting: " + grantSql);
+            try { await conn.execute(grantSql); } catch (e) { log("Grant Error: " + e.message); }
+        }
+
         log("Table created successfully");
     } catch (err) {
         log("Error creating table: " + err.message);

@@ -1,6 +1,6 @@
 {
   "name": "server",
-  "version": "1.2.0",
+  "version": "1.2.3",
   "main": "electron-main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -44,8 +44,10 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
+    "dotenv": "^17.2.3",
     "electron-updater": "^6.6.2",
     "express": "^5.1.0",
     "json2csv": "^6.0.0-alpha.2",

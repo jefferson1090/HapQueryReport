@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
-import { ThemeContext } from '../App';
+import { ThemeContext } from '../context/ThemeContext';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql, PLSQL } from '@codemirror/lang-sql';
 import { autocompletion } from '@codemirror/autocomplete';
@@ -328,8 +328,21 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
             if (data.error) throw new Error(data.error);
 
             // 2. Show Results IMMEDIATELY
+            // Fix for DDL (DROP/CREATE) which may not return rows
+            const normalizedData = {
+                ...data,
+                rows: data.rows || [],
+                metaData: data.metaData || []
+            };
+
+            if (data.rowsAffected !== undefined) {
+                showToast(`Comando executado com sucesso. Linhas afetadas: ${data.rowsAffected}`);
+            } else if (!data.rows && !data.metaData) {
+                showToast("Comando executado com sucesso.");
+            }
+
             updateActiveTab({
-                results: data,
+                results: normalizedData,
                 loading: false
             });
 
