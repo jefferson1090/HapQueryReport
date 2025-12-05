@@ -1,6 +1,6 @@
 {
   "name": "server",
-  "version": "1.1.48",
+  "version": "1.2.0",
   "main": "electron-main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -30,7 +30,7 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "public/icon.png"
+      "icon": "public/hap_logo_v4.png"
     },
     "nsis": {
       "oneClick": false,

@@ -12,129 +12,115 @@ export const ThemeContext = createContext();
 export const THEMES = {
     default: {
         name: 'Padrão (Azul)',
-        bg: 'bg-gray-100',
-        sidebar: 'bg-white',
-        sidebarText: 'text-gray-700',
+        bg: 'bg-gray-100', // Main background
+        navbar: 'bg-white', // Top Bar background
+        navbarText: 'text-gray-700',
         text: 'text-gray-700',
-        headerText: 'text-gray-700',
-        primaryBtn: 'bg-blue-600 hover:bg-blue-700 text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
-        secondaryBtn: 'bg-gray-100 hover:bg-gray-200 text-gray-600 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        primaryBtn: 'bg-blue-600 hover:bg-blue-700 text-white',
+        secondaryBtn: 'bg-gray-100 hover:bg-gray-200 text-gray-600',
         accent: 'text-blue-600',
-        header: 'bg-white border-b',
-        tableHeader: 'bg-gray-50 text-gray-500',
-        tableRowHover: 'hover:bg-blue-50',
         border: 'border-gray-200',
         input: 'bg-white text-gray-900',
-        panel: 'bg-white'
+        panel: 'bg-white',
+        tabActive: 'bg-blue-50 text-blue-600 border-blue-600',
+        tabInactive: 'text-gray-500 hover:bg-gray-50 hover:text-blue-500'
     },
     dark: {
         name: 'Modo Escuro',
         bg: 'bg-gray-900',
-        sidebar: 'bg-gray-800',
-        sidebarText: 'text-gray-200',
+        navbar: 'bg-gray-800',
+        navbarText: 'text-gray-200',
         text: 'text-gray-200',
-        headerText: 'text-gray-200',
-        primaryBtn: 'bg-indigo-600 hover:bg-indigo-700 text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
-        secondaryBtn: 'bg-gray-700 hover:bg-gray-600 text-gray-200 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        primaryBtn: 'bg-indigo-600 hover:bg-indigo-700 text-white',
+        secondaryBtn: 'bg-gray-700 hover:bg-gray-600 text-gray-200',
         accent: 'text-indigo-400',
-        header: 'bg-gray-800 border-gray-700 border-b',
-        tableHeader: 'bg-gray-700 text-gray-300',
-        tableRowHover: 'hover:bg-gray-700',
         border: 'border-gray-700',
         input: 'bg-gray-700 text-white border-gray-600',
-        panel: 'bg-gray-800'
+        panel: 'bg-gray-800',
+        tabActive: 'bg-gray-700 text-indigo-400 border-indigo-400',
+        tabInactive: 'text-gray-400 hover:bg-gray-700 hover:text-indigo-300'
     },
     ubuntu: {
         name: 'Ubuntu',
-        bg: 'bg-[#fdf6e3]', // Solarized light-ish
-        sidebar: 'bg-[#300a24]', // Ubuntu purple
-        sidebarText: 'text-white',
+        bg: 'bg-[#fdf6e3]',
+        navbar: 'bg-[#300a24]',
+        navbarText: 'text-white',
         text: 'text-[#300a24]',
-        headerText: 'text-white',
-        primaryBtn: 'bg-[#e95420] hover:bg-[#c7461b] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
-        secondaryBtn: 'bg-[#aea79f] hover:bg-[#9e968d] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        primaryBtn: 'bg-[#e95420] hover:bg-[#c7461b] text-white',
+        secondaryBtn: 'bg-[#aea79f] hover:bg-[#9e968d] text-white',
         accent: 'text-[#e95420]',
-        header: 'bg-[#300a24] border-b border-[#5e2750]',
-        tableHeader: 'bg-[#aea79f] text-white',
-        tableRowHover: 'hover:bg-[#f2d7d0]',
         border: 'border-[#aea79f]',
         input: 'bg-white text-[#300a24]',
-        panel: 'bg-white'
+        panel: 'bg-white',
+        tabActive: 'bg-[#4e103b] text-[#e95420] border-[#e95420]',
+        tabInactive: 'text-gray-300 hover:bg-[#4e103b] hover:text-[#e95420]'
     },
     forest: {
         name: 'Floresta',
         bg: 'bg-stone-100',
-        sidebar: 'bg-[#1c2e1f]',
-        sidebarText: 'text-stone-200',
+        navbar: 'bg-[#1c2e1f]',
+        navbarText: 'text-stone-200',
         text: 'text-[#1c2e1f]',
-        headerText: 'text-[#1c2e1f]',
-        primaryBtn: 'bg-[#2d4a33] hover:bg-[#3a5e42] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
-        secondaryBtn: 'bg-stone-200 hover:bg-stone-300 text-stone-700 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        primaryBtn: 'bg-[#2d4a33] hover:bg-[#3a5e42] text-white',
+        secondaryBtn: 'bg-stone-200 hover:bg-stone-300 text-stone-700',
         accent: 'text-[#2d4a33]',
-        header: 'bg-white border-stone-200 border-b',
-        tableHeader: 'bg-stone-100 text-stone-600',
-        tableRowHover: 'hover:bg-[#e8f5e9]',
         border: 'border-stone-200',
         input: 'bg-white text-stone-800',
-        panel: 'bg-[#fdfbf7]'
+        panel: 'bg-[#fdfbf7]',
+        tabActive: 'bg-[#2d4a33] text-white border-[#4caf50]',
+        tabInactive: 'text-stone-400 hover:bg-[#2d4a33] hover:text-white'
     },
     ocean: {
         name: 'Oceano',
         bg: 'bg-cyan-50',
-        sidebar: 'bg-white',
-        sidebarText: 'text-slate-700',
+        navbar: 'bg-white',
+        navbarText: 'text-slate-700',
         text: 'text-slate-700',
-        headerText: 'text-slate-700',
-        primaryBtn: 'bg-cyan-600 hover:bg-cyan-700 text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
-        secondaryBtn: 'bg-cyan-100 hover:bg-cyan-200 text-cyan-800 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        primaryBtn: 'bg-cyan-600 hover:bg-cyan-700 text-white',
+        secondaryBtn: 'bg-cyan-100 hover:bg-cyan-200 text-cyan-800',
         accent: 'text-cyan-600',
-        header: 'bg-white border-cyan-100 border-b',
-        tableHeader: 'bg-cyan-50 text-cyan-700',
-        tableRowHover: 'hover:bg-cyan-50',
         border: 'border-cyan-200',
         input: 'bg-white text-slate-700',
-        panel: 'bg-white'
+        panel: 'bg-white',
+        tabActive: 'bg-cyan-50 text-cyan-700 border-cyan-600',
+        tabInactive: 'text-slate-500 hover:bg-cyan-50 hover:text-cyan-600'
     },
     dracula: {
         name: 'Dracula',
         bg: 'bg-[#282a36]',
-        sidebar: 'bg-[#44475a]',
-        sidebarText: 'text-[#f8f8f2]',
+        navbar: 'bg-[#44475a]',
+        navbarText: 'text-[#f8f8f2]',
         text: 'text-[#f8f8f2]',
-        headerText: 'text-[#f8f8f2]',
-        primaryBtn: 'bg-[#bd93f9] hover:bg-[#ff79c6] text-[#282a36] font-bold hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
-        secondaryBtn: 'bg-[#6272a4] hover:bg-[#50fa7b] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        primaryBtn: 'bg-[#bd93f9] hover:bg-[#ff79c6] text-[#282a36]',
+        secondaryBtn: 'bg-[#6272a4] hover:bg-[#50fa7b] text-white',
         accent: 'text-[#ff79c6]',
-        header: 'bg-[#44475a] border-[#6272a4] border-b',
-        tableHeader: 'bg-[#44475a] text-[#8be9fd]',
-        tableRowHover: 'hover:bg-[#44475a]',
         border: 'border-[#6272a4]',
         input: 'bg-[#282a36] text-[#f8f8f2] border-[#6272a4]',
-        panel: 'bg-[#282a36]'
+        panel: 'bg-[#282a36]',
+        tabActive: 'bg-[#282a36] text-[#ff79c6] border-[#ff79c6]',
+        tabInactive: 'text-[#6272a4] hover:bg-[#282a36] hover:text-[#bd93f9]'
     },
     military: {
         name: 'Militar',
         bg: 'bg-[#f5f5f5]',
-        sidebar: 'bg-[#3e2723]', // Dark Wood
-        sidebarText: 'text-[#efebe9]',
+        navbar: 'bg-[#3e2723]',
+        navbarText: 'text-[#efebe9]',
         text: 'text-[#3e2723]',
-        headerText: 'text-[#3e2723]',
-        primaryBtn: 'bg-[#558b2f] hover:bg-[#33691e] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
-        secondaryBtn: 'bg-[#795548] hover:bg-[#5d4037] text-white hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200',
+        primaryBtn: 'bg-[#558b2f] hover:bg-[#33691e] text-white',
+        secondaryBtn: 'bg-[#795548] hover:bg-[#5d4037] text-white',
         accent: 'text-[#33691e]',
-        header: 'bg-white border-[#3e2723] border-b',
-        tableHeader: 'bg-[#d7ccc8] text-[#3e2723]',
-        tableRowHover: 'hover:bg-[#e8f5e9]',
         border: 'border-[#8d6e63]',
         input: 'bg-white text-gray-900 border-[#8d6e63]',
-        panel: 'bg-[#fafafa]'
+        panel: 'bg-[#fafafa]',
+        tabActive: 'bg-[#5d4037] text-[#efebe9] border-[#fafafa]',
+        tabInactive: 'text-[#efebe9] opacity-70 hover:opacity-100'
     }
 };
 
 function App() {
     const [connection, setConnection] = useState(null);
     const [activeTab, setActiveTab] = useState('query-builder');
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    // Removed isSidebarOpen state
 
     // Theme State
     const [currentThemeName, setCurrentThemeName] = useState(() => localStorage.getItem('app_theme') || 'default');
@@ -180,7 +166,8 @@ function App() {
     const [updateDownloaded, setUpdateDownloaded] = useState(false);
 
     useEffect(() => {
-        document.title = "Hap Query Report v1.1.42";
+        // v1.2.0 - UI Modernization
+        document.title = "Hap Query Report v1.2.0";
         if (window.electronAPI) {
             window.electronAPI.onUpdateAvailable(() => setUpdateAvailable(true));
             window.electronAPI.onUpdateDownloaded(() => {
@@ -226,17 +213,43 @@ function App() {
         setActiveTab('query-builder');
     };
 
+    const NavTab = ({ id, icon, label }) => {
+        const isActive = activeTab === id;
+        return (
+            <button
+                onClick={() => {
+                    window.electronAPI?.resetFocus();
+                    window.focus();
+                    if (document.activeElement) document.activeElement.blur();
+                    setActiveTab(id);
+                }}
+                className={`
+                    relative group px-4 py-2 text-sm font-medium rounded-md transition-all duration-300 ease-out flex items-center space-x-2
+                    ${isActive ? theme.tabActive : theme.tabInactive}
+                    hover:-translate-y-0.5
+                `}
+            >
+                <span className="text-lg">{icon}</span>
+                <span>{label}</span>
+                {/* Active Indicator (Bottom Border Effect) */}
+                {isActive && (
+                    <span className="absolute bottom-0 left-0 w-full h-[2px] bg-current rounded-full opacity-60"></span>
+                )}
+            </button>
+        );
+    };
+
     if (!connection) {
         return <ConnectionForm onConnect={handleConnect} />;
     }
 
     return (
         <ThemeContext.Provider value={{ theme, currentThemeName, changeTheme }}>
-            <div className={`flex h-screen ${theme.bg} font-sans overflow-hidden transition-colors duration-300`}>
+            <div className={`flex flex-col h-screen ${theme.bg} font-sans overflow-hidden transition-colors duration-300`}>
 
                 {/* Update Notification */}
                 {(updateAvailable || updateDownloaded) && (
-                    <div className="fixed top-4 right-4 z-50 bg-white border border-blue-200 shadow-lg rounded-lg p-4 flex items-center space-x-4 animate-fade-in-down">
+                    <div className="fixed top-20 right-4 z-50 bg-white border border-blue-200 shadow-lg rounded-lg p-4 flex items-center space-x-4 animate-fade-in-down">
                         <div className="bg-blue-100 p-2 rounded-full">
                             <span className="text-xl">🚀</span>
                         </div>
@@ -257,143 +270,64 @@ function App() {
                     </div>
                 )}
 
-                {/* Sidebar */}
-                <div className={`${isSidebarOpen ? 'w-64' : 'w-0'} ${theme.sidebar} shadow-lg flex flex-col z-20 transition-all duration-300 overflow-hidden relative border-r ${theme.border}`}>
-                    <div className={`p-4 flex flex-row items-center justify-center border-b ${theme.border} min-w-[16rem] bg-white`}>
-                        <img src={hapLogo} alt="Hap Query Report" className="w-auto h-8 object-contain transition-transform hover:scale-105" />
+                {/* Top Navigation Bar */}
+                <header className={`${theme.navbar} ${theme.navbarText} h-16 shadow-md flex items-center justify-between px-6 z-20 border-b ${theme.border}`}>
+
+                    {/* Tabs (Left Aligned to fill empty space) */}
+                    <div className="flex-1 flex justify-start space-x-2">
+                        <NavTab id="query-builder" icon="📊" label="Construtor" />
+                        <NavTab id="sql-runner" icon="💻" label="Editor SQL" />
+                        <NavTab id="csv-importer" icon="📂" label="Importar CSV" />
+                        <NavTab id="reminders" icon="🔔" label="Lembretes" />
                     </div>
 
-                    <nav className="flex-1 py-6 space-y-1 px-3 overflow-y-auto min-w-[16rem]">
-                        <button
-                            onClick={() => {
-                                window.electronAPI?.resetFocus();
-                                window.focus();
-                                if (document.activeElement) document.activeElement.blur();
-                                setActiveTab('query-builder');
-                            }}
-                            className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'query-builder'
-                                ? `${theme.primaryBtn} shadow-sm`
-                                : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
-                                }`}
-                        >
-                            <span className="mr-3 text-lg">📊</span>
-                            Construtor de Consultas
-                        </button>
-                        <button
-                            onClick={() => {
-                                window.electronAPI?.resetFocus();
-                                window.focus();
-                                if (document.activeElement) document.activeElement.blur();
-                                setActiveTab('sql-runner');
-                            }}
-                            className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'sql-runner'
-                                ? `${theme.primaryBtn} shadow-sm`
-                                : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
-                                }`}
-                        >
-                            <span className="mr-3 text-lg">💻</span>
-                            Editor SQL
-                        </button>
-                        <button
-                            onClick={() => {
-                                window.electronAPI?.resetFocus();
-                                window.focus();
-                                if (document.activeElement) document.activeElement.blur();
-                                setActiveTab('csv-importer');
-                            }}
-                            className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'csv-importer'
-                                ? `${theme.primaryBtn} shadow-sm`
-                                : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
-                                }`}
-                        >
-                            <span className="mr-3 text-lg">📂</span>
-                            Importar CSV
-                        </button>
-                        <button
-                            onClick={() => {
-                                window.electronAPI?.resetFocus();
-                                window.focus();
-                                if (document.activeElement) document.activeElement.blur();
-                                setActiveTab('reminders');
-                            }}
-                            className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 group ${activeTab === 'reminders'
-                                ? `${theme.primaryBtn} shadow-sm`
-                                : `${theme.sidebarText} hover:bg-opacity-10 hover:bg-black`
-                                }`}
-                        >
-                            <span className="mr-3 text-lg">🔔</span>
-                            Lembretes
-                        </button>
+                    {/* Right: User & Actions */}
+                    <div className="flex items-center space-x-4 min-w-[200px] justify-end">
 
-                        {/* Theme Switcher in Sidebar */}
-                        <div className="mt-6 px-1">
-                            <label className={`block text-xs font-bold uppercase mb-2 ${theme.sidebarText} opacity-70`}>Tema</label>
+                        {/* Theme Select (Compact) */}
+                        <div className="relative group">
                             <select
                                 value={currentThemeName}
                                 onChange={(e) => changeTheme(e.target.value)}
-                                className={`w-full text-xs p-2 rounded border outline-none ${theme.input} ${theme.border}`}
+                                className={`textxs py-1 px-2 rounded border outline-none cursor-pointer opacity-70 hover:opacity-100 transition-opacity ${theme.input} ${theme.border}`}
+                                title="Mudar Tema"
                             >
                                 {Object.entries(THEMES).map(([key, val]) => (
                                     <option key={key} value={key}>{val.name}</option>
                                 ))}
                             </select>
                         </div>
-                    </nav>
 
-                    <div className={`p-4 border-t ${theme.border} min-w-[16rem]`}>
-                        <div className="flex items-center mb-3 px-2">
-                            <div className="w-8 h-8 rounded-full bg-[#f37021] flex items-center justify-center text-white font-bold text-xs shadow-sm">
-                                {connection.user.substring(0, 2).toUpperCase()}
-                            </div>
-                            <div className="ml-3 overflow-hidden">
-                                <p className={`text-sm font-medium truncate ${theme.sidebarText}`}>{connection.user}</p>
-                                <p className={`text-xs truncate opacity-70 ${theme.sidebarText}`}>{connection.connectString}</p>
-                            </div>
+                        <div className="h-8 w-[1px] bg-current opacity-20 mx-2"></div>
+
+                        {/* User Info */}
+                        <div className="text-right hidden md:block">
+                            <p className="text-sm font-bold leading-tight">{connection.user}</p>
+                            <p className="text-[10px] opacity-70 truncate max-w-[150px]">{connection.connectString}</p>
                         </div>
+
+                        {/* Disconnect */}
                         <button
                             onClick={handleDisconnect}
-                            className={`w-full flex items-center justify-center px-4 py-2 border shadow-sm text-sm font-medium rounded-md transition-colors duration-200 ${theme.secondaryBtn} ${theme.border}`}
+                            className="p-2 rounded-full hover:bg-red-500 hover:text-white transition-all duration-300 group"
+                            title="Desconectar"
                         >
-                            Desconectar
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+                            </svg>
                         </button>
-                        <div className="mt-4 text-center">
-                            <p className="text-[10px] text-gray-400">Desenvolvido por:</p>
-                            <p className="text-xs font-semibold text-gray-500">Jefferson Oliveira</p>
-                        </div>
                     </div>
-                </div>
+                </header>
 
-                {/* Main Content */}
-                <div className="flex-1 overflow-hidden relative flex flex-col">
-                    {/* Toggle Button */}
-                    <div className={`${theme.header} p-2 flex items-center shadow-sm z-10`}>
-                        <button
-                            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                            className={`p-2 rounded-md hover:bg-opacity-10 hover:bg-black focus:outline-none ${theme.sidebarText}`}
-                            title={isSidebarOpen ? "Recolher Menu" : "Expandir Menu"}
-                        >
-                            {isSidebarOpen ? '◀️' : '▶️'}
-                        </button>
-                        {!isSidebarOpen && (
-                            <div className="ml-4 flex items-center">
-                                <img src={hapLogo} alt="Logo" className="h-8 object-contain mr-2" />
-                                <span className={`font-bold ${theme.accent}`}>Hap Query Report <span className="text-xs font-normal text-gray-500 ml-1">v1.1.33</span></span>
-                            </div>
-                        )}
-                    </div>
-
-                    <main className="flex-1 overflow-auto p-2 sm:p-6 transition-all duration-300 relative">
+                {/* Main Content Area */}
+                <main className="flex-1 overflow-hidden relative">
+                    <div className="absolute inset-0 overflow-auto p-4 sm:p-6">
                         <div className="max-w-7xl mx-auto h-full flex flex-col relative">
-                            <div style={{
-                                display: activeTab === 'query-builder' ? 'block' : 'none',
-                                width: '100%', height: '100%'
-                            }}>
+                            {/* Content Wrappers (Preserving State) */}
+                            <div className={activeTab === 'query-builder' ? 'block h-full' : 'hidden'}>
                                 <QueryBuilder isVisible={activeTab === 'query-builder'} />
                             </div>
-                            <div style={{
-                                display: activeTab === 'sql-runner' ? 'block' : 'none',
-                                width: '100%', height: '100%'
-                            }}>
+                            <div className={activeTab === 'sql-runner' ? 'block h-full' : 'hidden'}>
                                 <SqlRunner
                                     isVisible={activeTab === 'sql-runner'}
                                     tabs={sqlTabs}
@@ -404,23 +338,18 @@ function App() {
                                     setSavedQueries={setSavedSqlQueries}
                                 />
                             </div>
-                            <div style={{
-                                display: activeTab === 'csv-importer' ? 'block' : 'none',
-                                width: '100%', height: '100%'
-                            }}>
+                            <div className={activeTab === 'csv-importer' ? 'block h-full' : 'hidden'}>
                                 <CsvImporter isVisible={activeTab === 'csv-importer'} connectionName={connection?.connectionName || connection?.user || 'Desconhecido'} />
                             </div>
-                            <div style={{
-                                display: activeTab === 'reminders' ? 'block' : 'none',
-                                width: '100%', height: '100%'
-                            }}>
+                            <div className={activeTab === 'reminders' ? 'block h-full' : 'hidden'}>
                                 <Reminders isVisible={activeTab === 'reminders'} />
                             </div>
                         </div>
-                    </main>
-                </div>
+                    </div>
+                </main>
+
             </div>
-        </ThemeContext.Provider>
+        </ThemeContext.Provider >
     );
 }
 
