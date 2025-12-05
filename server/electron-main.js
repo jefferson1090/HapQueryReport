@@ -15,7 +15,7 @@ function createWindow() {
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js')
         },
-        icon: path.join(__dirname, 'public', 'vite.svg') // Optional: Add an icon
+        icon: path.join(__dirname, 'public', 'hap_logo_v4.png')
     });
 
     // Load the local server
@@ -48,6 +48,36 @@ ipcMain.handle('select-file', async () => {
 
 ipcMain.handle('read-file', async (event, path) => {
     return await fs.promises.readFile(path, 'utf-8');
+});
+
+const { shell } = require('electron');
+ipcMain.handle('show-item-in-folder', async (event, path) => {
+    shell.showItemInFolder(path);
+});
+
+ipcMain.handle('save-file', async (event, { filename, content, type }) => {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: filename,
+        filters: [
+            { name: type === 'csv' ? 'CSV Files' : 'Excel Files', extensions: [type] }
+        ]
+    });
+
+    if (canceled || !filePath) return null;
+
+    // Content determines format. If it's a buffer (Excel), write buffer. 
+    // We expect content to be passed appropriately.
+    // For simplicity, we'll assume content is passed as a Buffer or string.
+    // However, JSON IPC doesn't handle Buffers well without conversion. 
+    // We will expect base64 string for binary (xlsx) and plain string for text (csv).
+
+    if (type === 'xlsx') {
+        await fs.promises.writeFile(filePath, Buffer.from(content, 'base64'));
+    } else {
+        await fs.promises.writeFile(filePath, content, 'utf-8');
+    }
+
+    return filePath;
 });
 
 const { autoUpdater } = require('electron-updater');

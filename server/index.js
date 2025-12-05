@@ -219,7 +219,7 @@ app.post('/api/query', async (req, res) => {
       });
 
       if (whereClauses.length > 0) {
-        finalSql = `SELECT * FROM (${sql}) WHERE ${whereClauses.join(' AND ')}`;
+        finalSql = `SELECT * FROM (${sql}\n) WHERE ${whereClauses.join(' AND ')}`;
       }
     }
 
@@ -234,7 +234,7 @@ app.post('/api/query/count', async (req, res) => {
   const { sql, params } = req.body;
   try {
     const cleanSql = sql.trim().replace(/;$/, '');
-    const countSql = `SELECT COUNT(*) FROM (${cleanSql})`;
+    const countSql = `SELECT COUNT(*) FROM (${cleanSql}\n)`;
     const result = await db.executeQuery(countSql, params || []);
     res.json({ count: result.rows[0][0] });
   } catch (err) {
@@ -277,7 +277,7 @@ app.post('/api/export/csv', async (req, res) => {
       });
 
       if (whereClauses.length > 0) {
-        finalSql = `SELECT * FROM (${sql}) WHERE ${whereClauses.join(' AND ')}`;
+        finalSql = `SELECT * FROM (${sql}\n) WHERE ${whereClauses.join(' AND ')}`;
       }
     }
 

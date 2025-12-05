@@ -4,6 +4,7 @@ import { saveAs } from 'file-saver';
 import { ThemeContext } from '../App';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql, PLSQL } from '@codemirror/lang-sql';
+import { autocompletion } from '@codemirror/autocomplete';
 import PropTypes from 'prop-types';
 
 // Custom AutoSizer to avoid build issues with the library
@@ -107,6 +108,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const viewRef = useRef(null);
     const containerRef = useRef(null);
     const [toast, setToast] = useState(null);
+    const toastTimeoutRef = useRef(null);
 
     // Focus Strategy: Robust focus handling
     useEffect(() => {
@@ -179,9 +181,18 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     };
 
     // Toast Helper
-    const showToast = (message, type = 'success') => {
+    const showToast = (message, type = 'success', duration = 3000) => {
+        if (toastTimeoutRef.current) {
+            clearTimeout(toastTimeoutRef.current);
+            toastTimeoutRef.current = null;
+        }
         setToast({ message, type });
-        setTimeout(() => setToast(null), 3000);
+        if (duration > 0) {
+            toastTimeoutRef.current = setTimeout(() => {
+                setToast(null);
+                toastTimeoutRef.current = null;
+            }, duration);
+        }
     };
 
     // Helper to get active tab
@@ -410,7 +421,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const filteredRows = getFilteredRows();
 
     const downloadStreamExport = async () => {
-        setIsExporting(true);
+        showToast("Iniciando download do CSV...", "info", 0);
         try {
             const cleanSql = activeTab.sqlContent.trim().replace(/;$/, '');
             const res = await fetch('http://localhost:3001/api/export/csv', {
@@ -430,8 +441,29 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         } catch (err) {
             console.error(err);
             showToast("Erro ao exportar: " + err.message, 'error');
-        } finally {
-            setIsExporting(false);
+        }
+    };
+
+    const performNativeSave = async (filename, content, type) => {
+        if (window.electronAPI && window.electronAPI.saveFile) {
+            const savedPath = await window.electronAPI.saveFile({ filename, content, type });
+            if (savedPath) {
+                showToast("Arquivo salvo com sucesso!");
+                window.electronAPI.showItemInFolder(savedPath);
+            }
+        } else {
+            // Browser Fallback logic
+            let blob;
+            if (type === 'xlsx') {
+                const binary = atob(content);
+                const array = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i);
+                blob = new Blob([array], { type: 'application/octet-stream' });
+            } else {
+                blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
+            }
+            saveAs(blob, filename);
+            showToast("Download concluído!");
         }
     };
 
@@ -464,7 +496,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
 
                     // Fallback to fetching all JSON for Excel (Legacy method)
                     // This might crash for > 1M, but we warned them.
-                    setIsExporting(true);
+                    showToast("Baixando dados do servidor...", "info", 0);
                     try {
                         const cleanSql = activeTab.sqlContent.trim().replace(/;$/, '');
                         const res = await fetch('http://127.0.0.1:3001/api/query', {
@@ -486,13 +518,22 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                         const ws = XLSX.utils.aoa_to_sheet(rows);
                         XLSX.utils.book_append_sheet(wb, ws, "Results");
                         const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-                        const blob = new Blob([wbout], { type: 'application/octet-stream' });
-                        saveAs(blob, `export_${Date.now()}.xlsx`);
-                        showToast("Download concluído!");
+
+                        // Prepare for IPC (Base64)
+                        const bytes = new Uint8Array(wbout);
+                        let binary = '';
+                        const len = bytes.byteLength;
+                        for (let i = 0; i < len; i++) {
+                            binary += String.fromCharCode(bytes[i]);
+                        }
+                        const contentBase64 = window.btoa(binary);
+                        const filename = `export_full_${Date.now()}.xlsx`;
+
+                        await performNativeSave(filename, contentBase64, 'xlsx');
                     } catch (err) {
                         alert("Falha ao buscar todos os dados: " + err.message);
                     } finally {
-                        setIsExporting(false);
+                        // Done
                     }
                     return;
                 }
@@ -500,39 +541,176 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         }
 
         // Export only what's visible (Client Side)
-        setIsExporting(true);
-        setTimeout(() => {
+
+
+        // Let's use toast "Gerando arquivo..."
+        showToast("Gerando arquivo...", "info", 0);
+
+        // Small delay to let toast render
+        setTimeout(async () => {
             try {
                 const header = activeTab.results.metaData.map(m => m.name);
                 const data = [header, ...filteredRows];
                 const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-                const filename = `sql_export_${timestamp}`;
+                const filename = `sql_export_${timestamp}.${type}`;
+                let contentToSend;
 
                 if (type === 'xlsx') {
                     const wb = XLSX.utils.book_new();
                     const ws = XLSX.utils.aoa_to_sheet(data);
                     XLSX.utils.book_append_sheet(wb, ws, "Results");
                     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-                    const blob = new Blob([wbout], { type: 'application/octet-stream' });
-                    saveAs(blob, `${filename}.xlsx`);
+
+                    // Convert to Base64
+                    const bytes = new Uint8Array(wbout);
+                    let binary = '';
+                    const len = bytes.byteLength;
+                    for (let i = 0; i < len; i++) {
+                        binary += String.fromCharCode(bytes[i]);
+                    }
+                    contentToSend = window.btoa(binary);
+
                 } else if (type === 'csv') {
                     const ws = XLSX.utils.aoa_to_sheet(data);
-                    const csvOutput = XLSX.utils.sheet_to_csv(ws);
-                    const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8' });
-                    saveAs(blob, `${filename}.csv`);
+                    contentToSend = XLSX.utils.sheet_to_csv(ws);
                 } else if (type === 'txt') {
+                    // For txt just fallback to saveAs for simplicity or implement text save
                     const txtContent = data.map(row => row.join('\t')).join('\n');
                     const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8' });
                     saveAs(blob, `${filename}.txt`);
+                    showToast("Download concluído!");
+                    return;
                 }
-                showToast("Download concluído com sucesso!");
+
+                await performNativeSave(filename, contentToSend, type);
+
             } catch (err) {
                 console.error("Export Error:", err);
                 showToast("Falha ao exportar: " + err.message, 'error');
-            } finally {
-                setIsExporting(false);
             }
+            // We don't need finally { setIsExporting(false) } because we didn't set it true (or if we did, we should turn it off)
+            // But wait, if I don't use the overlay, user might click again. 
+            // It's better to show toast "Aguarde..." and maybe disable buttons?
         }, 100);
+    };
+
+    const unused_handleShare = async (type) => {
+        if (!activeTab.results || !activeTab.results.rows || activeTab.results.rows.length === 0) {
+            alert("Não há dados para compartilhar.");
+            return;
+        }
+
+        setIsExporting(true);
+        try {
+            const header = activeTab.results.metaData.map(m => m.name);
+            const data = [header, ...filteredRows];
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const filename = `sql_report_${timestamp}.${type}`;
+
+            let file;
+            if (type === 'xlsx') {
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.aoa_to_sheet(data);
+                XLSX.utils.book_append_sheet(wb, ws, "Results");
+                const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                file = new File([new Blob([wbout])], filename, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            } else if (type === 'csv') {
+                const ws = XLSX.utils.aoa_to_sheet(data);
+                const csvOutput = XLSX.utils.sheet_to_csv(ws);
+                file = new File([new Blob([csvOutput])], filename, { type: 'text/csv' });
+            }
+
+            // Try to use Native Share first
+            if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({
+                        files: [file],
+                        title: 'Relatório SQL',
+                        text: 'Segue relatório gerado pelo Hap Query Report.'
+                    });
+                    showToast("Compartilhamento completo!");
+                    return;
+                } catch (shareErr) {
+                    console.warn("Native share failed, falling back to Save As", shareErr);
+                    // Fallthrough to fallback
+                }
+            }
+
+            // Fallback: Use Electron File Save (Robust)
+            if (window.electronAPI && window.electronAPI.saveFile) {
+                // Prepare content for IPC
+                let contentToSend;
+                if (type === 'xlsx') {
+                    // Blob to Base64
+                    const arrayBuffer = await file.arrayBuffer();
+                    let binary = '';
+                    const bytes = new Uint8Array(arrayBuffer);
+                    const len = bytes.byteLength;
+                    for (let i = 0; i < len; i++) {
+                        binary += String.fromCharCode(bytes[i]);
+                    }
+                    contentToSend = window.btoa(binary);
+                } else {
+                    // Text
+                    contentToSend = await file.text();
+                }
+
+                const savedPath = await window.electronAPI.saveFile({ filename, content: contentToSend, type });
+
+                if (savedPath) {
+                    showToast("Arquivo salvo com sucesso!");
+                    window.electronAPI.showItemInFolder(savedPath);
+                }
+            } else {
+                // Browser Fallback (if not in Electron)
+                saveAs(file, filename);
+                showToast("Arquivo salvo!");
+            }
+
+        } catch (err) {
+            console.error("Share Error:", err);
+            if (err.name !== 'AbortError') {
+                showToast("Erro ao compartilhar: " + err.message, 'error');
+            }
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    // --- Smart Value Formatting ---
+    const formatCellValue = (val) => {
+        if (typeof val !== 'string') return val;
+
+        // Strict ISO Date regex (YYYY-MM-DDTHH:mm:ss...)
+        // We only want to format typical database timestamps
+        const isoDateRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?$/;
+
+        if (isoDateRegex.test(val)) {
+            const date = new Date(val);
+            if (isNaN(date.getTime())) return val;
+
+            // Check if it has "meaningful" time.
+            // Often "03:00:00.000Z" effectively means "Midnight in Brazil" (GMT-3) or just Midnight UTC
+            // If the UTC time is Turn-of-Day or if Local time is Turn-of-Day, we might show just Date.
+            // However, sticking to the standard: 
+            // If local time has 00:00:00, show only date.
+
+            // To be precise: If the string ends in T00:00:00.000Z or T03:00:00.000Z (typical Oracle Date w/o Time in BRT context)
+            // But let's rely on the Date object values.
+
+            const hours = date.getHours();
+            const minutes = date.getMinutes();
+            const seconds = date.getSeconds();
+
+            const hasTime = hours !== 0 || minutes !== 0 || seconds !== 0;
+
+            if (!hasTime) {
+                return date.toLocaleDateString('pt-BR'); // DD/MM/YYYY
+            } else {
+                return date.toLocaleString('pt-BR'); // DD/MM/YYYY HH:mm:ss
+            }
+        }
+        return val;
     };
 
     // --- Column Drag & Drop ---
@@ -569,8 +747,8 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                     const originalIdx = activeTab.results.metaData.findIndex(m => m.name === colName);
                     const width = columnWidths[colName] || 150;
                     return (
-                        <div key={colName} className={`px-2 py-2 text-sm ${theme.sidebarText} overflow-hidden text-ellipsis whitespace-nowrap`} style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }} title={row[originalIdx]}>
-                            {row[originalIdx]}
+                        <div key={colName} className={`px-2 py-2 text-sm ${theme.sidebarText} overflow-hidden text-ellipsis whitespace-nowrap`} style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }} title={String(row[originalIdx])}>
+                            {formatCellValue(row[originalIdx])}
                         </div>
                     );
                 })}
@@ -638,39 +816,51 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                         </button>
                     </div>
 
-                    <div className={`p-3 rounded border shadow-sm flex justify-between items-center ${theme.panel} ${theme.border}`}>
-                        <div>
-                            <h3 className={`font-bold ${theme.sidebarText}`}>Editor SQL</h3>
-                        </div>
-                        <div className="flex items-center space-x-3">
-                            {activeTab.totalRecords !== undefined && (
-                                <span className="text-xs font-medium text-gray-500 mr-2">
-                                    Total: {activeTab.totalRecords.toLocaleString()} registros
-                                </span>
-                            )}
-                            <button
-                                onClick={() => setShowSidebar(!showSidebar)}
-                                className={`text-xs px-3 py-1.5 rounded border transition-colors ${showSidebar ? `${theme.primaryBtn}` : `${theme.secondaryBtn}`}`}
-                                title={showSidebar ? "Ocultar Lateral" : "Mostrar Lateral"}
-                            >
-                                {showSidebar ? 'Ocultar Lateral' : 'Mostrar Lateral'}
-                            </button>
-                            <input
-                                type="file"
-                                accept=".sql"
-                                onChange={handleFileUpload}
-                                className="text-xs text-gray-500 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 transition-colors"
-                            />
-                        </div>
-                    </div>
-
                     <div className="flex-none">
                         <div ref={containerRef} onClick={handleContainerClick} className={`border rounded overflow-hidden ${theme.border} cursor-text`}>
                             {isVisible && (
                                 <CodeMirror
                                     value={activeTab.sqlContent}
                                     height="200px"
-                                    extensions={[sql({ schema: schemaData, dialect: PLSQL })]}
+                                    extensions={[
+                                        sql({ schema: schemaData, dialect: PLSQL }),
+                                        autocompletion({
+                                            override: [(context) => {
+                                                let word = context.matchBefore(/\w*/)
+                                                if (!word) return null
+                                                if (word.from == word.to && !context.explicit) return null
+
+                                                const oracleFunctions = [
+                                                    { label: "NVL", type: "function", detail: "nvl(expr1, expr2)" },
+                                                    { label: "NVL2", type: "function", detail: "nvl2(expr1, expr2, expr3)" },
+                                                    { label: "DECODE", type: "function", detail: "decode(expr, search, result...)" },
+                                                    { label: "TO_CHAR", type: "function", detail: "to_char(n, [fmt])" },
+                                                    { label: "TO_DATE", type: "function", detail: "to_date(char, [fmt])" },
+                                                    { label: "TO_NUMBER", type: "function", detail: "to_number(expr, [fmt])" },
+                                                    { label: "SUBSTR", type: "function", detail: "substr(char, position, [len])" },
+                                                    { label: "INSTR", type: "function", detail: "instr(string, substring)" },
+                                                    { label: "REPLACE", type: "function", detail: "replace(char, search, [replace])" },
+                                                    { label: "TRUNC", type: "function", detail: "trunc(date, [fmt])" },
+                                                    { label: "ROUND", type: "function", detail: "round(n, [integer])" },
+                                                    { label: "SYSDATE", type: "keyword", detail: "Current Date" },
+                                                    { label: "UPPER", type: "function", detail: "upper(char)" },
+                                                    { label: "LOWER", type: "function", detail: "lower(char)" },
+                                                    { label: "COALESCE", type: "function", detail: "coalesce(expr1, ...)" },
+                                                    { label: "LISTAGG", type: "function", detail: "listagg(measure, delimiter)" },
+                                                    { label: "CASE", type: "keyword", detail: "CASE WHEN ... END" },
+                                                    { label: "WHEN", type: "keyword" },
+                                                    { label: "THEN", type: "keyword" },
+                                                    { label: "ELSE", type: "keyword" },
+                                                    { label: "END", type: "keyword" }
+                                                ];
+
+                                                return {
+                                                    from: word.from,
+                                                    options: oracleFunctions
+                                                }
+                                            }]
+                                        })
+                                    ]}
                                     onChange={(value) => updateActiveTab({ sqlContent: value })}
                                     theme={theme.name === 'Modo Escuro' || theme.name === 'Dracula' ? 'dark' : 'light'}
                                     className="text-sm"
@@ -681,6 +871,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                 />
                             )}
                         </div>
+
                         <div className={`mt-2 flex items-center justify-between p-2 rounded border ${theme.panel} ${theme.border}`}>
                             <div className="flex items-center space-x-3">
                                 <button
@@ -700,18 +891,48 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                     )}
                                 </button>
 
-                                <div className={`flex items-center space-x-2 border-l pl-3 ${theme.border}`}>
-                                    <span className={`text-sm font-medium ${theme.sidebarText}`}>Limite:</span>
+                                {activeTab.totalRecords !== undefined && (
+                                    <span className="text-xs font-medium text-gray-500 ml-2">
+                                        Total: {activeTab.totalRecords.toLocaleString()} registros
+                                    </span>
+                                )}
+
+                                <button
+                                    onClick={() => setShowSidebar(!showSidebar)}
+                                    className={`p-2 rounded border transition-colors flex items-center justify-center ${showSidebar ? `${theme.primaryBtn}` : `${theme.secondaryBtn}`}`}
+                                    title={showSidebar ? "Ocultar Menu Lateral" : "Mostrar Menu Lateral"}
+                                >
+                                    {/* Sidebar Layout Icon */}
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 6v12" />
+                                    </svg>
+                                </button>
+                                <label className="cursor-pointer p-2 rounded border transition-colors text-gray-500 hover:bg-blue-50 hover:text-blue-600" title="Carregar Arquivo SQL">
+                                    <input
+                                        type="file"
+                                        accept=".sql"
+                                        onChange={handleFileUpload}
+                                        className="hidden"
+                                    />
+                                    {/* Paperclip Icon */}
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                    </svg>
+                                </label>
+
+                                <div className={`flex items-center border-l pl-2 ${theme.border}`}>
                                     <select
                                         value={limit}
                                         onChange={(e) => setLimit(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                                        className={`border rounded p-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none ${theme.input} ${theme.border}`}
+                                        title="Limite de Linhas"
+                                        className={`border rounded p-1.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none w-24 ${theme.input} ${theme.border}`}
                                     >
                                         <option value={100}>100 linhas</option>
                                         <option value={500}>500 linhas</option>
                                         <option value={1000}>1000 linhas</option>
                                         <option value={5000}>5000 linhas</option>
-                                        <option value="all">Todas (Cuidado)</option>
+                                        <option value="all">Todas</option>
                                     </select>
                                 </div>
                             </div>
@@ -755,7 +976,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                             <div className={`p-3 border-b flex justify-between items-center ${theme.header}`}>
                                 <div className="flex items-center space-x-4">
                                     <h3 className={`text-sm font-bold ${theme.sidebarText}`}>
-                                        Resultados ({filteredRows.length} linhas {limit !== 'all' && activeTab.results.rows.length >= limit ? '(Limitado)' : ''})
+                                        Resultados: {filteredRows.length} {activeTab.totalRecords !== undefined ? `de ${activeTab.totalRecords.toLocaleString()} (Total)` : ''} {limit !== 'all' && activeTab.results.rows.length >= limit ? '(Limitado)' : ''}
                                     </h3>
 
                                     {/* Column Controls */}
@@ -805,14 +1026,12 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                 </div>
 
                                 <div className="flex space-x-2">
+
                                     <button onClick={() => exportData('csv')} className={`text-xs border px-3 py-1.5 rounded transition-colors font-medium flex items-center ${theme.secondaryBtn} ${theme.border}`}>
                                         <span className="mr-1">📄</span> CSV
                                     </button>
                                     <button onClick={() => exportData('xlsx')} className={`text-xs px-3 py-1.5 rounded shadow-sm transition-colors font-medium flex items-center ${theme.primaryBtn}`}>
                                         <span className="mr-1">📊</span> Excel
-                                    </button>
-                                    <button onClick={() => exportData('txt')} className={`text-xs border px-3 py-1.5 rounded transition-colors font-medium flex items-center ${theme.secondaryBtn} ${theme.border}`}>
-                                        <span className="mr-1">📝</span> TXT
                                     </button>
                                 </div>
                             </div>
@@ -845,8 +1064,35 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                                             className={`relative px-2 py-3 flex-none overflow-hidden text-ellipsis cursor-move transition-colors ${draggingCol === colName ? 'opacity-50 bg-blue-50' : ''}`}
                                                             style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
                                                         >
-                                                            <div className="flex flex-col space-y-2">
-                                                                <span className="whitespace-normal break-words leading-tight">{colName}</span>
+                                                            <div className="flex flex-col space-y-2 w-full">
+                                                                <span
+                                                                    className="whitespace-normal break-words leading-tight cursor-pointer hover:text-blue-600"
+                                                                    title="Clique duplo para auto-ajustar largura"
+                                                                    onDoubleClick={() => {
+                                                                        // Precise measurement using Canvas
+                                                                        const canvas = document.createElement('canvas');
+                                                                        const context = canvas.getContext('2d');
+                                                                        context.font = '12px "Inter", "Segoe UI", sans-serif'; // Match table font roughly
+
+                                                                        let maxWidth = context.measureText(colName).width; // Start with header width
+
+                                                                        // Sample first 2000 rows for performance
+                                                                        const rowsToScan = activeTab.results.rows.length > 2000 ? activeTab.results.rows.slice(0, 2000) : activeTab.results.rows;
+
+                                                                        rowsToScan.forEach(row => {
+                                                                            const originalIdx = activeTab.results.metaData.findIndex(m => m.name === colName);
+                                                                            const val = String(row[originalIdx] || ''); // Use originalIdx to get correct column value
+                                                                            const w = context.measureText(val).width;
+                                                                            if (w > maxWidth) maxWidth = w;
+                                                                        });
+
+                                                                        // Add padding (approx 24px)
+                                                                        const finalWidth = Math.min(Math.max(100, Math.ceil(maxWidth + 24)), 800);
+                                                                        setColumnWidths(prev => ({ ...prev, [colName]: finalWidth }));
+                                                                    }}
+                                                                >
+                                                                    {colName}
+                                                                </span>
                                                                 {showFilters && (
                                                                     <input
                                                                         type="text"
@@ -1014,6 +1260,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         </div>
     );
 }
+
 
 SqlRunner.propTypes = {
     isVisible: PropTypes.bool,

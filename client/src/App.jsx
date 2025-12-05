@@ -180,6 +180,7 @@ function App() {
     const [updateDownloaded, setUpdateDownloaded] = useState(false);
 
     useEffect(() => {
+        document.title = "Hap Query Report v1.1.42";
         if (window.electronAPI) {
             window.electronAPI.onUpdateAvailable(() => setUpdateAvailable(true));
             window.electronAPI.onUpdateDownloaded(() => {
@@ -258,11 +259,8 @@ function App() {
 
                 {/* Sidebar */}
                 <div className={`${isSidebarOpen ? 'w-64' : 'w-0'} ${theme.sidebar} shadow-lg flex flex-col z-20 transition-all duration-300 overflow-hidden relative border-r ${theme.border}`}>
-                    <div className={`p-4 flex flex-col items-center border-b ${theme.border} min-w-[16rem] bg-white`}>
-                        <img src={hapLogo} alt="Hap Query Report" className="w-full h-auto max-h-20 object-contain mb-2 transition-transform hover:scale-105" />
-                        <h1 className={`text-lg font-bold tracking-tight text-center leading-tight text-gray-800`}>
-                            Hap Query Report <span className="text-xs font-normal text-gray-500 block">v1.1.42</span>
-                        </h1>
+                    <div className={`p-4 flex flex-row items-center justify-center border-b ${theme.border} min-w-[16rem] bg-white`}>
+                        <img src={hapLogo} alt="Hap Query Report" className="w-auto h-8 object-contain transition-transform hover:scale-105" />
                     </div>
 
                     <nav className="flex-1 py-6 space-y-1 px-3 overflow-y-auto min-w-[16rem]">
@@ -410,7 +408,7 @@ function App() {
                                 display: activeTab === 'csv-importer' ? 'block' : 'none',
                                 width: '100%', height: '100%'
                             }}>
-                                <CsvImporter isVisible={activeTab === 'csv-importer'} />
+                                <CsvImporter isVisible={activeTab === 'csv-importer'} connectionName={connection?.connectionName || connection?.user || 'Desconhecido'} />
                             </div>
                             <div style={{
                                 display: activeTab === 'reminders' ? 'block' : 'none',

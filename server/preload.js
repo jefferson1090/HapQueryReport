@@ -6,5 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readFile: (path) => ipcRenderer.invoke('read-file', path),
     onUpdateAvailable: (callback) => ipcRenderer.on('update_available', (_event, value) => callback(value)),
     onUpdateDownloaded: (callback) => ipcRenderer.on('update_downloaded', (_event, value) => callback(value)),
-    restartApp: () => ipcRenderer.send('restart_app')
+    restartApp: () => ipcRenderer.send('restart_app'),
+    showItemInFolder: (path) => ipcRenderer.invoke('show-item-in-folder', path),
+    saveFile: (data) => ipcRenderer.invoke('save-file', data)
 });

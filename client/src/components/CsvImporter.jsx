@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-function CsvImporter({ isVisible }) {
+function CsvImporter({ isVisible, connectionName }) {
     if (!isVisible) return null;
 
     const [step, setStep] = useState(1); // 1: Upload, 2: Review, 3: Result
@@ -44,7 +44,7 @@ function CsvImporter({ isVisible }) {
             const res = await fetch('http://localhost:3001/api/query', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sql: `GRANT SELECT ON "${item.tableName}" TO "${editingGrantUser.toUpperCase()}"` })
+                body: JSON.stringify({ sql: `GRANT ALL ON "${item.tableName}" TO "${editingGrantUser.toUpperCase()}"` })
             });
 
             const data = await res.json();
@@ -264,7 +264,8 @@ function CsvImporter({ isVisible }) {
                     tableName: tableName,
                     date: new Date().toISOString(),
                     grantUser: grantUser || 'Nenhum',
-                    rowCount: result.totalInserted
+                    rowCount: result.totalInserted,
+                    connection: connectionName
                 });
 
                 setTimeout(() => {
@@ -345,10 +346,11 @@ function CsvImporter({ isVisible }) {
                     {importHistory.length > 0 && (
                         <div className="border-t border-gray-200 pt-4">
                             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Últimas Importações</h3>
-                            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden overflow-x-auto">
+                            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden overflow-x-auto w-full max-w-[calc(100vw-80px)] md:max-w-full">
                                 <table className="min-w-full divide-y divide-gray-200">
                                     <thead className="bg-gray-50">
                                         <tr>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Conexão</th>
                                             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Arquivo</th>
                                             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Tabela</th>
                                             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Data</th>
@@ -359,7 +361,8 @@ function CsvImporter({ isVisible }) {
                                     </thead>
                                     <tbody className="divide-y divide-gray-200">
                                         {importHistory.slice(0, historyLimit).map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-gray-50">
+                                            <tr key={idx} className="hover:bg-gray-50 group">
+                                                <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap font-medium">{item.connection || '-'}</td>
                                                 <td className="px-4 py-2 text-sm text-gray-900 whitespace-nowrap">{item.fileName}</td>
                                                 <td className="px-4 py-2 text-sm text-[#0054a6] font-medium whitespace-nowrap">{item.tableName}</td>
                                                 <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">{new Date(item.date).toLocaleDateString()} {new Date(item.date).toLocaleTimeString()}</td>
