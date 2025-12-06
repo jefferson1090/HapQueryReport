@@ -51,7 +51,7 @@ async function getTables(search = '') {
         conn = await getConnection();
 
         // Query ALL_OBJECTS to get both tables and views
-        let query = `SELECT OWNER || '.' || OBJECT_NAME 
+        let query = `SELECT OWNER || '.' || OBJECT_NAME, OBJECT_TYPE 
              FROM ALL_OBJECTS 
              WHERE OBJECT_TYPE IN ('TABLE', 'VIEW')
              AND OWNER NOT IN (
@@ -62,17 +62,72 @@ async function getTables(search = '') {
 
         const params = {};
         if (search) {
-            // If search contains a dot, we might be searching for OWNER.OBJECT
-            // If not, we search in both or just object name.
-            // The user said "humaster.vw_", so we need to support full string match.
             query += ` AND UPPER(OWNER || '.' || OBJECT_NAME) LIKE UPPER(:search)`;
             params.search = `%${search}%`;
         }
 
-        query += ` ORDER BY OWNER, OBJECT_NAME OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY`;
+        query += ` ORDER BY OBJECT_TYPE, OWNER, OBJECT_NAME OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY`;
 
         const result = await conn.execute(query, params);
+        // Map to format: "OWNER.NAME"
         return result.rows.map(row => row[0]);
+    } finally {
+        if (conn) await conn.close();
+    }
+}
+
+// Smart Search Logic
+async function findObjects(term) {
+    let conn;
+    try {
+        term = term ? term.trim() : '';
+        if (!term) return [];
+
+        conn = await getConnection();
+
+        const baseQuery = `SELECT OWNER, OBJECT_NAME, OBJECT_TYPE 
+                           FROM ALL_OBJECTS 
+                           WHERE OBJECT_TYPE IN ('TABLE', 'VIEW')
+                           AND OWNER NOT IN ('SYS', 'SYSTEM', 'OUTLN', 'DBSNMP', 'APPQOSSYS', 'WMSYS', 'CTXSYS', 'XDB', 'ORDDATA', 'ORDSYS', 'MDSYS', 'OLAPSYS', 'LBACSYS', 'DVSYS', 'GSMADMIN_INTERNAL')`;
+
+        // 1. Exact Match First
+        const exactParams = { term: term.toUpperCase() };
+        // Check for "OWNER.OBJECT" pattern
+        let exactWhere = "";
+        if (term.includes('.')) {
+            exactWhere = "AND UPPER(OWNER || '.' || OBJECT_NAME) = :term";
+        } else {
+            exactWhere = "AND UPPER(OBJECT_NAME) = :term";
+        }
+
+        const exactResult = await conn.execute(
+            `${baseQuery} ${exactWhere} ORDER BY OWNER, OBJECT_NAME`,
+            exactParams
+        );
+
+        if (exactResult.rows.length > 0) {
+            return exactResult.rows.map(row => ({
+                owner: row[0],
+                object_name: row[1],
+                object_type: row[2],
+                full_name: `${row[0]}.${row[1]}`
+            }));
+        }
+
+        // 2. Fuzzy Match (Fallback)
+        const fuzzyParams = { term: `%${term.toUpperCase()}%` };
+        const fuzzyResult = await conn.execute(
+            `${baseQuery} AND UPPER(OBJECT_NAME) LIKE :term ORDER BY OBJECT_TYPE, OWNER, OBJECT_NAME FETCH NEXT 50 ROWS ONLY`,
+            fuzzyParams
+        );
+
+        return fuzzyResult.rows.map(row => ({
+            owner: row[0],
+            object_name: row[1],
+            object_type: row[2],
+            full_name: `${row[0]}.${row[1]}`
+        }));
+
     } finally {
         if (conn) await conn.close();
     }
@@ -142,12 +197,15 @@ async function getColumns(tableNameInput) {
     }
 }
 
-async function executeQuery(sql, params = [], limit = 1000) {
+async function executeQuery(sql, params = [], limit = 1000, extraOptions = {}) {
     let conn;
     try {
         conn = await getConnection();
         // Limit rows to avoid crashing browser, default 1000 but adjustable
-        const options = { maxRows: limit === 'all' ? undefined : Number(limit) };
+        const options = {
+            maxRows: limit === 'all' ? undefined : Number(limit),
+            ...extraOptions
+        };
         const result = await conn.execute(sql, params, options);
         return {
             metaData: result.metaData,
@@ -170,19 +228,40 @@ async function createTable(tableName, columns, indices = [], grants = []) {
         await conn.execute(sql);
 
         // 2. Add Indices / Constraints
+        // 2. Add Indices / Constraints
         for (const idx of indices) {
-            if (columns.some(c => c.name === idx)) {
+            // Support Object format: { name: 'IDX_NAME', column: 'COL_NAME' }
+            if (typeof idx === 'object' && idx.name && idx.column) {
+                const indexSql = `CREATE INDEX "${idx.name.toUpperCase()}" ON "${tableName.toUpperCase()}" ("${idx.column.toUpperCase()}")`;
+                log("Creating Index (Structured): " + indexSql);
+                try { await conn.execute(indexSql); } catch (e) { log("Index Error: " + e.message); }
+            }
+            // Support Raw SQL (if starts with CREATE INDEX)
+            else if (typeof idx === 'string' && idx.trim().toUpperCase().startsWith('CREATE INDEX')) {
+                log("Creating Index (Raw): " + idx);
+                try { await conn.execute(idx); } catch (e) { log("Index Error: " + e.message); }
+            }
+            // Legacy/Simple: idx is a column name
+            else if (typeof idx === 'string' && columns.some(c => c.name === idx)) {
                 const indexSql = `CREATE INDEX "IDX_${tableName}_${idx}" ON "${tableName}" ("${idx}")`;
-                log("Creating Index: " + indexSql);
+                log("Creating Index (Simple): " + indexSql);
                 try { await conn.execute(indexSql); } catch (e) { log("Index Error: " + e.message); }
             }
         }
 
         // 3. Grants
         for (const user of grants) {
-            const grantSql = `GRANT ALL ON "${tableName}" TO "${user.toUpperCase()}"`;
-            log("Granting: " + grantSql);
-            try { await conn.execute(grantSql); } catch (e) { log("Grant Error: " + e.message); }
+            // Support Raw SQL
+            if (typeof user === 'string' && user.trim().toUpperCase().startsWith('GRANT')) {
+                log("Granting (Raw): " + user);
+                try { await conn.execute(user); } catch (e) { log("Grant Error: " + e.message); }
+            }
+            // Legacy: user is just a username
+            else {
+                const grantSql = `GRANT ALL ON "${tableName}" TO "${user.toUpperCase()}"`;
+                log("Granting (Simple): " + grantSql);
+                try { await conn.execute(grantSql); } catch (e) { log("Grant Error: " + e.message); }
+            }
         }
 
         log("Table created successfully");
@@ -247,8 +326,6 @@ async function insertData(tableName, columns, data) {
 
         if (result.batchErrors && result.batchErrors.length > 0) {
             log("Batch Errors: " + JSON.stringify(result.batchErrors));
-            // We could throw here, but partial success might be better. 
-            // Let's log it.
         } else {
             log(`Inserted ${result.rowsAffected} rows.`);
         }
@@ -262,21 +339,8 @@ async function insertData(tableName, columns, data) {
     }
 }
 
-module.exports = {
-    checkConnection,
-    getTables,
-    getColumns,
-    executeQuery,
-    createTable,
-    insertData,
-    checkTableExists,
-    dropTable,
-    getStream
-};
-
 async function getStream(sql, params = []) {
     const conn = await getConnection();
-    // Return both stream and connection so caller can manage lifecycle
     return {
         stream: conn.queryStream(sql, params),
         connection: conn
@@ -287,7 +351,6 @@ async function checkTableExists(tableName) {
     let conn;
     try {
         conn = await getConnection();
-        // Check if table exists for the current user
         const result = await conn.execute(
             `SELECT count(*) FROM user_tables WHERE table_name = :tableName`,
             [tableName.toUpperCase()]
@@ -305,7 +368,6 @@ async function dropTable(tableName) {
         await conn.execute(`DROP TABLE "${tableName.toUpperCase()}"`);
         log(`Table ${tableName} dropped.`);
     } catch (err) {
-        // Ignore if table doesn't exist (ORA-00942)
         if (err.errorNum !== 942) {
             throw err;
         }
@@ -313,3 +375,17 @@ async function dropTable(tableName) {
         if (conn) await conn.close();
     }
 }
+
+module.exports = {
+    checkConnection,
+    getTables,
+    getColumns,
+    executeQuery,
+    createTable,
+    insertData,
+    checkTableExists,
+    dropTable,
+    getStream,
+    findObjects,
+    oracledb // Export/expose the library constants
+};

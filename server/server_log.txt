@@ -520,3 +520,57 @@
 [2025-12-05T19:50:25.477Z] Table created successfully
 [2025-12-05T20:00:58.733Z] Connection successful for user: humaster
 [2025-12-05T21:18:12.115Z] Connection successful for user: humaster
+[2025-12-06T16:28:32.785Z] Connection successful for user: humaster
+[2025-12-06T16:33:46.295Z] Connection successful for user: humaster
+[2025-12-06T16:37:55.609Z] Connection successful for user: c_stenio
+[2025-12-06T17:00:11.110Z] Connection successful for user: humaster
+[2025-12-06T17:12:46.716Z] Connection successful for user: c_stenio
+[2025-12-06T17:28:52.231Z] Connection successful for user: c_stenio
+[2025-12-06T17:28:52.326Z] Connection successful for user: c_stenio
+[2025-12-06T17:33:57.614Z] Connection successful for user: humaster
+[2025-12-06T17:34:00.730Z] Connection successful for user: humaster
+[2025-12-06T18:07:07.014Z] Connection successful for user: humaster
+[2025-12-06T18:23:52.987Z] Connection successful for user: humaster
+[2025-12-06T18:31:52.092Z] Connection successful for user: humaster
+[2025-12-06T19:00:22.050Z] Connection successful for user: humaster
+[2025-12-06T19:18:37.032Z] Connection successful for user: humaster
+[2025-12-06T19:21:01.949Z] Connection successful for user: humaster
+[2025-12-06T19:23:18.919Z] Connection successful for user: humaster
+[2025-12-06T19:30:00.619Z] Connection successful for user: humaster
+[2025-12-06T19:38:48.265Z] Connection successful for user: humaster
+[2025-12-06T19:45:40.417Z] Connection successful for user: humaster
+[2025-12-06T19:56:34.833Z] Connection successful for user: humaster
+[2025-12-06T20:00:30.408Z] Executing Create Table: CREATE TABLE "TT_JEFFERSON_TESTE" ("NM_NOME" VARCHAR2(100), "DT_NASCIMENTO" DATE, "FL_SEXO" VARCHAR2(1))
+[2025-12-06T20:00:30.556Z] Table created successfully
+[2025-12-06T20:06:28.594Z] Connection successful for user: humaster
+[2025-12-06T20:08:43.386Z] Executing Create Table: CREATE TABLE "TT_JEFFERSON_IA" ("NM_NOME" VARCHAR2(100), "DT_NASCIMENTO" DATE, "FL_SEXO" VARCHAR2(1), "VL_VALOR" VARCHAR2(10))
+[2025-12-06T20:08:43.534Z] Table created successfully
+[2025-12-06T20:10:57.674Z] Connection successful for user: humaster
+[2025-12-06T20:15:55.173Z] Connection successful for user: humaster
+[2025-12-06T20:20:00.499Z] Connection successful for user: humaster
+[2025-12-06T20:27:53.986Z] Connection failed: ORA-12541: TNS:no listener
+[2025-12-06T20:27:57.349Z] Connection successful for user: humaster
+[2025-12-06T20:36:00.823Z] Connection successful for user: humaster
+[2025-12-06T20:46:52.698Z] Connection successful for user: humaster
+[2025-12-06T20:50:34.247Z] Connection successful for user: humaster
+[2025-12-06T21:01:09.621Z] Connection successful for user: humaster
+[2025-12-06T21:03:35.554Z] Connection successful for user: humaster
+[2025-12-06T21:04:37.021Z] Connection successful for user: humaster
+[2025-12-06T21:06:01.819Z] Connection successful for user: humaster
+[2025-12-06T21:08:41.189Z] Connection successful for user: humaster
+[2025-12-06T21:12:05.602Z] Connection successful for user: humaster
+[2025-12-06T21:19:22.456Z] Connection failed: ORA-12541: TNS:no listener
+[2025-12-06T21:19:27.096Z] Connection successful for user: humaster
+[2025-12-06T21:24:20.067Z] Connection successful for user: humaster
+[2025-12-06T21:26:47.258Z] Connection successful for user: humaster
+[2025-12-06T21:28:24.005Z] Connection successful for user: humaster
+[2025-12-06T21:30:16.759Z] Connection successful for user: humaster
+[2025-12-06T21:35:21.589Z] Connection successful for user: humaster
+[2025-12-06T21:37:03.036Z] Connection successful for user: humaster
+[2025-12-06T21:39:03.587Z] Connection successful for user: humaster
+[2025-12-06T21:46:58.558Z] Connection successful for user: humaster
+[2025-12-06T21:57:41.549Z] Connection successful for user: humaster
+[2025-12-06T22:07:05.887Z] Connection successful for user: humaster
+[2025-12-06T22:10:39.492Z] Connection successful for user: humaster
+[2025-12-06T22:17:57.537Z] Connection successful for user: humaster
+[2025-12-06T22:19:41.063Z] Connection successful for user: humaster

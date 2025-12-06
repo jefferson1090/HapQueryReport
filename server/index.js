@@ -5,6 +5,7 @@ const cors = require('cors');
 const oracledb = require('oracledb');
 const db = require('./db');
 const aiService = require('./services/aiService');
+const learningService = require('./services/learningService');
 const multer = require('multer');
 // const path = require('path'); // Already imported at top
 const os = require('os');
@@ -55,7 +56,18 @@ if (process.versions.electron || process.env.ELECTRON_RUN_AS_NODE) {
 console.log(`Using uploads directory: ${uploadsDir}`);
 
 if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+  try {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  } catch (err) {
+    console.error(`Failed to create uploads dir at ${uploadsDir}: ${err.message}`);
+    debugLog(`Failed to create uploads dir at ${uploadsDir}: ${err.message}`);
+    // Fallback to temp
+    uploadsDir = path.join(os.tmpdir(), 'hap-query-report-uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (e) { /* give up */ }
+    }
+    console.log(`Falling back to uploads directory: ${uploadsDir}`);
+  }
 }
 
 // Serve uploads statically
@@ -194,7 +206,7 @@ app.post('/api/ai/create-table-confirm', async (req, res) => {
     if (!tableName || !columns) throw new Error("Dados incompletos.");
 
     await db.createTable(tableName, columns, indices, grants);
-    res.json({ success: true });
+    res.json({ success: true, tableName });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -729,6 +741,25 @@ function suggestTableName(filename) {
   return name.substring(0, 30);
 }
 
+// 9. AI Learning Endpoints
+app.get('/api/ai/suggestions', (req, res) => {
+  try {
+    const suggestions = learningService.getSuggestions();
+    res.json(suggestions);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ai/skills', (req, res) => {
+  try {
+    const skills = learningService.getSkills();
+    res.json(skills);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Serve static files from the public directory
 app.use(express.static(path.join(rootDir, 'public')));
 
@@ -737,6 +768,6 @@ app.get(/.*/, (req, res) => {
   res.sendFile(path.join(rootDir, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });

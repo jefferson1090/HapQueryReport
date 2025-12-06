@@ -5,6 +5,7 @@ import AiBuilder from './components/AiBuilder';
 import SqlRunner from './components/SqlRunner';
 import CsvImporter from './components/CsvImporter';
 import Reminders from './components/Reminders';
+import ErrorBoundary from './components/ErrorBoundary';
 import hapLogo from './assets/hap_logo_v4.png';
 
 // --- Theme Context & Definitions ---
@@ -60,7 +61,7 @@ function App() {
 
     useEffect(() => {
         // v1.2.0 - UI Modernization
-        document.title = "Hap Query Report v1.2.0";
+        document.title = "Hap Query Report v1.12.17";
         if (window.electronAPI) {
             window.electronAPI.onUpdateAvailable(() => setUpdateAvailable(true));
             window.electronAPI.onUpdateDownloaded(() => {
@@ -218,7 +219,9 @@ function App() {
                         <div className="max-w-7xl mx-auto h-full flex flex-col relative">
                             {/* Content Wrappers (Preserving State) */}
                             <div className={activeTab === 'query-builder' ? 'block h-full' : 'hidden'}>
-                                <AiBuilder isVisible={activeTab === 'query-builder'} />
+                                <ErrorBoundary>
+                                    <AiBuilder isVisible={activeTab === 'query-builder'} />
+                                </ErrorBoundary>
                             </div>
                             <div className={activeTab === 'sql-runner' ? 'block h-full' : 'hidden'}>
                                 <SqlRunner

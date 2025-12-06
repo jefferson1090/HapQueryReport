@@ -1,4 +1,4 @@
-$version = "1.1.26"
+$version = "1.12.17"
 $sourceExe = "C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\Hap Query Report Setup $version.exe"
 $destDir = "C:\Users\jeffe\Downloads\Projeto Desktop Qiuery"
 $sourceCodeDir = "C:\Users\jeffe\Downloads\Projeto Desktop Qiuery\Codigo Fonte"
