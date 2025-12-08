@@ -13,6 +13,10 @@ const upload = multer({ dest: path.join(os.tmpdir(), 'oracle-lowcode-uploads') }
 const fs = require('fs');
 const csv = require('csv-parser');
 
+// Docs Module Imports
+const docService = require('./services/localDocService');
+// const setupDocs = require('./scripts/setupDocs'); // Deprecated for Local Storage
+
 const debugLogPath = path.join(os.tmpdir(), 'hap_debug.log');
 function debugLog(msg) {
   try {
@@ -124,11 +128,30 @@ try {
   debugLog(err.message);
   console.error('Whoops, you need the Oracle Instant Client installed!');
   console.error(err);
+  debugLog('Whoops, you need the Oracle Instant Client installed!');
+  debugLog(err.message);
+  console.error('Whoops, you need the Oracle Instant Client installed!');
+  console.error(err);
 }
 
-// Routes
-
-// 1. Connection Test
+// --- Serve Static Frontend ---
+// In production/packaged mode, serve the React app from 'client/dist'
+const clientDistPath = path.join(__dirname, '..', 'client', 'dist');
+if (fs.existsSync(clientDistPath)) {
+  console.log(`Serving static files from: ${clientDistPath}`);
+  app.use(express.static(clientDistPath));
+  // SPA Fallback
+  // SPA Fallback
+  app.get(/.*/, (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+      return next();
+    }
+    res.sendFile(path.join(clientDistPath, 'index.html'));
+  });
+} else {
+  console.log(`Client dist not found at: ${clientDistPath}. Assuming Dev Mode.`);
+}
+// -----------------------------
 app.post('/api/connect', async (req, res) => {
   const { user, password, connectString } = req.body;
   try {
@@ -214,8 +237,8 @@ app.post('/api/ai/create-table-confirm', async (req, res) => {
 
 app.post('/api/ai/chat', async (req, res) => {
   try {
-    const { message, mode } = req.body;
-    const result = await aiService.processMessage(message, mode);
+    const { message, mode, history } = req.body;
+    const result = await aiService.processMessage(message, mode, history);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -760,6 +783,104 @@ app.get('/api/ai/skills', (req, res) => {
   }
 });
 
+// --- DOCS MODULE ROUTES ---
+
+// Init DB - Explicit Init now used via /api/docs/init
+// setupDocs().catch(console.error);
+
+// Docs Module Routes
+app.get('/api/docs/status', async (req, res) => {
+  try {
+    const status = await setupDocs.checkStatus();
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/docs/init', async (req, res) => {
+  try {
+    const result = await setupDocs.initializeDatabase();
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/docs/books', async (req, res) => {
+  try {
+    const books = await docService.listBooks();
+    res.json(books);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/docs/books', async (req, res) => {
+  try {
+    const { title, description } = req.body;
+    const id = await docService.createBook(title, description);
+    res.json({ id, message: 'Book created' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/docs/books/:id/tree', async (req, res) => {
+  try {
+    const tree = await docService.getBookTree(req.params.id);
+    res.json(tree);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/docs/nodes/:id', async (req, res) => {
+  try {
+    const node = await docService.getNode(req.params.id);
+    // Handle CLOB if needed (oracledb usually converts to string automatically for fetches if small enough)
+    res.json(node);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/docs/ai/process', async (req, res) => {
+  try {
+    const { text, instruction, context } = req.body;
+    // We reuse the existing aiService, but maybe need a specific method?
+    // Let's us aiService.processMessage but frame it as a request.
+    // Or better, a direct call to the LLM if aiService exposes it. 
+    // Checking aiService.js first would be good, but assuming processMessage handles general prompts:
+
+    const prompt = `
+    Context: the user is writing a document about "${context || 'General Topic'}".
+    Selected Text: "${text}".
+    Instruction: ${instruction} (e.g. summarize, expand, fix grammar).
+    
+    Please provide ONLY the result text to replace or append.
+    `;
+
+    const result = await aiService.processMessage(prompt, 'chat');
+    // The aiService might return a JSON structure { text: ... } or just a string depending on implementation.
+    // Assuming it returns { text: "response" } based on previous usage.
+
+    res.json({ text: result.text || result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/docs/nodes', async (req, res) => {
+  try {
+    const { bookId, parentId, title, type } = req.body;
+    const id = await docService.createNode(bookId, parentId, title, type);
+    res.json({ id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/docs/nodes/:id', async (req, res) => {
+  try {
+    const { content, title } = req.body;
+    await docService.updateNodeContent(req.params.id, content, title);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Serve static files from the public directory
 app.use(express.static(path.join(rootDir, 'public')));
 
@@ -768,6 +889,7 @@ app.get(/.*/, (req, res) => {
   res.sendFile(path.join(rootDir, 'public', 'index.html'));
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+// Start Server
+app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

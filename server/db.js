@@ -147,21 +147,48 @@ async function getColumns(tableNameInput) {
 
         conn = await getConnection();
 
-        // 1. Try to get View Definition first (if it's a view)
-        // We can check if it's a view by querying ALL_VIEWS
+        // 1. Try to get View Definition
+        // Improved Logic: If owner is provided, check directly. If not, or if failed, try to find the view globally (in ALL_VIEWS).
         let viewText = null;
         try {
-            // Only check if it's a view if we are looking for structure
+            // A. Direct check
+            let viewSql = `SELECT TEXT FROM ALL_VIEWS WHERE UPPER(VIEW_NAME) = UPPER(:tableName)`;
+            const viewParams = { tableName };
+
+            if (owner && owner !== connectionParams.user.toUpperCase()) {
+                viewSql += ` AND UPPER(OWNER) = UPPER(:owner)`;
+                viewParams.owner = owner;
+            } else {
+                // Optimization: Prefer current user, but if not found, we might search others? 
+                // Actually, if no owner specified, it might be a public synonym or another schema.
+                // Let's first try exact match if we can. 
+            }
+
+            // Let's just try to find ANY view with this name accessible to us.
+            // If we have an owner, enforce it.
+            let finalViewSql = `SELECT TEXT FROM ALL_VIEWS WHERE UPPER(VIEW_NAME) = UPPER(:tableName)`;
+            let finalViewParams = { tableName };
+
+            if (owner) {
+                finalViewSql += ` AND UPPER(OWNER) = UPPER(:owner)`;
+                finalViewParams.owner = owner;
+            }
+
+            // Fetch
             const viewResult = await conn.execute(
-                `SELECT TEXT FROM ALL_VIEWS WHERE UPPER(OWNER) = UPPER(:owner) AND UPPER(VIEW_NAME) = UPPER(:tableName)`,
-                [owner, tableName],
-                { fetchInfo: { TEXT: { type: oracledb.STRING } } } // Long columns need specific fetch info
+                finalViewSql + " FETCH NEXT 1 ROWS ONLY",
+                finalViewParams,
+                { fetchInfo: { TEXT: { type: oracledb.STRING } } }
             );
+
             if (viewResult.rows.length > 0) {
                 viewText = viewResult.rows[0][0];
+            } else if (!owner) {
+                // Return Null, handled later.
             }
         } catch (e) {
             // Ignore view check errors
+            console.error("View check error", e);
         }
 
         const result = await conn.execute(
@@ -211,6 +238,18 @@ async function executeQuery(sql, params = [], limit = 1000, extraOptions = {}) {
             metaData: result.metaData,
             rows: result.rows
         };
+    } finally {
+        if (conn) await conn.close();
+    }
+}
+
+async function execute(sql, params = [], options = {}) {
+    let conn;
+    try {
+        conn = await getConnection();
+        // Default autoCommit to true if not specified, since global might be set but good to be explicit
+        const execOptions = { autoCommit: true, ...options };
+        return await conn.execute(sql, params, execOptions);
     } finally {
         if (conn) await conn.close();
     }
@@ -386,6 +425,8 @@ module.exports = {
     checkTableExists,
     dropTable,
     getStream,
-    findObjects,
-    oracledb // Export/expose the library constants
+    getConnection,
+    execute,
+    oracledb,
+    findObjects
 };

@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { ThemeContext } from '../context/ThemeContext';
+import ReactMarkdown from 'react-markdown';
+import RemarkGfm from 'remark-gfm';
+import ColumnSelection from './ColumnSelection';
 
 const AiBuilder = ({ isVisible }) => {
     const { theme } = useContext(ThemeContext);
@@ -295,9 +298,16 @@ const AiBuilder = ({ isVisible }) => {
                     </div>
                 )}
                 {viewData?.viewDefinition && (
-                    <div className="p-4 bg-gray-900 text-gray-100 text-xs font-mono border-b border-gray-700 overflow-x-auto">
-                        <div className="mb-2 text-gray-400 uppercase font-bold">Definição SQL (View):</div>
-                        <pre>{viewData.viewDefinition}</pre>
+                    <div className="bg-slate-900 mx-6 mt-6 rounded-xl overflow-hidden shadow-2xl border border-slate-700">
+                        <div className="bg-slate-800 px-6 py-3 border-b border-slate-700 flex justify-between items-center">
+                            <h3 className="font-mono text-base font-bold text-emerald-400 tracking-wide">Definição SQL (View)</h3>
+                            <span className="text-xs text-white bg-slate-700 px-2 py-1 rounded font-bold uppercase tracking-wider">READ-ONLY</span>
+                        </div>
+                        <div className="p-6 overflow-x-auto bg-[#0f111a]">
+                            <pre className="font-mono text-base text-cyan-300 whitespace-pre-wrap leading-relaxed shadow-none">
+                                {viewData.viewDefinition}
+                            </pre>
+                        </div>
                     </div>
                 )}
                 <table className="min-w-full divide-y divide-gray-200">
@@ -568,6 +578,8 @@ const AiBuilder = ({ isVisible }) => {
         );
     };
 
+
+
     return (
         <div className={`flex h-full ${theme.bg} overflow-hidden font-sans`}>
 
@@ -642,19 +654,34 @@ const AiBuilder = ({ isVisible }) => {
                                 ? 'bg-blue-600 text-white rounded-br-none'
                                 : (msg.isSystem ? 'bg-indigo-50 text-indigo-900 border border-indigo-100' : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none')
                                 }`}>
-                                {(() => {
-                                    const parts = msg.text.split(/```/);
-                                    return parts.map((part, i) => {
-                                        if (i % 2 === 1) {
-                                            let codeContent = part.trim();
-                                            const firstLineBreak = codeContent.indexOf('\n');
-                                            if (firstLineBreak > -1 && firstLineBreak < 10) codeContent = codeContent.substring(firstLineBreak + 1);
-                                            return <pre key={i} className="bg-gray-800 text-gray-100 p-3 rounded-lg my-2 text-xs font-mono overflow-x-auto border border-gray-700 shadow-inner"><code>{codeContent}</code></pre>;
-                                        } else {
-                                            return <span key={i} className="whitespace-pre-wrap leading-relaxed">{part}</span>;
-                                        }
-                                    });
-                                })()}
+                                {msg.sender === 'ai' ? (
+                                    <ReactMarkdown
+                                        remarkPlugins={[RemarkGfm]}
+                                        components={{
+                                            code({ node, inline, className, children, ...props }) {
+                                                const match = /language-(\w+)/.exec(className || '')
+                                                return !inline ? (
+                                                    <pre className="bg-gray-800 text-gray-100 p-3 rounded-lg my-2 text-xs font-mono overflow-x-auto border border-gray-700 shadow-inner">
+                                                        <code className={className} {...props}>
+                                                            {children}
+                                                        </code>
+                                                    </pre>
+                                                ) : (
+                                                    <code className="bg-gray-100 px-1 py-0.5 rounded text-red-500 font-mono text-xs" {...props}>
+                                                        {children}
+                                                    </code>
+                                                )
+                                            },
+                                            p({ children }) {
+                                                return <div className="mb-2 whitespace-pre-wrap leading-relaxed">{children}</div>
+                                            }
+                                        }}
+                                    >
+                                        {msg.text}
+                                    </ReactMarkdown>
+                                ) : (
+                                    <div className="whitespace-pre-wrap leading-relaxed">{msg.text}</div>
+                                )}
                             </div>
                         </div>
                     ))}
@@ -771,7 +798,13 @@ const AiBuilder = ({ isVisible }) => {
                     {activeView === 'draft_view' && renderDraftView()}
                     {activeView === 'table_results' && viewData && renderTableList()}
                     {activeView === 'schema_view' && viewData && renderSchemaView()}
-                    {activeView === 'column_selection' && viewData && renderColumnSelection()}
+                    {activeView === 'column_selection' && viewData && (
+                        <ColumnSelection
+                            viewData={viewData}
+                            onSearch={handleSend}
+                            onCancel={() => { setActiveView('welcome'); setViewData(null); }}
+                        />
+                    )}
                     {activeView === 'data_view' && viewData && renderDataView()}
 
                 </div>

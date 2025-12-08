@@ -1,6 +1,6 @@
 {
   "name": "server",
-  "version": "1.12.17",
+  "version": "1.15.19",
   "main": "electron-main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -30,7 +30,7 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "public/hap_logo_v4.png"
+      "icon": "icon.png"
     },
     "nsis": {
       "oneClick": false,
@@ -50,6 +50,7 @@
     "dotenv": "^17.2.3",
     "electron-updater": "^6.6.2",
     "express": "^5.1.0",
+    "groq-sdk": "^0.37.0",
     "json2csv": "^6.0.0-alpha.2",
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",

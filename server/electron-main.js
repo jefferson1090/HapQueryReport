@@ -15,7 +15,7 @@ function createWindow() {
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js')
         },
-        icon: path.join(__dirname, 'public', 'hap_logo_v4.png')
+        icon: path.join(__dirname, 'icon.png')
     });
 
     // Load the local server

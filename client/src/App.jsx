@@ -4,6 +4,7 @@ import QueryBuilder from './components/QueryBuilder'; // Legacy
 import AiBuilder from './components/AiBuilder';
 import SqlRunner from './components/SqlRunner';
 import CsvImporter from './components/CsvImporter';
+import DocsModule from './components/DocsModule';
 import Reminders from './components/Reminders';
 import ErrorBoundary from './components/ErrorBoundary';
 import hapLogo from './assets/hap_logo_v4.png';
@@ -60,8 +61,8 @@ function App() {
     const [updateDownloaded, setUpdateDownloaded] = useState(false);
 
     useEffect(() => {
-        // v1.2.0 - UI Modernization
-        document.title = "Hap Query Report v1.12.17";
+        // v1.15.17 - Chat Safety Update
+        document.title = "Hap Assistente de Dados v1.15.19";
         if (window.electronAPI) {
             window.electronAPI.onUpdateAvailable(() => setUpdateAvailable(true));
             window.electronAPI.onUpdateDownloaded(() => {
@@ -173,6 +174,7 @@ function App() {
                         <NavTab id="sql-runner" icon="💻" label="Editor SQL" />
                         <NavTab id="csv-importer" icon="📂" label="Importar CSV" />
                         <NavTab id="reminders" icon="🔔" label="Lembretes" />
+                        <NavTab id="docs" icon="📚" label="Docs" />
                     </div>
 
                     {/* Right: User & Actions */}
@@ -215,15 +217,15 @@ function App() {
 
                 {/* Main Content Area */}
                 <main className="flex-1 overflow-hidden relative">
-                    <div className="absolute inset-0 overflow-auto p-4 sm:p-6">
-                        <div className="max-w-7xl mx-auto h-full flex flex-col relative">
+                    <div className="absolute inset-0 overflow-auto p-0"> {/* Removed padding for full width docs */}
+                        <div className="h-full flex flex-col relative w-full">
                             {/* Content Wrappers (Preserving State) */}
-                            <div className={activeTab === 'query-builder' ? 'block h-full' : 'hidden'}>
+                            <div className={`${activeTab === 'query-builder' ? 'block h-full' : 'hidden'} p-4 sm:p-6 max-w-7xl mx-auto w-full`}>
                                 <ErrorBoundary>
                                     <AiBuilder isVisible={activeTab === 'query-builder'} />
                                 </ErrorBoundary>
                             </div>
-                            <div className={activeTab === 'sql-runner' ? 'block h-full' : 'hidden'}>
+                            <div className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} p-4 sm:p-6 max-w-7xl mx-auto w-full`}>
                                 <SqlRunner
                                     isVisible={activeTab === 'sql-runner'}
                                     tabs={sqlTabs}
@@ -234,16 +236,20 @@ function App() {
                                     setSavedQueries={setSavedSqlQueries}
                                 />
                             </div>
-                            <div className={activeTab === 'csv-importer' ? 'block h-full' : 'hidden'}>
+                            <div className={`${activeTab === 'csv-importer' ? 'block h-full' : 'hidden'} p-4 sm:p-6 max-w-7xl mx-auto w-full`}>
                                 <CsvImporter isVisible={activeTab === 'csv-importer'} connectionName={connection?.connectionName || connection?.user || 'Desconhecido'} />
                             </div>
-                            <div className={activeTab === 'reminders' ? 'block h-full' : 'hidden'}>
+                            <div className={`${activeTab === 'reminders' ? 'block h-full' : 'hidden'} p-4 sm:p-6 max-w-7xl mx-auto w-full`}>
                                 <Reminders isVisible={activeTab === 'reminders'} />
+                            </div>
+                            <div className={activeTab === 'docs' ? 'block h-full' : 'hidden'}>
+                                <ErrorBoundary>
+                                    <DocsModule />
+                                </ErrorBoundary>
                             </div>
                         </div>
                     </div>
                 </main>
-
             </div>
         </ThemeContext.Provider >
     );

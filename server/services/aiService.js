@@ -1,31 +1,29 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const Groq = require("groq-sdk");
 const db = require('../db');
 const learningService = require('./learningService');
 
 class AiService {
 
     constructor() {
-        this.apiKey = process.env.GEMINI_API_KEY;
-        this.genAI = null;
-        this.model = null;
+        this.apiKey = process.env.GROQ_API_KEY;
+        this.groq = null;
+        this.modelName = process.env.AI_MODEL || "llama-3.3-70b-versatile";
 
         if (this.apiKey) {
-            this.genAI = new GoogleGenerativeAI(this.apiKey);
-            const modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
-            this.model = this.genAI.getGenerativeModel({ model: modelName });
+            this.groq = new Groq({ apiKey: this.apiKey });
         } else {
-            console.warn("GEMINI_API_KEY not found. AI features disabled.");
+            console.warn("GROQ_API_KEY not found. AI features disabled.");
         }
 
         // Regex Patterns for Local Mode
         this.localIntents = [
             {
-                // FIND TABLES (Refined to support "Localizar tabelas que contenham: ...")
+                // FIND TABLES
                 regex: /(?:busque|encontre|listar|mostre|quais|onde ficam|procurar|pesquisar|localizar)(?:\s+as)?(?:\s+tabelas?)?(?:\s+(?:de|do|da|dos|das|por|que contenham:?))?\s+(.+)/i,
                 action: 'list_tables'
             },
             {
-                // DESCRIBE TABLE (Direct Schema.Table support added)
+                // DESCRIBE TABLE (Schema.Table)
                 regex: /^(?:estrutura|descreva|schema|colunas|detalhes)?\s*(?:d[aeo]\s+)?(?:tabela\s+)?([a-zA-Z0-9_$#]+\.[a-zA-Z0-9_$#]+)$/i,
                 action: 'describe_table'
             },
@@ -45,25 +43,26 @@ class AiService {
                 action: 'list_triggers'
             },
             {
-                // DRAFT TABLE (Structured Input: Name; Cols; Indices; Grants)
+                // DRAFT TABLE
                 regex: /^([a-zA-Z0-9_\.$#\s]+)\s*;\s*(.+?)(?:\s*;\s*(.*))?$/i,
                 action: 'draft_table'
             },
             {
-                // CREATE TABLE SQL GENERATION (Legacy/Fallback)
+                // CREATE TABLE SQL
                 regex: /(?:criar|nova|create)\s+tabela\s+([a-zA-Z0-9_$#]+)\s+(?:com|with)\s+(.+)/i,
                 action: 'create_table_sql'
             }
         ];
-        // State for Multi-turn Conversations (e.g. Confirmations)
+
+        // State for Multi-turn Conversations
         this.conversationState = {
-            status: 'IDLE', // IDLE, AWAITING_CONFIRMATION
-            payload: null   // Data for the pending action
+            status: 'IDLE',
+            payload: null
         };
     }
 
-    async processMessage(message, mode = 'ai') {
-        if (mode === 'ai' && !this.model) {
+    async processMessage(message, mode = 'ai', history = []) {
+        if (mode === 'ai' && !this.groq) {
             return {
                 text: "⚠️ API Key não configurada. Alternando para modo Local.",
                 action: 'switch_mode',
@@ -75,11 +74,9 @@ class AiService {
         if (this.conversationState.status === 'AWAITING_CONFIRMATION') {
             const lowerMsg = message.trim().toLowerCase();
             if (['sim', 'yes', 's', 'y', 'confirmar', 'ok'].includes(lowerMsg)) {
-                // EXECUTE PENDING ACTION
                 const pendingData = this.conversationState.payload;
-                this.conversationState = { status: 'IDLE', payload: null }; // Reset
+                this.conversationState = { status: 'IDLE', payload: null };
 
-                // For drop_table, we need to execute it now
                 if (pendingData.action === 'drop_table') {
                     return await this.executeAction({
                         action: 'drop_table',
@@ -87,8 +84,7 @@ class AiService {
                     });
                 }
             } else {
-                // CANCEL
-                this.conversationState = { status: 'IDLE', payload: null }; // Reset
+                this.conversationState = { status: 'IDLE', payload: null };
                 return {
                     text: "🆗 Ação cancelada. O que gostaria de fazer agora?",
                     action: "text_response"
@@ -100,12 +96,11 @@ class AiService {
         if (mode === 'local') {
             result = await this.processWithRegex(message);
         } else {
-            result = await this.processWithGemini(message);
+            result = await this.processWithGroq(message, history);
         }
 
         // --- 2. INTERCEPT DANGEROUS ACTIONS ---
         if (result.action === 'drop_table') {
-            // Check safety again (redundant but good)
             const tableName = result.data.tableName.toUpperCase();
             if (!tableName.startsWith('TT_')) {
                 return {
@@ -114,7 +109,6 @@ class AiService {
                 };
             }
 
-            // Set State and Ask Confirmation
             this.conversationState = {
                 status: 'AWAITING_CONFIRMATION',
                 payload: result
@@ -125,8 +119,7 @@ class AiService {
             };
         }
 
-        // LEARN: If action was successful (not null/chat only), log it
-        if (result.action && result.action !== 'chat' && result.action !== 'quota_exceeded' && result.action !== 'text_response') {
+        if (result.action && result.action !== 'chat' && result.action !== 'text_response') {
             learningService.logInteraction(result.action, message, true);
         }
 
@@ -134,7 +127,7 @@ class AiService {
     }
 
     async processWithRegex(message) {
-        const cleanMsg = message.trim().replace(/[\[\]]/g, ''); // SANITIZE: Remove brackets [ ] from input
+        const cleanMsg = message.trim().replace(/[\[\]]/g, '');
 
         for (const intent of this.localIntents) {
             const match = cleanMsg.match(intent.regex);
@@ -172,10 +165,8 @@ class AiService {
                 if (intent.action === 'draft_table') {
                     let tableName = match[1].trim();
                     tableName = tableName.replace(/\s+/g, '_');
-
                     const columnsRaw = match[2] ? match[2].split(',') : [];
                     const restRaw = match[3] ? match[3].split(';') : [];
-
                     const indicesRaw = restRaw[0] ? restRaw[0].split(',') : [];
                     const grantsRaw = restRaw[1] ? restRaw[1].split(',') : [];
 
@@ -186,12 +177,9 @@ class AiService {
                         return { name, type };
                     }).filter(c => c.name);
 
-                    const indices = indicesRaw.map(i => i.trim()).filter(i => i);
-                    const grants = grantsRaw.map(g => g.trim()).filter(g => g);
-
                     return await this.executeAction({
                         action: 'draft_table',
-                        data: { tableName, columns, indices, grants },
+                        data: { tableName, columns, indices: indicesRaw, grants: grantsRaw },
                         text: `[Modo Rascunho] Preparando tabela **${tableName}**...`
                     });
                 }
@@ -209,12 +197,12 @@ class AiService {
         }
 
         return {
-            text: "🤖 [Modo Local] Não entendi. Tente usar formatos padrão como 'Buscar tabelas de X' ou 'Estrutura da Tabela Y'.",
+            text: "🤖 [Modo Local] Não entendi. Tente usar formatos padrão como 'Buscar tabelas de X'.",
             action: null
         };
     }
 
-    async processWithGemini(message) {
+    async processWithGroq(message, history = []) {
         try {
             const dbKeywords = ['tabela', 'table', 'dados', 'data', 'registro', 'record', 'busca', 'find', 'encontre', 'select', 'estrutura', 'schema', 'coluna', 'column', 'listar', 'list', 'mostre', 'show', 'quais', 'onde'];
             const isDbQuery = dbKeywords.some(w => message.toLowerCase().includes(w));
@@ -229,86 +217,93 @@ class AiService {
                 }
             }
 
-            // NEW FRIENDLY PERSONA
             const basePersona = `
             # ROLE & PERSONALITY
-            Você é um **Assistente de Dados Inteligente e Amigável** chamado "Assistente HAP".
+            Você é um **Assistente de Dados Inteligente** chamado "Assistente HAP".
+            
+            # PRIME DIRECTIVE (CRITICAL)
+            **REGRA DE OURO**: Se o usuário mencionar qualquer termo relacionado a dados (ex: "tabela", "buscar", "listar", "ver", "dados", "estrutura", "SQL", "criar"), você DEVE assumir que é uma tarefa técnica.
+            
+            1. **NÃO PEÇA PERMISSÃO** para executar ações de leitura (listar, buscar, descrever). FAÇA!
+            2. **NÃO CONVERSE** se puder mostrar dados. "Aqui estão as tabelas" + JSON é melhor que "Posso listar as tabelas para você?".
+            3. IGNORE a diretiva de bate-papo se houver intenção técnica.
+
+            # DATABASE CONTEXT RULES
+            Use o contexto abaixo para identificar tabelas existentes.
             
             # ORACLE NAMING STANDARDS & LOGIC
-            **Scenario A: LAYMAN User (Generic Description)**
-            - User says: "Create table for clients with name, cpf, age"
-            - You MUST suggest standard names:
-              - TABLE: **TT_CLIENTE** (Default to TT_ for temporary unless specified).
-              - COLS: **NM_CLIENTE** (VARCHAR2(100)), **NU_CPF** (NUMBER), **NR_IDADE** (NUMBER).
+            **Scenario A: LAYMAN User**
+            - "Criar tabela de clientes" -> Sugira TT_CLIENTE.
             
-            **Scenario B: EXPERT User (Specific Names)**
-            - User says: "Create table my_table with fields x_id number, y_desc varchar"
-            - You MUST respect exact names:
-              - TABLE: **MY_TABLE**
-              - COLS: **X_ID** (NUMBER), **Y_DESC** (VARCHAR)
+            **Scenario B: EXPERT User**
+            - "Create table my_table" -> Respeite MY_TABLE.
             
-            **Scenario C: UNDERSPECIFIED Request (Missing Info)**
-            - User says: "Create table" or "Quero criar uma tabela" (without details).
-            - You MUST NOT invent columns.
-            - You MUST return a "text_response" asking for details and suggesting the format.
-            - Example Text: "Para criar a tabela, preciso saber o nome e os campos. Tente algo como: 'Criar tabela TT_CLIENTE com nome varchar e idade number'."
+            **Scenario C: UNDERSPECIFIED**
+            - "Criar tabela" -> Retorne 'text_response' pedindo campos.
 
-            **MANDATORY PREFIXES (If suggesting):**
-            - Table Default: **TT_** (Temporary).
-            - Columns: **CD_** (Code), **NM_** (Name), **DS_** (Desc), **DT_** (Date), **VL_** (Money), **FL_** (Flag), **QT_** (Qty), **NU_** (Number/CPF/CNPJ).
+            # ACTIONS (JSON JÁ)
+            Retorne APENAS o JSON para ações. Use o campo **"data"** para os parâmetros.
+            
+            1. **"list_tables"**: Se usuário disser "listar tabelas", "ver tabelas", "quais tabelas tem".
+               data: { "search_term": "..." (ou vazio) }
+            
+            2. **"describe_table"**: Se usuário disser "estrutura da tabela X", "quais colunas tem na tabela X", "desc table X".
+               data: { "table_name": "X" }
+            
+            3. **"find_record"**: Se usuário disser "buscar cliente X", "quem é o ID 123", "procure por X na tabela Y".
+               data: { "table_name": "Y", "value": "X" }
 
-            **SAFETY & DELETION RULES:**
-            - **CRITICAL**: You MUST REFUSE to delete/drop any table that does NOT start with **TT_**.
-            - If user asks to delete "CLIENTES", reject and explain: "Segurança: Só é permitido excluir tabelas temporárias (iniciadas com TT_)."
-            - If user asks to delete "TT_CLIENTES", proceed (confirming first if needed).
-            - **CRITICAL**: For DELETE/DROP requests, you MUST return the 'drop_table' action IMMEDIATELY. Do NOT ask for confirmation in the 'text' field. The system handles confirmation.
-            
-            # ACTIONS (JSON OBRIGATÓRIO)
-            Responda SEMPRE com JSON.
-            
-            1. "draft_table": Params: { "tableName": "TT_NAME", "columns": [{ "name": "CD_ID", "type": "NUMBER" }, ...] }
-            2. "list_tables": Params: { "search_term": "..." }
-            3. "describe_table": Params: { "table_name": "..." }
-            4. "find_record": Params: { "table_name": "...", "value": "...", "column_name": "..." (Opcional) }
-            5. "drop_table": Params: { "tableName": "..." } (Para solicitações de exclusão/delete)
-            6. "run_sql": Params: { "sql": "..." } (Para qualquer outro comando SQL: TRUNCATE, GRANT, ALTER, etc.)
-            7. "text_response": Params: { "message": "..." } (Para dúvidas ou falta de info)
-            
-            Exemplo "Leigo":
-            User: "Tabela de vendas com valor e data"
-            JSON: {
-               "action": "draft_table",
-               "text": "Sugeri uma estrutura padrão para vendas.",
-               "data": { "tableName": "TT_VENDA", "columns": [ { "name": "CD_VENDA", "type": "NUMBER" }, { "name": "VL_VENDA", "type": "NUMBER(15,2)" }, { "name": "DT_VENDA", "type": "DATE" } ] }
-            }
-
-            Exemplo "Falta Info":
-            User: "Crie uma tabela"
-            JSON: {
-               "action": "text_response",
-               "text": "Claro! Qual será o nome e os campos? Exemplo: 'Tabela de Produtos com codigo e preço'."
-            }
+            4. **"chat"**: APENAS para saudações ("Oi", "Bom dia") ou perguntas gerais NÃO relacionadas a banco ("Como fazer bolo").
+               **IMPORTANTE**: Coloque a sua resposta no campo **"text"**.
+               Ex: { "action": "chat", "text": "Olá! Como posso ajudar com seus dados hoje?" }
             `;
 
-            const prompt = `
-            ${basePersona}
-            Context: [${tableContext}]
-            User Query: "${message}"
-            `;
+            const systemMessage = {
+                role: "system",
+                content: `${basePersona}\n\nContexto Atual: [${tableContext}]`
+            };
 
-            const result = await this.model.generateContent(prompt);
-            const response = await result.response;
-            let text = response.text();
-            text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+            const historyMessages = history.map(h => ({
+                role: h.sender === 'user' ? 'user' : 'assistant',
+                content: h.text
+            }));
+
+            const completion = await this.groq.chat.completions.create({
+                messages: [systemMessage, ...historyMessages, { role: "user", content: message }],
+                model: this.modelName,
+                temperature: 0.5,
+                max_completion_tokens: 1024,
+                top_p: 1,
+                stop: null,
+                stream: false
+            });
+
+            const content = completion.choices[0]?.message?.content || "";
+
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            let text = "";
+
+            if (jsonMatch) {
+                text = jsonMatch[0];
+            } else {
+                text = content.replace(/```json/g, '').replace(/```/g, '').trim();
+            }
 
             let aiResponse;
             try {
                 aiResponse = JSON.parse(text);
             } catch (e) {
-                return { text: text, action: 'chat' };
+                try {
+                    const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+                    aiResponse = JSON.parse(cleanText);
+                } catch (e2) {
+                    return { text: content, action: 'chat' };
+                }
             }
 
-            // CRITICAL: Return drop_table actions directly to processMessage for interception/confirmation
+            // CRITICAL LOGGING: See exactly what AI returns
+            console.log("🤖 AI RAW RESPONSE:", aiResponse);
+
             if (aiResponse.action === 'drop_table') {
                 return aiResponse;
             }
@@ -316,175 +311,102 @@ class AiService {
             return await this.executeAction(aiResponse);
 
         } catch (err) {
-            console.error("Gemini Error:", err);
+            console.error("Groq Error:", err);
             const msg = err.message || "";
-
-            if (msg.includes('429') || msg.includes('Quota') || msg.includes('Too Many Requests')) {
-                return {
-                    text: "⏳ **Muitas requisições!** O cérebro da IA está superaquecido (limite da API do Google). Aguarde 30s ou tente comandos simples.",
-                    action: null // Action null to just show text
-                };
+            if (msg.includes('429') || msg.includes('Quota')) {
+                return { text: "⏳ **Muitas requisições!** Aguarde um pouco.", action: 'text_response' };
             }
-
-            return { text: "Ops, tive um probleminha para pensar nisso agora: " + msg, action: null };
+            return { text: "Ops, problema técnico: " + msg, action: null };
         }
     }
 
     async executeAction(aiResponse) {
-        const { action, data, text } = aiResponse;
+        let { action, data, text } = aiResponse;
+
+        // PROTOCOL FIX: If 'data' is missing, try 'params' (common hallucination)
+        data = data || aiResponse.params || {};
+
+        if (!text && data) {
+            text = data.text || data.message || data.response || data.answer || data.content;
+        }
 
         try {
             if (action === 'list_tables') {
                 const term = data.search_term ? data.search_term.trim() : '';
-                // SMART SEARCH LOGIC (now centralized here or in db)
                 const objects = await db.findObjects(term);
-
                 if (objects.length === 0) {
-                    return {
-                        text: `Hmm, não encontrei nenhuma tabela ou view com o nome **"${term}"**. Quer tentar outro nome?`,
-                        action: 'chat'
-                    };
+                    return { text: `Hmm, não encontrei nenhuma tabela com **"${term}"**.`, action: 'chat' };
                 }
-
-                // Return simple list for now, or FE can handle the array
                 return {
-                    text: text || `Encontrei estas tabelas para **"${term}"**:`,
+                    text: text || `Encontrei estas tabelas:`,
                     action: 'list_tables',
                     data: objects.map(o => ({ owner: o.owner, name: o.object_name, comments: o.full_name }))
                 };
             }
 
             if (action === 'describe_table') {
-                let tableName = data.table_name.toUpperCase();
-                let columns = await db.getColumns(tableName);
+                let tableName = (data.table_name || data.tableName || "").toUpperCase();
+                if (!tableName) return { text: "⚠️ Nome da tabela não informado." };
 
+                let columns = await db.getColumns(tableName);
                 if (!columns.length && !tableName.includes('.')) {
-                    // Fallback search
-                    const owners = await db.executeQuery(
-                        `SELECT OWNER FROM ALL_OBJECTS WHERE OBJECT_TYPE = 'TABLE' AND OBJECT_NAME = :name AND OWNER NOT IN ('SYS','SYSTEM') FETCH NEXT 1 ROWS ONLY`,
-                        { name: tableName }
-                    );
+                    const owners = await db.executeQuery(`SELECT OWNER FROM ALL_OBJECTS WHERE OBJECT_TYPE='TABLE' AND OBJECT_NAME=:name AND OWNER NOT IN('SYS','SYSTEM') FETCH NEXT 1 ROWS ONLY`, { name: tableName });
                     if (owners.rows.length > 0) {
                         tableName = `${owners.rows[0][0]}.${tableName}`;
                         columns = await db.getColumns(tableName);
                     }
                 }
-
-                if (!columns.length) return { text: `Não consegui acessar a tabela **${tableName}**. Talvez ela não exista ou eu não tenha permissão.` };
+                if (!columns.length) return { text: `Não consegui acessar **${tableName}**.` };
 
                 const responseData = { tableName, columns };
                 if (columns.viewDefinition) {
                     responseData.viewDefinition = columns.viewDefinition;
                     responseData.isView = true;
                 }
-
-                return {
-                    text: text || `Aqui está a estrutura da **${tableName}**:`,
-                    action: 'describe_table',
-                    data: responseData
-                };
+                return { text: text || `Estrutura da **${tableName}**:`, action: 'describe_table', data: responseData };
             }
 
             if (action === 'find_record') {
                 const result = await this.performFindRecord(data);
-                // Fix: Prioritize result.text (error/success) over generic AI text ("Ok seeking...")
                 return { ...result, text: result.text || text };
             }
 
             if (action === 'list_triggers') {
                 const tableName = data.table_name ? data.table_name.toUpperCase() : null;
-                let sql = `SELECT TRIGGER_NAME, TABLE_NAME, STATUS, TRIGGERING_EVENT FROM ALL_TRIGGERS WHERE OWNER NOT IN ('SYS', 'SYSTEM')`;
+                let sql = `SELECT TRIGGER_NAME, TABLE_NAME, STATUS, TRIGGERING_EVENT FROM ALL_TRIGGERS WHERE OWNER NOT IN('SYS', 'SYSTEM')`;
                 const params = {};
-
-                if (tableName) {
-                    sql += ` AND TABLE_NAME = :tbl`;
-                    params.tbl = tableName;
-                } else {
-                    sql += ` FETCH NEXT 20 ROWS ONLY`;
-                }
+                if (tableName) { sql += ` AND TABLE_NAME = :tbl`; params.tbl = tableName; }
+                else { sql += ` FETCH NEXT 20 ROWS ONLY`; }
 
                 const result = await db.executeQuery(sql, params);
-
-                if (result.rows.length === 0) return { text: tableName ? `Nenhuma trigger encontrada para a tabela ${tableName}.` : "Nenhuma trigger encontrada." };
-
-                return {
-                    text: text,
-                    action: 'show_data',
-                    data: { metaData: result.metaData, rows: result.rows }
-                };
+                if (result.rows.length === 0) return { text: "Nenhuma trigger encontrada." };
+                return { text: text, action: 'show_data', data: { metaData: result.metaData, rows: result.rows } };
             }
 
             if (action === 'draft_table') {
-                return {
-                    text: text || `Abri um rascunho para a tabela **${data.tableName}** aqui ao lado.`,
-                    action: 'draft_table',
-                    data: data
-                };
+                return { text: text || `Rascunho criado para **${data.tableName}**.`, action: 'draft_table', data: data };
             }
 
             if (action === 'create_table_sql') {
                 const tableName = data.tableName || "NOVA_TABELA";
                 const columnsRaw = data.columns || "ID NUMBER";
                 const sql = `CREATE TABLE ${tableName.toUpperCase()} (\n  ${columnsRaw.replace(/,/g, ',\n  ')}\n);`;
-                return {
-                    text: `Aqui está o script para criar a tabela **${tableName}**:\n\n\`\`\`sql\n${sql}\n\`\`\``,
-                    action: 'chat'
-                };
-            }
-
-            if (action === 'drop_table') {
-                const tableName = data.tableName.toUpperCase();
-                // Execution logic (db.js might need a specific method, or we use executeQuery)
-                // Using executeQuery for generic DDL
-                try {
-                    await db.executeQuery(`DROP TABLE ${tableName}`);
-                    return {
-                        text: `✅ Tabela **${tableName}** excluída com sucesso!`,
-                        action: 'text_response'
-                    };
-                } catch (e) {
-                    return {
-                        text: `❌ Erro ao excluir a tabela **${tableName}**: ${e.message}`,
-                        action: 'text_response'
-                    };
-                }
+                return { text: `Script para **${tableName}**:\n\`\`\`sql\n${sql}\n\`\`\``, action: 'chat' };
             }
 
             if (action === 'run_sql') {
-                return {
-                    text: `Aqui está o SQL para realizar esta tarefa:\n\n\`\`\`sql\n${data.sql}\n\`\`\``,
-                    action: 'chat'
-                };
+                return { text: `SQL sugerido:\n\`\`\`sql\n${data.sql}\n\`\`\``, action: 'chat' };
             }
 
             if (action === 'text_response') {
-                return {
-                    text: (data && data.message) ? data.message : text,
-                    action: 'chat'
-                };
+                return { text: (data && data.message) ? data.message : text, action: 'chat' };
             }
 
             return { text: text, action: 'chat' };
 
         } catch (err) {
-            console.error("Gemini Error:", err);
-            const msg = err.message || "";
-
-            if (msg.includes('429') || msg.includes('Quota') || msg.includes('Too Many Requests')) {
-                return {
-                    text: "⏳ **Muitas requisições!** O cérebro da IA está superaquecido (limite da API do Google). Aguarde 30s ou tente comandos simples.",
-                    action: 'text_response'
-                };
-            }
-
-            if (msg.includes('Safety') || msg.includes('blocked')) {
-                return {
-                    text: "🛡️ **Bloqueio de Segurança**. A IA achou esse pedido arriscado e bloqueou.",
-                    action: 'text_response'
-                };
-            }
-
-            return { text: "Ops, tive um probleminha técnico: " + msg, action: null };
+            console.error("Exec Error:", err);
+            return { text: "Erro na execução: " + err.message, action: null };
         }
     }
 
@@ -497,21 +419,17 @@ class AiService {
             const columns = await db.getColumns(tableName);
             if (!columns.length) return { text: `Tabela ${tableName} não encontrada.` };
 
-            // ORA-01722 Fix: Check if value is numeric
             const isNumeric = !isNaN(parseFloat(value)) && isFinite(value);
-
             let targetCols = [];
 
             if (columnName) {
-                // User explicitly requested a column
                 const col = columns.find(c => c.COLUMN_NAME === columnName);
                 if (col) {
                     targetCols = [col];
                 } else {
-                    // Error: Column not found. Fallback to selection UI.
                     const sortedColumns = columns.sort((a, b) => a.COLUMN_NAME.localeCompare(b.COLUMN_NAME));
                     return {
-                        text: `A IA tentou buscar na coluna **${columnName}**, mas ela não existe na tabela **${tableName}**.\n\nPor favor, selecione a coluna correta abaixo:`,
+                        text: `Coluna **${columnName}** não encontrada em **${tableName}**. Selecione abaixo:`,
                         action: 'column_selection',
                         data: {
                             tableName: tableName,
@@ -521,27 +439,17 @@ class AiService {
                     };
                 }
             } else {
-                // Auto-detect columns
                 targetCols = columns.filter(c => {
-                    // Safety: If searching for strings (e.g. alphanumeric code), DO NOT include Number columns
                     if (c.DATA_TYPE === 'NUMBER' && !isNumeric) return false;
-
                     return ['NUMBER', 'VARCHAR2', 'CHAR'].includes(c.DATA_TYPE) &&
-                        (
-                            c.COLUMN_NAME === 'ID' ||
-                            c.COLUMN_NAME.includes('_ID') ||
-                            c.COLUMN_NAME.startsWith('COD') ||
-                            c.COLUMN_NAME.includes('CPF') ||
-                            c.COLUMN_NAME.includes('CNPJ') ||
-                            c.COLUMN_NAME.startsWith('NU_') ||
-                            c.COLUMN_NAME.startsWith('NR_')
-                        );
+                        (c.COLUMN_NAME === 'ID' || c.COLUMN_NAME.includes('_ID') || c.COLUMN_NAME.startsWith('COD') ||
+                            c.COLUMN_NAME.includes('CPF') || c.COLUMN_NAME.includes('CNPJ') || c.COLUMN_NAME.startsWith('NR_'));
                 });
             }
 
             if (!targetCols.length && !columnName) {
                 const available = columns.map(c => `**${c.COLUMN_NAME}**`).join(', ');
-                return { text: `Não identifiquei colunas compatíveis com o valor **"${value}"** na tabela ${tableName}.\n\n(Se o valor for texto, ignorei colunas numéricas).\n\nAs colunas disponíveis são: ${available}.` };
+                return { text: `Colunas incompatíveis com "${value}".\nDisponíveis: ${available}.` };
             }
 
             const conditions = targetCols.map(c => `${c.COLUMN_NAME} = :val`).join(' OR ');
@@ -550,14 +458,10 @@ class AiService {
             const result = await db.executeQuery(sql, { val: value }, 10, { outFormat: db.oracledb.OUT_FORMAT_OBJECT });
 
             if (!result.rows.length) {
-                // UX Upgrade: Return structured action for interactive column selection
                 const searchedCols = targetCols.map(c => `\`${c.COLUMN_NAME}\``).join(', ');
-
-                // Sort columns: Suggested first (if any matched logic), then Alphabetical
                 const sortedColumns = columns.sort((a, b) => a.COLUMN_NAME.localeCompare(b.COLUMN_NAME));
-
                 return {
-                    text: `Não encontrei o registro **${value}** na tabela **${tableName}**.\n\nBusquei automaticamente nas colunas: ${searchedCols}.\n\nPara onde devo olhar agora? Selecione abaixo:`,
+                    text: `Registro **${value}** não encontrado em: ${searchedCols}. Selecione outra coluna:`,
                     action: 'column_selection',
                     data: {
                         tableName: tableName,
@@ -568,7 +472,7 @@ class AiService {
             }
 
             return {
-                text: `Encontrei estes registros:`,
+                text: `Encontrei:`,
                 action: 'show_data',
                 data: { metaData: result.metaData, rows: result.rows }
             };
