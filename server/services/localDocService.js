@@ -116,11 +116,70 @@ class LocalDocService {
         return true;
     }
 
-    // --- NODES (Pages) ---
+    async getAllSearchableNodes() {
+        const books = readBooks();
+        console.log(`[RAG] Indexing ${books.length} books...`);
+        const allNodes = [];
+        for (const book of books) {
+            try {
+                const nodes = readStructure(book.ID_BOOK);
+                for (const node of nodes) {
+                    // Read content file
+                    const contentPath = path.join(getBookDir(book.ID_BOOK), `${node.ID_NODE}.html`);
+                    let content = '';
+                    if (fs.existsSync(contentPath)) {
+                        // Read only first 4000 chars to satisfy search index (performance optimization)
+                        const fd = fs.openSync(contentPath, 'r');
+                        const buffer = Buffer.alloc(4000);
+                        const bytesRead = fs.readSync(fd, buffer, 0, 4000, 0);
+                        fs.closeSync(fd);
+                        content = buffer.toString('utf-8', 0, bytesRead);
+                    }
+
+                    allNodes.push({
+                        ID_NODE: node.ID_NODE,
+                        ID_BOOK: book.ID_BOOK,
+                        NM_TITLE: node.NM_TITLE,
+                        SNIPPET: content
+                    });
+                }
+            } catch (e) {
+                console.error(`Error indexing book ${book.ID_BOOK}:`, e);
+            }
+        }
+        console.log(`[RAG] Found ${allNodes.length} searchable nodes.`);
+        return allNodes;
+    }
+
+    async searchNodes(query) {
+        const allNodes = await this.getAllSearchableNodes();
+        if (!query) return [];
+
+        const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+        console.log(`[RAG] Searching for: ${terms.join(', ')}`);
+
+        const scored = allNodes.map(node => {
+            let score = 0;
+            const title = node.NM_TITLE.toLowerCase();
+            const content = node.SNIPPET.toLowerCase();
+
+            terms.forEach(term => {
+                if (title.includes(term)) score += 10;
+                if (content.includes(term)) score += 2;
+            });
+
+            return { ...node, score };
+        });
+
+        // Retorna top 5 relevants
+        const results = scored.filter(n => n.score > 0).sort((a, b) => b.score - a.score).slice(0, 5);
+        console.log(`[RAG] Found ${results.length} matches.`);
+        return results;
+    }
+
     async getBookTree(bookId) {
         const nodes = readStructure(bookId);
-        // Sort by Order then Title logic if needed, but array order usually suffices in JSON
-        // We need to build the tree object for the frontend
+        console.log(`[LocalDocService] getBookTree book=${bookId}, rawNodes=${nodes.length}`);
         return this.buildTree(nodes);
     }
 
@@ -146,14 +205,6 @@ class LocalDocService {
     }
 
     async getNode(id) {
-        // Since we don't have a global index of nodes, we have to search?
-        // OR, the frontend usually requests node by knowing the book?
-        // Actually, the current API `GET /api/docs/nodes/:id` doesn't pass the book ID.
-        // This makes JSON storage a bit tricky if we split by book.
-        // Solution: Read all book structures? Expensive.
-        // Better Solution: We pass BookID in the request if possible, OR we keep a global Node Index?
-        // Let's iterate books for now, it's local and fast enough for < 100 books.
-
         const books = readBooks();
         for (const book of books) {
             const nodes = readStructure(book.ID_BOOK);
@@ -214,6 +265,113 @@ class LocalDocService {
             }
         }
         throw new Error("Node not found");
+    }
+
+    async deleteNode(id) {
+        const books = readBooks();
+        for (const book of books) {
+            let nodes = readStructure(book.ID_BOOK);
+            const node = nodes.find(n => n.ID_NODE == id);
+
+            if (node) {
+                // Recursive collect all descendants to delete their files
+                const toDeleteIds = [id];
+                const findDescendants = (parentId) => {
+                    const children = nodes.filter(n => n.ID_PARENT_NODE == parentId);
+                    for (const child of children) {
+                        toDeleteIds.push(child.ID_NODE);
+                        findDescendants(child.ID_NODE);
+                    }
+                };
+                findDescendants(id);
+
+                // Delete files
+                for (const delId of toDeleteIds) {
+                    const filePath = path.join(getBookDir(book.ID_BOOK), `${delId}.html`);
+                    if (fs.existsSync(filePath)) {
+                        fs.unlinkSync(filePath);
+                    }
+                }
+
+                // Remove from structure
+                nodes = nodes.filter(n => !toDeleteIds.includes(n.ID_NODE));
+                writeStructure(book.ID_BOOK, nodes);
+
+                return true;
+            }
+        }
+        throw new Error("Node not found");
+    }
+
+    async moveNode(nodeId, targetBookId, targetParentId, newIndex) {
+        const books = readBooks();
+        let sourceBookId = null;
+        let nodeToMove = null;
+        let sourceNodes = null;
+
+        // 1. Find Source
+        for (const book of books) {
+            const nodes = readStructure(book.ID_BOOK);
+            const node = nodes.find(n => n.ID_NODE == nodeId);
+            if (node) {
+                sourceBookId = book.ID_BOOK;
+                nodeToMove = { ...node }; // Clone
+                sourceNodes = nodes;
+                break;
+            }
+        }
+
+        if (!nodeToMove) throw new Error("Source node not found");
+
+        // 2. Prepare Target
+        let targetNodes = [];
+        if (sourceBookId == targetBookId) {
+            targetNodes = sourceNodes; // Reference same array if same book
+        } else {
+            targetNodes = readStructure(targetBookId);
+        }
+
+        // 3. Remove from Source
+        if (sourceBookId == targetBookId) {
+            targetNodes = targetNodes.filter(n => n.ID_NODE != nodeId);
+        } else {
+            // Remove from source book file
+            const newSourceNodes = sourceNodes.filter(n => n.ID_NODE != nodeId);
+            writeStructure(sourceBookId, newSourceNodes);
+
+            // Move File
+            const sourcePath = path.join(getBookDir(sourceBookId), `${nodeId}.html`);
+            const targetPath = path.join(getBookDir(targetBookId), `${nodeId}.html`);
+            if (fs.existsSync(sourcePath)) {
+                fs.renameSync(sourcePath, targetPath);
+            }
+        }
+
+        // 4. Update Node Properties
+        nodeToMove.ID_BOOK = targetBookId;
+        nodeToMove.ID_PARENT_NODE = targetParentId;
+        nodeToMove.DT_UPDATED = new Date().toISOString();
+
+        // 5. Insert at new Index
+        const siblings = targetNodes.filter(n => n.ID_PARENT_NODE == targetParentId);
+        const nonSiblings = targetNodes.filter(n => n.ID_PARENT_NODE != targetParentId);
+
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex > siblings.length) newIndex = siblings.length;
+
+        siblings.splice(newIndex, 0, nodeToMove);
+
+        // 5a. Update NU_ORDER for all siblings
+        siblings.forEach((sib, idx) => {
+            sib.NU_ORDER = idx;
+        });
+
+        // 5b. Merge
+        const finalNodes = [...nonSiblings, ...siblings];
+
+        writeStructure(targetBookId, finalNodes);
+
+        return true;
     }
 }
 

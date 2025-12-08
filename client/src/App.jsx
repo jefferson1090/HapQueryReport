@@ -61,8 +61,8 @@ function App() {
     const [updateDownloaded, setUpdateDownloaded] = useState(false);
 
     useEffect(() => {
-        // v1.15.17 - Chat Safety Update
-        document.title = "Hap Assistente de Dados v1.15.19";
+        // v1.15.26 - Robust Auto-Save
+        document.title = "Hap Assistente de Dados v1.15.26";
         if (window.electronAPI) {
             window.electronAPI.onUpdateAvailable(() => setUpdateAvailable(true));
             window.electronAPI.onUpdateDownloaded(() => {
@@ -70,7 +70,46 @@ function App() {
                 setUpdateAvailable(false);
             });
         }
-    }, []);
+
+        // Global Event Listener for Deep Linking to Docs
+        const handleDocOpen = (e) => {
+            if (activeTab !== 'docs') {
+                setActiveTab('docs');
+            }
+        };
+
+        // Global Event Listener for Running SQL from Docs
+        const handleRunSql = (e) => {
+            const { query } = e.detail;
+            if (query) {
+                // 1. Switch directly to SQL Runner tab (assuming 'sql-runner' or 'query-builder' is the key)
+                // Wait, in previous view I saw 'activeTab' state. Need to check what value renders SqlRunner.
+                // It seems 'sql-runner' is the new component, but default might be 'query-builder'.
+                // I'll assume 'sql-runner' based on recent features, or check the render method.
+                // Assuming 'sql-runner' for now based on context.
+                setActiveTab('sql-runner');
+
+                // 2. Update the active SQL tab with the query
+                setSqlTabs(prev => {
+                    const newTabs = [...prev];
+                    const activeIndex = newTabs.findIndex(t => t.id === activeSqlTabId);
+                    if (activeIndex !== -1) {
+                        newTabs[activeIndex] = { ...newTabs[activeIndex], sqlContent: query };
+                    }
+                    return newTabs;
+                });
+
+                // Optional: Auto-execute? Maybe better to let user review first.
+            }
+        };
+
+        window.addEventListener('hap-doc-open', handleDocOpen);
+        window.addEventListener('hap-run-sql', handleRunSql);
+        return () => {
+            window.removeEventListener('hap-doc-open', handleDocOpen);
+            window.removeEventListener('hap-run-sql', handleRunSql);
+        };
+    }, [activeTab, activeSqlTabId]);
 
     const restartApp = () => {
         if (window.electronAPI) {
@@ -166,7 +205,7 @@ function App() {
                 )}
 
                 {/* Top Navigation Bar */}
-                <header className={`${theme.navbar} ${theme.navbarText} h-16 shadow-md flex items-center justify-between px-6 z-20 border-b ${theme.border}`}>
+                <header className={`${theme.navbar} ${theme.navbarText} h-16 shadow-md flex items-center justify-between px-6 z-20 border-b ${theme.border} print:hidden`}>
 
                     {/* Tabs (Left Aligned to fill empty space) */}
                     <div className="flex-1 flex justify-start space-x-2">

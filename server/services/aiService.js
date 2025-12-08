@@ -480,6 +480,108 @@ class AiService {
             return { text: `Erro na busca: ${e.message}` };
         }
     }
+
+    async processText(text, instruction) {
+        if (!this.groq) {
+            return "⚠️ IA não configurada (Sem API Key).";
+        }
+
+        try {
+            const systemPrompt = `
+            Você é um assistente de edição de texto especialista.
+            Sua tarefa é transformar o texto fornecido seguindo estritamente a instrução do usuário.
+            
+            # REGRAS
+            1. Retorne APENAS o resultado final do texto transformado.
+            2. Não inclua "Aqui está o texto" ou aspas extras.
+            3. Mantenha a formatação Markdown se existir.
+            4. Se a instrução for "Resumir", faça um resumo conciso.
+            5. Se a instrução for "Melhorar", corrija gramática e melhore a fluidez mantendo o tom profissional.
+            
+            Instrução: ${instruction}
+            `;
+
+            const completion = await this.groq.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: text }
+                ],
+                model: this.modelName,
+                temperature: 0.3,
+            });
+
+            return completion.choices[0]?.message?.content || text;
+        } catch (e) {
+            console.error("AI Text Error:", e);
+            return `Erro ao processar texto: ${e.message}`;
+        }
+    }
+
+    async processDocsChat(message, history = [], currentContext = null) {
+        if (!this.groq) {
+            return { text: "⚠️ IA não configurada (Sem API Key).", action: 'chat' };
+        }
+
+        try {
+            // RAG: Retrieval Step
+            const docService = require('./localDocService');
+            const relevantNodes = await docService.searchNodes(message);
+
+            let contextText = "";
+
+            // 1. Priority: Current Open Document (if User asks for "this" or "summary")
+            // We include it regardless if it's open, marking it strongly.
+            if (currentContext && currentContext.content) {
+                contextText += `=== DOCUMENTO ABERTO (Foco Principal) ===\n[Título: ${currentContext.title}]\nConteúdo: ${currentContext.content.substring(0, 3000)}\n\n`;
+            }
+
+            // 2. Global Search Results
+            if (relevantNodes.length > 0) {
+                contextText += `=== OUTROS DOCUMENTOS RELACIONADOS ===\n` + relevantNodes.map(n =>
+                    `[Título: ${n.NM_TITLE}]\nConteúdo: ${n.SNIPPET.substring(0, 1000)}...`
+                ).join("\n\n---\n\n");
+            }
+
+            if (!contextText) {
+                contextText = "Nenhum documento relevante encontrado.";
+            }
+
+            const systemPrompt = `
+            Você é um assistente especialista na documentação do projeto.
+            Use o contexto fornecido abaixo para responder à pergunta do usuário.
+            
+            # REGRAS
+            1. Se houver um "DOCUMENTO ABERTO", priorize ele para perguntas como "resuma este documento", "o que diz aqui", etc.
+            2. Se a resposta não estiver no contexto, diga que não sabe, mas tente ser útil.
+            3. Mantenha as respostas concisas e formatadas em Markdown.
+
+            # CONTEXTO (Documentos Recuperados)
+            ${contextText}
+            `;
+
+            const historyMessages = history.map(h => ({
+                role: h.sender === 'user' ? 'user' : 'assistant',
+                content: h.text
+            }));
+
+            const completion = await this.groq.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    ...historyMessages,
+                    { role: "user", content: message }
+                ],
+                model: this.modelName,
+                temperature: 0.3,
+            });
+
+            const answer = completion.choices[0]?.message?.content || "Houve um erro ao gerar a resposta.";
+            return { text: answer, action: 'chat' };
+
+        } catch (e) {
+            console.error("Docs Chat Error:", e);
+            return { text: `Erro no chat: ${e.message}`, action: 'error' };
+        }
+    }
 }
 
 module.exports = new AiService();

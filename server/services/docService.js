@@ -26,6 +26,58 @@ class DocService {
         return true;
     }
 
+    // --- SEARCH ---
+    async searchNodes(query) {
+        const fs = require('fs');
+        const logPath = require('path').join(__dirname, '../search_debug.log');
+        const log = (m) => {
+            try { fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${m}\n`); } catch (e) { }
+        };
+
+        log(`Incoming search query: "${query}"`);
+
+        // Robust Search Strategy:
+        // 1. Title: Standard LIKE with Upper case normalization
+        // 2. Content: DBMS_LOB.INSTR for CLOB searching (Case insensitive via UPPER)
+        const sql = `
+            SELECT n.ID_NODE, n.ID_BOOK, n.NM_TITLE, dbms_lob.substr(n.CL_CONTENT, 400, 1) as SNIPPET
+            FROM TB_DOC_NODES n
+            WHERE UPPER(n.NM_TITLE) LIKE UPPER('%' || :q || '%')
+               OR DBMS_LOB.INSTR(UPPER(n.CL_CONTENT), UPPER(:q)) > 0
+            FETCH FIRST 50 ROWS ONLY
+        `;
+
+        try {
+            const result = await db.executeQuery(sql, { q: query }, 50, { outFormat: db.oracledb.OUT_FORMAT_OBJECT });
+            log(`Query executed successfully. Rows found: ${result.rows.length}`);
+            if (result.rows.length > 0) {
+                log(`First match: ${result.rows[0].NM_TITLE}`);
+            }
+            return result.rows;
+        } catch (e) {
+            log(`FATAL SEARCH ERROR: ${e.message}`);
+            console.error(`[SEARCH] Error:`, e);
+            throw e;
+        }
+    }
+
+    async getAllSearchableNodes() {
+        // Fetch larger chunk for client-side search (4000 chars)
+        const sql = `
+            SELECT n.ID_NODE, n.ID_BOOK, n.NM_TITLE, 
+                   dbms_lob.substr(n.CL_CONTENT, 4000, 1) as SNIPPET
+            FROM TB_DOC_NODES n
+            ORDER BY n.NM_TITLE ASC
+        `;
+        try {
+            const result = await db.executeQuery(sql, {}, 5000, { outFormat: db.oracledb.OUT_FORMAT_OBJECT });
+            return result.rows;
+        } catch (e) {
+            console.error(`[SEARCH-INDEX] Error:`, e);
+            throw e;
+        }
+    }
+
     // --- NODES (Pages) ---
     async getBookTree(bookId) {
         // Fetch all nodes for a book and reconstruct tree in JS (cheaper than recursive SQL for small docs)

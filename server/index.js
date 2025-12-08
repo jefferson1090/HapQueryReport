@@ -693,6 +693,25 @@ app.post('/api/cancel-import/:jobId', (req, res) => {
   }
 });
 
+// AI Text Processing Endpoint
+app.post('/api/ai/text', async (req, res) => {
+  try {
+    const { text, instruction } = req.body;
+    if (!text || !instruction) return res.status(400).json({ error: 'Missing text or instruction' });
+
+    // Ensure aiService has the method
+    if (!aiService.processText) {
+      return res.status(503).json({ error: 'AI Service capabilities not fully loaded' });
+    }
+
+    const result = await aiService.processText(text, instruction);
+    res.json({ result });
+  } catch (e) {
+    console.error("AI Route Error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 function analyzeCsvStructure(headers, rows) {
   const usedNames = new Set();
 
@@ -811,6 +830,21 @@ app.post('/api/docs/init', async (req, res) => {
   }
 });
 
+app.get('/api/docs/search', async (req, res) => {
+  try {
+    const query = req.query.q;
+    const results = await docService.searchNodes(query);
+    res.json(results);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/docs/search-index', async (req, res) => {
+  try {
+    const nodes = await docService.getAllSearchableNodes();
+    res.json(nodes);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/docs/books', async (req, res) => {
   try {
     const books = await docService.listBooks();
@@ -836,8 +870,37 @@ app.get('/api/docs/books/:id/tree', async (req, res) => {
 app.get('/api/docs/nodes/:id', async (req, res) => {
   try {
     const node = await docService.getNode(req.params.id);
-    // Handle CLOB if needed (oracledb usually converts to string automatically for fetches if small enough)
     res.json(node);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DEBUG ROUTE - Remove after use
+app.get('/api/debug/find-bloqueios', async (req, res) => {
+  try {
+    const term = 'bloqueios';
+    const results = {};
+
+    results.dump = await db.executeQuery(
+      `SELECT ID_NODE, NM_TITLE, dbms_lob.substr(CL_CONTENT, 100, 1) as SAMPLE FROM TB_DOC_NODES FETCH FIRST 10 ROWS ONLY`,
+      {}, 10, { outFormat: db.oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    results.clobInstr = await db.executeQuery(
+      `SELECT ID_NODE, NM_TITLE, DBMS_LOB.SUBSTR(CL_CONTENT, 4000, 1) as FULL_CONTENT FROM TB_DOC_NODES WHERE DBMS_LOB.INSTR(UPPER(CL_CONTENT), UPPER(:q)) > 0`,
+      { q: term }, 10, { outFormat: db.oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message, stack: e.stack });
+  }
+});
+
+app.post('/api/docs/chat', async (req, res) => {
+  try {
+    const { message, history, currentContext } = req.body;
+    const result = await aiService.processDocsChat(message, history, currentContext);
+    res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -877,6 +940,21 @@ app.put('/api/docs/nodes/:id', async (req, res) => {
   try {
     const { content, title } = req.body;
     await docService.updateNodeContent(req.params.id, content, title);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/docs/nodes/move', async (req, res) => {
+  try {
+    const { nodeId, targetBookId, targetParentId, newIndex } = req.body;
+    await docService.moveNode(nodeId, targetBookId, targetParentId, newIndex);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/docs/nodes/:id', async (req, res) => {
+  try {
+    await docService.deleteNode(req.params.id);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

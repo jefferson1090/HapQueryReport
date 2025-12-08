@@ -20,7 +20,8 @@ function createWindow() {
 
     // Load the local server
     // Note: index.js starts listening on port 3001
-    mainWindow.loadURL('http://localhost:3001');
+    const startUrl = process.env.ELECTRON_START_URL || 'http://localhost:3001';
+    mainWindow.loadURL(startUrl);
 
     mainWindow.on('closed', function () {
         mainWindow = null;
@@ -78,6 +79,89 @@ ipcMain.handle('save-file', async (event, { filename, content, type }) => {
     }
 
     return filePath;
+});
+
+// PDF Export Handler
+ipcMain.handle('export-pdf', async (event, htmlContent) => {
+    if (!mainWindow) return false;
+
+    // Create a hidden worker window
+    let workerWindow = new BrowserWindow({
+        show: false,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true
+        }
+    });
+
+    try {
+        // Construct clean HTML document
+        const html = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <style>
+                    body { 
+                        font-family: Arial, Helvetica, sans-serif; 
+                        line-height: 1.6; 
+                        color: #333;
+                        max-width: 800px;
+                        margin: 0 auto;
+                        padding: 20px;
+                    }
+                    img { max-width: 100%; height: auto; }
+                    h1, h2, h3 { color: #111; margin-top: 1.5em; }
+                    p { margin-bottom: 1em; }
+                    ul, ol { margin-bottom: 1em; padding-left: 2em; }
+                    blockquote { border-left: 4px solid #ccc; padding-left: 1em; margin-left: 0; color: #666; }
+                    code { background: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-family: monospace; }
+                    pre { background: #f4f4f4; padding: 10px; border-radius: 5px; overflow-x: auto; }
+                    table { border-collapse: collapse; width: 100%; margin-bottom: 1em; }
+                    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                    th { background-color: #f2f2f2; }
+                </style>
+            </head>
+            <body>
+                ${htmlContent}
+            </body>
+            </html>
+        `;
+
+        // Load the content using data URI
+        await workerWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+
+        const pdfData = await workerWindow.webContents.printToPDF({
+            printBackground: true,
+            pageSize: 'A4',
+            margins: {
+                top: 1, // inches equivalent roughly
+                bottom: 1,
+                left: 1,
+                right: 1
+            }
+        });
+
+        const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+            title: 'Salvar PDF',
+            defaultPath: 'documento.pdf',
+            filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
+        });
+
+        if (canceled || !filePath) {
+            workerWindow.close();
+            return false;
+        }
+
+        await fs.promises.writeFile(filePath, pdfData);
+        workerWindow.close();
+        return true;
+
+    } catch (error) {
+        console.error('Failed to export PDF:', error);
+        if (workerWindow && !workerWindow.isDestroyed()) workerWindow.close();
+        return false;
+    }
 });
 
 const { autoUpdater } = require('electron-updater');
