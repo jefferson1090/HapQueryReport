@@ -32,10 +32,29 @@ debugLog('Electron version: ' + process.versions.electron);
 
 
 const app = express();
+const http = require('http');
+const server = http.createServer(app);
+const { Server } = require("socket.io");
+const io = new Server(server, {
+  cors: {
+    origin: "*", // Allow all for dev/electron
+    methods: ["GET", "POST"]
+  }
+});
+
+const chatService = require('./services/chatService');
+chatService.setSocketIo(io);
+
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Increased limit for data import
+
+// Disable caching for all routes
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  next();
+});
 
 // Determine root directory (handles both dev and pkg executable)
 const rootDir = process.pkg ? path.dirname(process.execPath) : __dirname;
@@ -157,10 +176,143 @@ app.post('/api/connect', async (req, res) => {
   const { user, password, connectString } = req.body;
   try {
     const result = await db.checkConnection({ user, password, connectString });
+
+    // Chat Schema is already initialized by ChatService constructor (SQLite)
+    // chatService.initializeSchema();
+
     res.json({ success: true, message: 'Conexão realizada com sucesso!' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
+});
+
+// --- CHAT API ROUTES ---
+app.post('/api/chat/register', async (req, res) => {
+  try {
+    const { username, password, team } = req.body;
+    console.log(`Registering user: ${username}`);
+    await chatService.registerUser(username, password, team);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("Registration error:", e);
+    res.status(500).json({ success: false, message: e.message, error: e.message });
+  }
+});
+
+// --- CHAT ROUTES ---
+app.post('/api/chat/register', async (req, res) => {
+  try {
+    const { username, password, team } = req.body;
+    console.log(`Registering user: ${username}`);
+    const result = await chatService.registerUser(username, password, team);
+    res.json(result);
+  } catch (e) {
+    console.error("Register error:", e);
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post('/api/chat/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    console.log(`Logging in user: ${username}`);
+    const result = await chatService.loginUser(username, password);
+    if (result.success) res.json(result);
+    else res.status(401).json(result);
+  } catch (e) {
+    console.error("Login error:", e);
+    res.status(500).json({ success: false, message: e.message, error: e.message });
+  }
+});
+
+app.get('/api/chat/history', async (req, res) => {
+  try {
+    const { username } = req.query;
+    const history = await chatService.getHistory(username);
+    res.json(history);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- SOCKET.IO EVENTS ---
+io.on('connection', (socket) => {
+  console.log('New client connected:', socket.id);
+
+  socket.on('join', (data) => {
+    // data can be just username (legacy) or { username, team }
+    const username = typeof data === 'object' ? data.username : data;
+    const team = typeof data === 'object' ? data.team : 'Geral';
+
+    chatService.users.set(socket.id, { username, team });
+
+    // Emit list of users with teams
+    const userList = Array.from(chatService.users.values());
+
+    // Send to everyone (including sender)
+    io.emit('users_update', userList);
+
+    // Also explicitly send to the joining socket to be sure
+    socket.emit('users_update', userList);
+
+    console.log(`${username} (${team}) joined chat. Total users: ${userList.length}`);
+  });
+
+  socket.on('message', async (data) => {
+    // data: { sender, content, type, metadata, recipient }
+    await chatService.saveMessage(data.sender, data.content, data.type, data.metadata, data.recipient);
+
+    const msgPayload = { ...data, timestamp: new Date() };
+
+    if (data.recipient && data.recipient !== 'ALL') {
+      // Private Message
+      // Find recipient socket(s)
+      let sent = false;
+      for (const [id, user] of chatService.users.entries()) {
+        if (user.username === data.recipient) {
+          io.to(id).emit('message', msgPayload);
+          sent = true;
+        }
+      }
+      // Also send back to sender (so it appears in their chat)
+      socket.emit('message', msgPayload);
+    } else {
+      // Broadcast to all
+      io.emit('message', msgPayload);
+    }
+  });
+
+  socket.on('share_item', async (data) => {
+    // data: { sender, recipient, itemType, itemData }
+    // If recipient is specific, we could target them, but for MVP we broadcast or use rooms.
+    // Let's broadcast to all for now, or filter if we had user->socket mapping.
+    // We have chatService.users map (socketId -> username).
+
+    // Find recipient socket
+    let recipientSocketId = null;
+    for (const [id, user] of chatService.users.entries()) {
+      if (user.username === data.recipient) {
+        recipientSocketId = id;
+        break;
+      }
+    }
+
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('shared_item_received', data);
+    } else {
+      // Fallback: Broadcast or notify sender user not found
+      // For MVP, if user not found, maybe just emit to all? No, privacy.
+      // Let's just log.
+      console.log(`Recipient ${data.recipient} not found for shared item.`);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    const user = chatService.users.get(socket.id);
+    chatService.users.delete(socket.id);
+    if (user) {
+      io.emit('users_update', Array.from(chatService.users.values()));
+      console.log(`${user.username} disconnected.`);
+    }
+  });
 });
 
 // 2. List Tables
@@ -1016,7 +1168,32 @@ app.get(/.*/, (req, res) => {
   res.sendFile(path.join(rootDir, 'public', 'index.html'));
 });
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Start Server Function
+function startServer(port) {
+  return new Promise((resolve, reject) => {
+    server.listen(port, () => {
+      console.log(`Server running on port ${port}`);
+      resolve(server);
+    });
+
+    server.on('error', (e) => {
+      if (e.code === 'EADDRINUSE') {
+        console.log(`Address in use on port ${port}, retrying...`);
+        reject(e);
+      } else {
+        console.error('Server error:', e);
+        reject(e);
+      }
+    });
+  });
+}
+
+// Only start if run directly
+if (require.main === module) {
+  startServer(PORT).catch(err => {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+  });
+}
+
+module.exports = startServer;

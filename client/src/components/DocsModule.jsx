@@ -610,7 +610,7 @@ const DocsModule = () => {
                 <button
                     onClick={() => setIsChatOpen(prev => !prev)}
                     className={`absolute bottom-6 right-6 z-40 p-3 rounded-full shadow-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-all duration-300 transform hover:scale-105 print:hidden ${isChatOpen ? 'scale-0 rotate-90 opacity-0 pointer-events-none' : 'scale-100 rotate-0 opacity-100'}`}
-                    title="Chat com IA"
+                    title="Hap IA Docs"
                 >
                     <MessageSquare size={24} />
                 </button>

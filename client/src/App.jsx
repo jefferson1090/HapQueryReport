@@ -1,4 +1,5 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
+import { io } from "socket.io-client";
 import ConnectionForm from './components/ConnectionForm';
 import QueryBuilder from './components/QueryBuilder'; // Legacy
 import AiBuilder from './components/AiBuilder';
@@ -6,18 +7,51 @@ import SqlRunner from './components/SqlRunner';
 import CsvImporter from './components/CsvImporter';
 import DocsModule from './components/DocsModule';
 import Reminders from './components/Reminders';
+import TeamChat from './components/TeamChat';
+import Login from './components/Login';
+import SplashScreen from './components/SplashScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import hapLogo from './assets/hap_logo_v4.png';
+import { getApiUrl } from './config';
 
 // --- Theme Context & Definitions ---
 import { ThemeContext, THEMES } from './context/ThemeContext';
+import { useApi } from './context/ApiContext';
 
-const VERSION = "v1.15.45";
+const VERSION = "v1.15.19";
 
 function App() {
+    // Chat User State (Main Entry)
+    const [chatUser, setChatUser] = useState(() => {
+        const saved = localStorage.getItem('chat_user');
+        return saved ? JSON.parse(saved) : null;
+    });
+    const [socket, setSocket] = useState(null);
+    const [showSplash, setShowSplash] = useState(true);
+    const { apiUrl } = useApi();
+
+    useEffect(() => {
+        const timer = setTimeout(() => setShowSplash(false), 2500);
+        return () => clearTimeout(timer);
+    }, []);
+
+    // Auto-Connect Socket on Refresh
+    // Auto-Connect Socket on Refresh
+    useEffect(() => {
+        if (chatUser && !socket && apiUrl) {
+            console.log("Auto-connecting socket for:", chatUser.username, "to", apiUrl);
+            const newSocket = io(apiUrl);
+            setSocket(newSocket);
+
+            // Re-join logic
+            newSocket.emit('join', { username: chatUser.username, team: chatUser.team });
+        }
+    }, [chatUser, socket, apiUrl]);
+
+    // Oracle Connection State (Gated Features)
     const [connection, setConnection] = useState(null);
-    const [activeTab, setActiveTab] = useState('query-builder');
-    // Removed isSidebarOpen state
+
+    const [activeTab, setActiveTab] = useState('team-chat'); // Default to chat after login
 
     // Theme State
     const [currentThemeName, setCurrentThemeName] = useState(() => localStorage.getItem('app_theme') || 'default');
@@ -65,6 +99,32 @@ function App() {
         return [];
     });
 
+    // Reminders State (Lifted)
+    const [reminders, setReminders] = useState(() => {
+        const saved = localStorage.getItem('hap_reminders');
+        if (saved) {
+            try {
+                let parsed = JSON.parse(saved);
+                // Migration: Ensure status exists
+                parsed = parsed.map(r => {
+                    if (!r.status) {
+                        return { ...r, status: r.completed ? 'COMPLETED' : 'PENDING' };
+                    }
+                    return r;
+                });
+                return parsed;
+            } catch (e) {
+                console.error("Failed to parse reminders", e);
+            }
+        }
+        return [];
+    });
+
+    const saveReminders = (newReminders) => {
+        setReminders(newReminders);
+        localStorage.setItem('hap_reminders', JSON.stringify(newReminders));
+    };
+
     // Auto-Update State
     const [updateAvailable, setUpdateAvailable] = useState(false);
     const [updateDownloaded, setUpdateDownloaded] = useState(false);
@@ -91,14 +151,7 @@ function App() {
         const handleRunSql = (e) => {
             const { query } = e.detail;
             if (query) {
-                // 1. Switch directly to SQL Runner tab (assuming 'sql-runner' or 'query-builder' is the key)
-                // Wait, in previous view I saw 'activeTab' state. Need to check what value renders SqlRunner.
-                // It seems 'sql-runner' is the new component, but default might be 'query-builder'.
-                // I'll assume 'sql-runner' based on recent features, or check the render method.
-                // Assuming 'sql-runner' for now based on context.
                 setActiveTab('sql-runner');
-
-                // 2. Update the active SQL tab with the query
                 setSqlTabs(prev => {
                     const newTabs = [...prev];
                     const activeIndex = newTabs.findIndex(t => t.id === activeSqlTabId);
@@ -107,8 +160,6 @@ function App() {
                     }
                     return newTabs;
                 });
-
-                // Optional: Auto-execute? Maybe better to let user review first.
             }
         };
 
@@ -154,7 +205,24 @@ function App() {
 
     const handleDisconnect = () => {
         setConnection(null);
-        setActiveTab('query-builder');
+        // Do not change tab, just show connection form in place
+    };
+
+    const handleChatLogin = (user, socketInstance) => {
+        setChatUser(user);
+        setSocket(socketInstance);
+        localStorage.setItem('chat_user', JSON.stringify(user));
+        setActiveTab('team-chat');
+    };
+
+    const handleLogout = () => {
+        setChatUser(null);
+        localStorage.removeItem('chat_user');
+        if (socket) {
+            socket.disconnect();
+            setSocket(null);
+        }
+        setConnection(null); // Also disconnect Oracle
     };
 
     const NavTab = ({ id, icon, label }) => {
@@ -183,10 +251,19 @@ function App() {
         );
     };
 
-    if (!connection) {
-        return <ConnectionForm onConnect={handleConnect} />;
+    // --- MAIN RENDER LOGIC ---
+
+    // 1. Splash Screen
+    if (showSplash) {
+        return <SplashScreen />;
     }
 
+    // 2. If not logged in to Chat, show Login Screen
+    if (!chatUser) {
+        return <Login onLogin={handleChatLogin} apiUrl={apiUrl} />;
+    }
+
+    // 2. Main Application Layout
     return (
         <ThemeContext.Provider value={{ theme, currentThemeName, changeTheme }}>
             <div className={`flex flex-col h-screen ${theme.bg} font-sans overflow-hidden transition-colors duration-300`}>
@@ -219,8 +296,9 @@ function App() {
 
                     {/* Tabs (Left Aligned to fill empty space) */}
                     <div className="flex-1 flex justify-start space-x-2">
-                        <NavTab id="query-builder" icon="🤖" label="Construtor AI" />
+                        <NavTab id="team-chat" icon="💬" label="Chat" />
                         <NavTab id="sql-runner" icon="💻" label="Editor SQL" />
+                        <NavTab id="query-builder" icon="🤖" label="Construtor AI" />
                         <NavTab id="csv-importer" icon="📂" label="Importar CSV" />
                         <NavTab id="reminders" icon="🔔" label="Lembretes" />
                         <NavTab id="docs" icon="📚" label="Docs" />
@@ -245,17 +323,17 @@ function App() {
 
                         <div className="h-8 w-[1px] bg-current opacity-20 mx-2"></div>
 
-                        {/* User Info */}
+                        {/* Chat User Info */}
                         <div className="text-right hidden md:block">
-                            <p className="text-sm font-bold leading-tight">{connection.user}</p>
-                            <p className="text-[10px] opacity-70 truncate max-w-[150px]">{connection.connectString}</p>
+                            <p className="text-sm font-bold leading-tight">{chatUser.username}</p>
+                            <p className="text-[10px] opacity-70 truncate max-w-[150px]">{chatUser.team || 'Geral'}</p>
                         </div>
 
-                        {/* Disconnect */}
+                        {/* Logout Button */}
                         <button
-                            onClick={handleDisconnect}
+                            onClick={handleLogout}
                             className="p-2 rounded-full hover:bg-red-500 hover:text-white transition-all duration-300 group"
-                            title="Desconectar"
+                            title="Sair / Logout"
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
@@ -266,35 +344,74 @@ function App() {
 
                 {/* Main Content Area */}
                 <main className="flex-1 overflow-hidden relative">
-                    <div className="absolute inset-0 overflow-auto p-0"> {/* Removed padding for full width docs */}
+                    <div className="absolute inset-0 overflow-auto p-0">
                         <div className="h-full flex flex-col relative w-full">
-                            {/* Content Wrappers (Preserving State) */}
+
+                            {/* Team Chat (Always Visible if Active) */}
+                            <div className={`${activeTab === 'team-chat' ? 'block h-full' : 'hidden'} w-full`}>
+                                <ErrorBoundary>
+                                    <TeamChat
+                                        isVisible={activeTab === 'team-chat'}
+                                        user={chatUser}
+                                        socket={socket}
+                                        savedQueries={savedSqlQueries}
+                                        setSavedQueries={setSavedSqlQueries}
+                                        reminders={reminders}
+                                        setReminders={saveReminders}
+                                    />
+                                </ErrorBoundary>
+                            </div>
+
+                            {/* SQL Runner (Gated by Oracle Connection) */}
+                            <div className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} w-full`}>
+                                {!connection ? (
+                                    <ConnectionForm onConnect={handleConnect} />
+                                ) : (
+                                    <SqlRunner
+                                        isVisible={activeTab === 'sql-runner'}
+                                        tabs={sqlTabs}
+                                        setTabs={setSqlTabs}
+                                        activeTabId={activeSqlTabId}
+                                        setActiveTabId={setActiveSqlTabId}
+                                        savedQueries={savedSqlQueries}
+                                        setSavedQueries={setSavedSqlQueries}
+                                        onDisconnect={handleDisconnect}
+                                    />
+                                )}
+                            </div>
+
+                            {/* AI Builder (Gated by Oracle Connection) */}
                             <div className={`${activeTab === 'query-builder' ? 'block h-full' : 'hidden'} w-full`}>
                                 <ErrorBoundary>
-                                    <AiBuilder isVisible={activeTab === 'query-builder'} />
+                                    {!connection ? (
+                                        <ConnectionForm onConnect={handleConnect} />
+                                    ) : (
+                                        <AiBuilder isVisible={activeTab === 'query-builder'} />
+                                    )}
                                 </ErrorBoundary>
                             </div>
-                            <div className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} w-full`}>
-                                <SqlRunner
-                                    isVisible={activeTab === 'sql-runner'}
-                                    tabs={sqlTabs}
-                                    setTabs={setSqlTabs}
-                                    activeTabId={activeSqlTabId}
-                                    setActiveTabId={setActiveSqlTabId}
-                                    savedQueries={savedSqlQueries}
-                                    setSavedQueries={setSavedSqlQueries}
+
+                            {/* CSV Importer (Gated by Oracle Connection) */}
+                            <div className={`${activeTab === 'csv-importer' ? 'block h-full' : 'hidden'} w-full`}>
+                                {!connection ? (
+                                    <ConnectionForm onConnect={handleConnect} />
+                                ) : (
+                                    <CsvImporter isVisible={activeTab === 'csv-importer'} />
+                                )}
+                            </div>
+
+                            {/* Reminders (Not Gated) */}
+                            <div className={`${activeTab === 'reminders' ? 'block h-full' : 'hidden'} w-full`}>
+                                <Reminders
+                                    isVisible={activeTab === 'reminders'}
+                                    reminders={reminders}
+                                    setReminders={saveReminders}
                                 />
                             </div>
-                            <div className={`${activeTab === 'csv-importer' ? 'block h-full' : 'hidden'} p-4 sm:p-6 max-w-7xl mx-auto w-full`}>
-                                <CsvImporter isVisible={activeTab === 'csv-importer'} connectionName={connection?.connectionName || connection?.user || 'Desconhecido'} />
-                            </div>
-                            <div className={`${activeTab === 'reminders' ? 'block h-full' : 'hidden'} p-4 sm:p-6 max-w-7xl mx-auto w-full`}>
-                                <Reminders isVisible={activeTab === 'reminders'} />
-                            </div>
-                            <div className={activeTab === 'docs' ? 'block h-full' : 'hidden'}>
-                                <ErrorBoundary>
-                                    <DocsModule />
-                                </ErrorBoundary>
+
+                            {/* Docs (Not Gated) */}
+                            <div className={`${activeTab === 'docs' ? 'block h-full' : 'hidden'} w-full`}>
+                                <DocsModule />
                             </div>
                         </div>
                     </div>

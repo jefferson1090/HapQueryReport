@@ -2,7 +2,27 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 console.log('ELECTRON_RUN_AS_NODE:', process.env.ELECTRON_RUN_AS_NODE);
 console.log('App type:', typeof app);
 const path = require('path');
-const server = require('./index'); // This starts the Express server
+const net = require('net');
+const startServer = require('./index'); // This imports the startServer function
+
+let serverPort = 3001; // Default, will be updated
+
+function findFreePort(startPort) {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.listen(startPort, () => {
+            const port = server.address().port;
+            server.close(() => resolve(port));
+        });
+        server.on('error', (err) => {
+            if (err.code === 'EADDRINUSE') {
+                resolve(findFreePort(startPort + 1));
+            } else {
+                reject(err);
+            }
+        });
+    });
+}
 
 let mainWindow;
 
@@ -22,6 +42,11 @@ function createWindow() {
     // Note: index.js starts listening on port 3001
     const startUrl = process.env.ELECTRON_START_URL || 'http://localhost:3001';
     mainWindow.loadURL(startUrl);
+
+    // Clear cache to ensure latest version is loaded
+    mainWindow.webContents.session.clearCache().then(() => {
+        console.log('Session cache cleared');
+    });
 
     mainWindow.on('closed', function () {
         mainWindow = null;
@@ -189,9 +214,21 @@ ipcMain.on('restart_app', () => {
     autoUpdater.quitAndInstall();
 });
 
-app.on('ready', () => {
+app.on('ready', async () => {
+    try {
+        serverPort = await findFreePort(3001);
+        console.log(`Starting server on port ${serverPort}...`);
+        await startServer(serverPort);
+    } catch (err) {
+        console.error("Failed to start server:", err);
+    }
+
     createWindow();
     autoUpdater.checkForUpdatesAndNotify();
+});
+
+ipcMain.handle('get-server-port', () => {
+    return serverPort;
 });
 
 app.on('window-all-closed', function () {

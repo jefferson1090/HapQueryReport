@@ -241,9 +241,8 @@ function ConnectionForm({ onConnect }) {
         <div className="flex h-screen bg-gray-100 font-sans">
             {/* Left Side - Saved Connections */}
             <div className="w-1/3 bg-white border-r border-gray-200 p-6 flex flex-col shadow-lg z-10">
-                <div className="flex flex-col items-center justify-center mb-8">
-                    <img src={hapLogo} alt="Hap Logo" className="h-24 object-contain mb-4" />
-                    <h1 className="text-2xl font-bold text-[#0054a6] tracking-tight">Hap Query Report</h1>
+                <div className="flex flex-col items-center justify-center mb-4">
+                    {/* Logo removed from here */}
                 </div>
                 <h2 className="text-lg font-bold text-gray-700 mb-4 px-2 border-l-4 border-[#f37021]">Conexões Salvas</h2>
                 <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
@@ -307,6 +306,9 @@ function ConnectionForm({ onConnect }) {
             {/* Right Side - Form */}
             <div className="w-2/3 p-10 flex flex-col justify-center bg-gradient-to-br from-gray-50 to-blue-50">
                 <div className="max-w-lg mx-auto w-full bg-white p-10 rounded-2xl shadow-xl border border-gray-100">
+                    <div className="flex justify-center mb-6">
+                        <img src={hapLogo} alt="Hap Logo" className="h-16 object-contain" />
+                    </div>
                     <h2 className="text-3xl font-bold text-gray-800 mb-8 text-center">
                         {isEditing ? 'Editar Conexão' : 'Nova Conexão'}
                     </h2>

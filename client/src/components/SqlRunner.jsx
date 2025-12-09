@@ -3,221 +3,50 @@ import React, { useState, useEffect, useContext, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import * as XLSX from 'xlsx';
-import { saveAs } from 'file-saver';
 import { ThemeContext } from '../context/ThemeContext';
+import { useApi } from '../context/ApiContext';
+import PropTypes from 'prop-types';
+import { saveAs } from 'file-saver';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql, PLSQL } from '@codemirror/lang-sql';
 import { autocompletion } from '@codemirror/autocomplete';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import PropTypes from 'prop-types';
+import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { PanelRightClose, PanelRightOpen } from 'lucide-react';
+import AutoSizer from 'react-virtualized-auto-sizer';
+import * as ReactWindow from 'react-window';
+const VirtualList = ReactWindow.FixedSizeList || ReactWindow.default?.FixedSizeList;
 
-// Custom AutoSizer to avoid build issues with the library
-const AutoSizer = ({ children }) => {
-    const ref = useRef(null);
-    const [size, setSize] = useState({ width: 0, height: 0 });
-
-    useEffect(() => {
-        if (!ref.current) return;
-        const observer = new ResizeObserver(entries => {
-            for (let entry of entries) {
-                // Use contentRect for precise dimensions
-                const { width, height } = entry.contentRect;
-                setSize({ width, height });
-            }
-        });
-        observer.observe(ref.current);
-        return () => observer.disconnect();
-    }, []);
-
-    return (
-        <div ref={ref} style={{ width: '100%', height: '100%' }}>
-            {size.width > 0 && size.height > 0 && children(size)}
-        </div>
-    );
-};
-
-AutoSizer.propTypes = {
-    children: PropTypes.func.isRequired
-};
-
-// Custom VirtualList to replace react-window
-const VirtualList = ({ height, width, itemCount, itemSize, minWidth, header, headerHeight = 40, children }) => {
-    const [scrollTop, setScrollTop] = useState(0);
-    const containerRef = useRef(null);
-
-    const handleScroll = (e) => {
-        setScrollTop(e.target.scrollTop);
-    };
-
-    const totalHeight = itemCount * itemSize;
-    const overscan = 5; // Render extra items to prevent flickering
-
-    // Adjust start/end index calculations to account for header height
-    const effectiveScrollTop = Math.max(0, scrollTop - headerHeight);
-
-    const startIndex = Math.max(0, Math.floor(effectiveScrollTop / itemSize) - overscan);
-    const endIndex = Math.min(
-        itemCount - 1,
-        Math.floor((effectiveScrollTop + height) / itemSize) + overscan
-    );
-
-    const items = [];
-    for (let i = startIndex; i <= endIndex; i++) {
-        items.push(
-            children({
-                index: i,
-                style: {
-                    position: 'absolute',
-                    top: i * itemSize + headerHeight, // Offset by header height
-                    left: 0,
-                    width: '100%',
-                    height: itemSize,
-                },
-            })
-        );
-    }
-
-    return (
-        <div
-            ref={containerRef}
-            onScroll={handleScroll}
-            style={{ height, width, overflow: 'auto', position: 'relative', willChange: 'transform' }}
-        >
-            <div style={{ height: totalHeight + headerHeight, position: 'relative', width: '100%', minWidth: minWidth || '100%' }}>
-                {/* Sticky Header */}
-                <div style={{ position: 'sticky', top: 0, zIndex: 10, height: headerHeight, width: '100%' }}>
-                    {header}
-                </div>
-                {items}
-            </div>
-        </div>
-    );
-};
-
-VirtualList.propTypes = {
-    height: PropTypes.number.isRequired,
-    width: PropTypes.number.isRequired,
-    itemCount: PropTypes.number.isRequired,
-    itemSize: PropTypes.number.isRequired,
-    minWidth: PropTypes.number,
-    header: PropTypes.node,
-    headerHeight: PropTypes.number,
-    children: PropTypes.func.isRequired
-};
-
-function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, savedQueries, setSavedQueries }) {
+const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, savedQueries, setSavedQueries, onDisconnect }) => {
     const { theme } = useContext(ThemeContext);
-
-    // Internal state for things that don't need to persist across unmounts
-    const viewRef = useRef(null);
-    const containerRef = useRef(null);
+    const { apiUrl } = useApi();
     const [toast, setToast] = useState(null);
-    const toastTimeoutRef = useRef(null);
 
-    // Focus Strategy: Robust focus handling
-    useEffect(() => {
-        const focusEditor = () => {
-            if (viewRef.current) {
-                viewRef.current.focus();
-            }
-        };
-
-        // 1. Focus on mount with a small delay
-        const timer = setTimeout(() => {
-            focusEditor();
-        }, 100);
-
-        // 2. Focus when window regains focus (fixes the "alt-tab" issue)
-        const handleWindowFocus = () => {
-            focusEditor();
-        };
-        window.addEventListener('focus', handleWindowFocus);
-
-        return () => {
-            clearTimeout(timer);
-            window.removeEventListener('focus', handleWindowFocus);
-        };
-    }, []); // Run once on mount
-
-    // 3. Focus when component becomes visible (fixes tab switching issue)
-    useEffect(() => {
-        if (isVisible) {
-            // Try to focus multiple times to ensure it catches
-            const timers = [
-                setTimeout(() => viewRef.current?.focus(), 50),
-                setTimeout(() => viewRef.current?.focus(), 200),
-                setTimeout(() => viewRef.current?.focus(), 500)
-            ];
-            return () => timers.forEach(t => clearTimeout(t));
-        }
-    }, [isVisible]);
-
-
-
-    // --- Column Resizing State ---
-    const [columnWidths, setColumnWidths] = useState({});
-    const resizingRef = useRef(null);
-
-    const startResizing = (e, colName) => {
-        e.preventDefault();
-        e.stopPropagation();
-        resizingRef.current = {
-            colName,
-            startX: e.clientX,
-            startWidth: columnWidths[colName] || 150
-        };
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-    };
-
-    const handleMouseMove = (e) => {
-        if (!resizingRef.current) return;
-        const { colName, startX, startWidth } = resizingRef.current;
-        const diff = e.clientX - startX;
-        const newWidth = Math.max(50, startWidth + diff); // Min width 50px
-        setColumnWidths(prev => ({ ...prev, [colName]: newWidth }));
-    };
-
-    const handleMouseUp = () => {
-        resizingRef.current = null;
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    // Toast Helper
-    const showToast = (message, type = 'success', duration = 3000) => {
-        if (toastTimeoutRef.current) {
-            clearTimeout(toastTimeoutRef.current);
-            toastTimeoutRef.current = null;
-        }
-        setToast({ message, type });
-        if (duration > 0) {
-            toastTimeoutRef.current = setTimeout(() => {
-                setToast(null);
-                toastTimeoutRef.current = null;
-            }, duration);
-        }
-    };
-
-    // Helper to get active tab
+    // Derived State
     const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
 
-    // Helper to update active tab
-    const updateActiveTab = (updates) => {
-        setTabs(prevTabs => prevTabs.map(t => t.id === activeTabId ? { ...t, ...updates } : t));
-    };
-
-    const [isExporting, setIsExporting] = useState(false);
-    const [limit, setLimit] = useState(1000);
+    // Local State
+    const [limit, setLimit] = useState(100);
     const [queryName, setQueryName] = useState('');
     const [showSaveInput, setShowSaveInput] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
     const [showSidebar, setShowSidebar] = useState(true);
-    const [activeSidebarTab, setActiveSidebarTab] = useState('saved'); // 'saved', 'schema', 'chat'
+    const [activeSidebarTab, setActiveSidebarTab] = useState('saved');
     const [aiChatHistory, setAiChatHistory] = useState([]);
     const [aiChatInput, setAiChatInput] = useState('');
     const [aiLoading, setAiLoading] = useState(false);
+    const [columnWidths, setColumnWidths] = useState({});
 
-    // Schema Browser State
+    const viewRef = useRef(null);
+    const containerRef = useRef(null);
+
+    const showToast = (message, type = 'success', duration = 3000) => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), duration);
+    };
+
+    const updateActiveTab = (updates) => {
+        setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, ...updates } : t));
+    };
     const [schemaSearch, setSchemaSearch] = useState('');
     const [schemaTables, setSchemaTables] = useState([]);
     const [expandedTable, setExpandedTable] = useState(null);
@@ -316,7 +145,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const fetchSchemaTables = async (search = '') => {
         setLoadingSchema(true);
         try {
-            const res = await fetch(`http://localhost:3001/api/tables?search=${encodeURIComponent(search)}`);
+            const res = await fetch(`${apiUrl}/api/tables?search=${encodeURIComponent(search)}`);
             const data = await res.json();
             setSchemaTables(data);
 
@@ -341,7 +170,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         }
         setExpandedTable(tableName);
         try {
-            const res = await fetch(`http://localhost:3001/api/columns/${encodeURIComponent(tableName)}`);
+            const res = await fetch(`${apiUrl}/api/columns/${encodeURIComponent(tableName)}`);
             const data = await res.json();
             setTableColumns(data);
 
@@ -367,7 +196,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
 
         updateActiveTab({ loading: true });
         try {
-            const res = await fetch('http://localhost:3001/api/upload/sql', {
+            const res = await fetch('${apiUrl}/api/upload/sql', {
                 method: 'POST',
                 body: formData
             });
@@ -381,9 +210,28 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         }
     };
 
+    const abortControllerRef = useRef(null);
+
+    const handleCancelQuery = () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
+            updateActiveTab({ loading: false, error: "Execução cancelada pelo usuário." });
+            showToast("Execução cancelada.", "info");
+        }
+    };
+
     const executeQuery = async () => {
         // Clear previous results to indicate new execution
         updateActiveTab({ loading: true, error: null, results: null, totalRecords: undefined });
+
+        // Create new AbortController
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+        abortControllerRef.current = new AbortController();
+        const signal = abortControllerRef.current.signal;
+
         try {
             const cleanSql = activeTab.sqlContent.trim().replace(/;+\s*$/, '');
 
@@ -395,7 +243,8 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                     sql: cleanSql,
                     limit: limit,
                     filter: serverSideFilter ? columnFilters : null
-                })
+                }),
+                signal // Pass signal to fetch
             });
             const data = await res.json();
             if (data.error) throw new Error(data.error);
@@ -424,18 +273,27 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                 const countRes = await fetch('http://127.0.0.1:3001/api/query/count', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sql: cleanSql })
+                    body: JSON.stringify({ sql: cleanSql }),
+                    signal // Pass signal to fetch
                 });
                 const countData = await countRes.json();
                 if (countData.count !== undefined) {
                     updateActiveTab({ totalRecords: countData.count });
                 }
             } catch (countErr) {
-                console.error("Failed to fetch count", countErr);
+                if (countErr.name !== 'AbortError') {
+                    console.error("Failed to fetch count", countErr);
+                }
             }
 
         } catch (err) {
-            updateActiveTab({ error: err.message, loading: false });
+            if (err.name === 'AbortError') {
+                console.log("Query aborted");
+            } else {
+                updateActiveTab({ error: err.message, loading: false });
+            }
+        } finally {
+            abortControllerRef.current = null;
         }
     };
 
@@ -510,7 +368,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         showToast("Iniciando download do CSV...", "info", 0);
         try {
             const cleanSql = activeTab.sqlContent.trim().replace(/;$/, '');
-            const res = await fetch('http://localhost:3001/api/export/csv', {
+            const res = await fetch('${apiUrl}/api/export/csv', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -863,7 +721,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                 return acc;
             }, {});
 
-            const res = await fetch('http://localhost:3001/api/ai/sql/chat', {
+            const res = await fetch('${apiUrl}/api/ai/sql/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ prompt: userMsg.content, schemaContext })
@@ -886,7 +744,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         showToast("IA analisando erro...", "info", 2000);
 
         try {
-            const res = await fetch('http://localhost:3001/api/ai/sql/fix', {
+            const res = await fetch('${apiUrl}/api/ai/sql/fix', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sql: activeTab.sqlContent, error: activeTab.error })
@@ -924,7 +782,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         setAiLoading(true);
         showToast("Gerando explicação...", "info", 2000);
         try {
-            const res = await fetch('http://localhost:3001/api/ai/sql/explain', {
+            const res = await fetch('${apiUrl}/api/ai/sql/explain', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sql: activeTab.sqlContent })
@@ -949,7 +807,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         setAiLoading(true);
         showToast("Analisando performance...", "info", 2000);
         try {
-            const res = await fetch('http://localhost:3001/api/ai/sql/optimize', {
+            const res = await fetch('${apiUrl}/api/ai/sql/optimize', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sql: activeTab.sqlContent })
@@ -1008,6 +866,15 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                     </div>
                 </div>
             )}
+
+            {/* Unified Sidebar Toggle Button */}
+            <button
+                onClick={() => setShowSidebar(!showSidebar)}
+                className={`absolute top-0 right-0 mt-1 mr-1 z-50 p-2 rounded-lg shadow-sm border ${theme.border} ${theme.panel} hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-300 transform hover:rotate-90`}
+                title={showSidebar ? "Ocultar Menu Lateral" : "Mostrar Menu Lateral"}
+            >
+                {showSidebar ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+            </button>
 
             <PanelGroup direction="horizontal" className="h-full">
                 {/* Main Editor Area */}
@@ -1090,7 +957,7 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
 
                                                             // Fetch from API
                                                             try {
-                                                                const res = await fetch(`http://localhost:3001/api/columns/${encodeURIComponent(objectName)}`);
+                                                                const res = await fetch(`${apiUrl}/api/columns/${encodeURIComponent(objectName)}`);
                                                                 const cols = await res.json();
                                                                 if (cols && cols.length > 0) {
                                                                     const colNames = cols.map(c => c.name);
@@ -1151,23 +1018,23 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                             )}
                                         </button>
 
+                                        {activeTab.loading && (
+                                            <button
+                                                onClick={handleCancelQuery}
+                                                className="py-2 px-4 rounded-lg shadow-md transition-all font-semibold flex items-center bg-red-100 text-red-600 hover:bg-red-200"
+                                                title="Cancelar Execução"
+                                            >
+                                                🛑 Cancelar
+                                            </button>
+                                        )}
+
                                         {activeTab.totalRecords !== undefined && (
                                             <span className="text-xs font-medium text-gray-500 ml-2">
                                                 Total: {activeTab.totalRecords.toLocaleString()} registros
                                             </span>
                                         )}
 
-                                        <button
-                                            onClick={() => setShowSidebar(!showSidebar)}
-                                            className={`p-2 rounded border transition-colors flex items-center justify-center ${showSidebar ? `${theme.primaryBtn}` : `${theme.secondaryBtn}`}`}
-                                            title={showSidebar ? "Ocultar Menu Lateral" : "Mostrar Menu Lateral"}
-                                        >
-                                            {/* Sidebar Layout Icon */}
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 6v12" />
-                                            </svg>
-                                        </button>
+
                                         <label className="cursor-pointer p-2 rounded border transition-colors text-gray-500 hover:bg-blue-50 hover:text-blue-600" title="Carregar Arquivo SQL">
                                             <input
                                                 type="file"
@@ -1214,6 +1081,15 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                             {/* Zap Icon */}
                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                            </svg>
+                                        </button>
+
+                                        <div className="h-6 border-l border-gray-300 mx-1"></div>
+
+                                        <button onClick={onDisconnect} className={`p-2 rounded border hover:bg-red-50 text-red-600 ${theme.border}`} title="Trocar Conexão / Desconectar">
+                                            {/* Logout/Switch Icon */}
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                                             </svg>
                                         </button>
                                     </div>
@@ -1265,13 +1141,15 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                             </div>
                                             <div className="ml-3 flex-1">
                                                 <p className="text-sm text-red-700 font-mono whitespace-pre-wrap">{activeTab.error}</p>
-                                                <button
-                                                    onClick={handleFixError}
-                                                    disabled={aiLoading}
-                                                    className="mt-2 flex items-center bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded text-xs font-semibold transition-colors"
-                                                >
-                                                    {aiLoading ? "Corrigindo..." : "✨ Corrigir com IA"}
-                                                </button>
+                                                {!activeTab.error.includes("cancelada pelo usuário") && (
+                                                    <button
+                                                        onClick={handleFixError}
+                                                        disabled={aiLoading}
+                                                        className="mt-2 flex items-center bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded text-xs font-semibold transition-colors"
+                                                    >
+                                                        {aiLoading ? "Corrigindo..." : "✨ Corrigir com IA"}
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -1375,25 +1253,27 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                 {/* Sidebar (Saved Queries & Schema) */}
                 {showSidebar && (
                     <Panel defaultSize={20} minSize={15} maxSize={40} className={`border-l ${theme.border} flex flex-col`}>
-                        <div className={`flex border-b ${theme.border}`}>
-                            <button
-                                onClick={() => setActiveSidebarTab('saved')}
-                                className={`flex-1 py-2 text-sm font-medium transition-colors ${activeSidebarTab === 'saved' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-                            >
-                                Salvos
-                            </button>
-                            <button
-                                onClick={() => setActiveSidebarTab('schema')}
-                                className={`flex-1 py-2 text-sm font-medium transition-colors ${activeSidebarTab === 'schema' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-                            >
-                                Schema
-                            </button>
-                            <button
-                                onClick={() => setActiveSidebarTab('chat')}
-                                className={`flex-1 py-2 text-sm font-medium transition-colors ${activeSidebarTab === 'chat' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-                            >
-                                IA
-                            </button>
+                        <div className={`flex items-center border-b ${theme.border} pr-10`}>
+                            <div className="flex-1 flex">
+                                <button
+                                    onClick={() => setActiveSidebarTab('saved')}
+                                    className={`flex-1 py-2 text-sm font-medium transition-colors ${activeSidebarTab === 'saved' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                >
+                                    Salvos
+                                </button>
+                                <button
+                                    onClick={() => setActiveSidebarTab('schema')}
+                                    className={`flex-1 py-2 text-sm font-medium transition-colors ${activeSidebarTab === 'schema' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                >
+                                    Schema
+                                </button>
+                                <button
+                                    onClick={() => setActiveSidebarTab('chat')}
+                                    className={`flex-1 py-2 text-sm font-medium transition-colors ${activeSidebarTab === 'chat' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                >
+                                    IA
+                                </button>
+                            </div>
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-2">

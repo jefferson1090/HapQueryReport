@@ -1,45 +1,27 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
-import { ThemeContext } from '../context/ThemeContext';
 import ReactMarkdown from 'react-markdown';
 import RemarkGfm from 'remark-gfm';
+import { ThemeContext } from '../context/ThemeContext';
+import { useApi } from '../context/ApiContext';
+import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import ColumnSelection from './ColumnSelection';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
 const AiBuilder = ({ isVisible }) => {
     const { theme } = useContext(ThemeContext);
-    // ... state ... (we need to be careful not to overwrite the whole file, but replace_file is chunk based)
+    const { apiUrl } = useApi();
 
-    // skipping the logic parts to focus on render...
-
-    // We need to target the RETURN statement for the major structural change.
-    // However, replace_file works on chunks. I will do this in two passes or use a large chunk if I can identify steady anchors.
-    // The imports are at the top.
-
-    // Changing imports first
-
-    const [messages, setMessages] = useState([
-        {
-            id: 1,
-            sender: 'ai',
-            text: 'Olá! Estou aqui para ajudar você a descobrir insights nos seus dados.\n\nO que vamos descobrir hoje?',
-            isSystem: true
-        }
-    ]);
+    const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
-    const [viewData, setViewData] = useState(null);
-    const [activeView, setActiveView] = useState('welcome'); // welcome, table_results, schema_view, data_view, draft_view
-    const [mode, setMode] = useState('ai'); // 'ai' or 'local'
-    const [draftData, setDraftData] = useState(null);
-
-    // Learning Data State
     const [headlines, setHeadlines] = useState([]);
     const [skills, setSkills] = useState([]);
-    const [showSkillsModal, setShowSkillsModal] = useState(false);
-
-    // Interactive Flow State
     const [flowStep, setFlowStep] = useState(null);
     const [flowParams, setFlowParams] = useState({});
+    const [draftData, setDraftData] = useState(null);
+    const [activeView, setActiveView] = useState('welcome');
+    const [viewData, setViewData] = useState(null);
+    const [mode, setMode] = useState('ai');
+    const [showSkillsModal, setShowSkillsModal] = useState(false);
 
     const messagesEndRef = useRef(null);
 
@@ -61,7 +43,7 @@ const AiBuilder = ({ isVisible }) => {
 
     const fetchHeadlines = async () => {
         try {
-            const res = await fetch('http://localhost:3001/api/ai/suggestions');
+            const res = await fetch('${apiUrl}/api/ai/suggestions');
             const data = await res.json();
             if (Array.isArray(data)) setHeadlines(data);
         } catch (e) {
@@ -71,7 +53,7 @@ const AiBuilder = ({ isVisible }) => {
 
     const fetchSkills = async () => {
         try {
-            const res = await fetch('http://localhost:3001/api/ai/skills');
+            const res = await fetch('${apiUrl}/api/ai/skills');
             const data = await res.json();
             if (Array.isArray(data)) setSkills(data);
         } catch (e) {
@@ -106,7 +88,7 @@ const AiBuilder = ({ isVisible }) => {
     const handleConfirmDraft = async () => {
         setLoading(true);
         try {
-            const res = await fetch('http://localhost:3001/api/ai/create-table-confirm', {
+            const res = await fetch('${apiUrl}/api/ai/create-table-confirm', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(draftData)
@@ -160,7 +142,7 @@ const AiBuilder = ({ isVisible }) => {
         setLoading(true);
 
         try {
-            const res = await fetch('http://localhost:3001/api/ai/chat', {
+            const res = await fetch('${apiUrl}/api/ai/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: textToSend, mode: mode })

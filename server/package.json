@@ -1,6 +1,6 @@
 {
   "name": "server",
-  "version": "1.15.45",
+  "version": "1.15.19",
   "main": "electron-main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -11,7 +11,7 @@
   },
   "build": {
     "appId": "com.hap.queryreport",
-    "productName": "Hap Query Report",
+    "productName": "Hap Assistente de Dados",
     "npmRebuild": false,
     "directories": {
       "output": "dist"
@@ -45,6 +45,7 @@
   "description": "",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "better-sqlite3": "^12.5.0",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^17.2.3",
@@ -54,11 +55,12 @@
     "json2csv": "^6.0.0-alpha.2",
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
-    "oracledb": "^6.10.0"
+    "oracledb": "^6.10.0",
+    "socket.io": "^4.8.1"
   },
   "bin": "index.js",
   "devDependencies": {
-    "electron": "^33.2.1",
+    "electron": "^28.3.3",
     "electron-builder": "^24.13.3",
     "nodemon": "^3.1.11",
     "wait-on": "^9.0.3"

@@ -1,7 +1,7 @@
 {
   "name": "client",
   "private": true,
-  "version": "1.15.45",
+  "version": "1.15.19",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -49,6 +49,7 @@
     "react-virtualized-auto-sizer": "^1.0.26",
     "react-window": "^2.2.3",
     "remark-gfm": "^4.0.1",
+    "socket.io-client": "^4.8.1",
     "sql-formatter": "^15.6.10",
     "xlsx": "^0.18.5"
   },

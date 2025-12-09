@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     showItemInFolder: (path) => ipcRenderer.invoke('show-item-in-folder', path),
     showItemInFolder: (path) => ipcRenderer.invoke('show-item-in-folder', path),
     saveFile: (data) => ipcRenderer.invoke('save-file', data),
-    exportPDF: (html) => ipcRenderer.invoke('export-pdf', html)
+    exportPDF: (html) => ipcRenderer.invoke('export-pdf', html),
+    getServerPort: () => ipcRenderer.invoke('get-server-port')
 });

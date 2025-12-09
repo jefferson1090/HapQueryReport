@@ -126,6 +126,76 @@ class AiService {
         return result;
     }
 
+    async processWithGroq(message, history) {
+        if (!this.groq) return { text: "⚠️ IA não configurada.", action: 'switch_mode', mode: 'local' };
+
+        // System Prompt defining the Persona and Tools
+        const systemPrompt = `
+        Você é o Hap AI, um assistente especialista em Banco de Dados Oracle, atuando como um **Assistente de Dados** e **Assistente de Product Owner**.
+        Sua missão é ajudar o usuário a consultar, entender e manipular dados, além de fornecer insights de negócio.
+
+        # FERRAMENTAS DISPONÍVEIS (Responda com JSON se precisar usar uma)
+        Se o usuário pedir algo que exija acesso ao banco, retorne APENAS um JSON no seguinte formato:
+        { "action": "NOME_DA_ACAO", "params": { ... } }
+
+        Ações:
+        1. list_tables { search_term: string } -> Listar tabelas.
+        2. describe_table { tableName: string } -> Ver colunas/estrutura.
+        3. run_sql { sql: string } -> Executar SELECT (Apenas SELECT!).
+        4. draft_table { tableName: string, columns: array, ... } -> Criar rascunho de tabela.
+        5. list_triggers { table_name: string } -> Listar triggers.
+
+        # REGRAS DE RESPOSTA
+        1. Se for apenas conversa, responda em texto normal (Markdown).
+        2. Se for uma ação, responda APENAS o JSON.
+        3. Se o usuário pedir para criar uma tabela, use a ação 'draft_table' ou sugira o SQL.
+        4. Sempre seja cordial e profissional.
+        `;
+
+        const messages = [
+            { role: "system", content: systemPrompt },
+            ...history.map(h => ({ role: h.sender === 'user' ? 'user' : 'assistant', content: h.text })),
+            { role: "user", content: message }
+        ];
+
+        try {
+            const completion = await this.groq.chat.completions.create({
+                messages: messages,
+                model: this.modelName,
+                temperature: 0.3,
+                stop: null
+            });
+
+            const content = completion.choices[0]?.message?.content || "";
+
+            // Try to parse JSON action
+            try {
+                // Find JSON in content (sometimes models add text around it)
+                const jsonMatch = content.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    const jsonStr = jsonMatch[0];
+                    const actionData = JSON.parse(jsonStr);
+
+                    if (actionData.action) {
+                        return await this.executeAction({
+                            action: actionData.action,
+                            data: actionData.params || actionData.data,
+                            text: null // Let executeAction generate the text
+                        });
+                    }
+                }
+            } catch (e) {
+                // Not JSON, treat as text
+            }
+
+            return { text: content, action: 'chat' };
+
+        } catch (e) {
+            console.error("Groq Chat Error:", e);
+            return { text: `Erro na IA: ${e.message}`, action: 'error' };
+        }
+    }
+
     async processWithRegex(message) {
         const cleanMsg = message.trim().replace(/[\[\]]/g, '');
 
@@ -549,6 +619,68 @@ class AiService {
             return { text: completion.choices[0]?.message?.content || "" };
         } catch (e) {
             return { text: "Erro ao gerar SQL: " + e.message };
+        }
+    }
+    async processDocsChat(message, history, currentContext) {
+        if (!this.groq) return { text: "⚠️ IA não configurada (Sem API Key).", action: 'error' };
+
+        try {
+            // RAG: Retrieval Step
+            const docService = require('./localDocService');
+            const relevantNodes = await docService.searchNodes(message);
+
+            let contextText = "";
+
+            // 1. Priority: Current Open Document (if User asks for "this" or "summary")
+            if (currentContext && currentContext.content) {
+                contextText += `=== DOCUMENTO ABERTO (Foco Principal) ===\n[Título: ${currentContext.title}]\nConteúdo: ${currentContext.content.substring(0, 3000)}\n\n`;
+            }
+
+            // 2. Global Search Results
+            if (relevantNodes.length > 0) {
+                contextText += `=== OUTROS DOCUMENTOS RELACIONADOS ===\n` + relevantNodes.map(n =>
+                    `[Título: ${n.NM_TITLE}]\nConteúdo: ${n.SNIPPET.substring(0, 1000)}...`
+                ).join("\n\n---\n\n");
+            }
+
+            if (!contextText) {
+                contextText = "Nenhum documento relevante encontrado.";
+            }
+
+            const systemPrompt = `
+            Você é um assistente especialista na documentação do projeto.
+            Use o contexto fornecido abaixo para responder à pergunta do usuário.
+            
+            # REGRAS
+            1. Se houver um "DOCUMENTO ABERTO", priorize ele para perguntas como "resuma este documento", "o que diz aqui", etc.
+            2. Se a resposta não estiver no contexto, diga que não sabe, mas tente ser útil.
+            3. Mantenha as respostas concisas e formatadas em Markdown.
+
+            # CONTEXTO (Documentos Recuperados)
+            ${contextText}
+            `;
+
+            const historyMessages = history.map(h => ({
+                role: h.sender === 'user' ? 'user' : 'assistant',
+                content: h.text
+            }));
+
+            const completion = await this.groq.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    ...historyMessages,
+                    { role: "user", content: message }
+                ],
+                model: this.modelName,
+                temperature: 0.3,
+            });
+
+            const answer = completion.choices[0]?.message?.content || "Houve um erro ao gerar a resposta.";
+            return { text: answer, action: 'chat' };
+
+        } catch (e) {
+            console.error("Docs Chat Error:", e);
+            return { text: `Erro no chat: ${e.message}`, action: 'error' };
         }
     }
 }

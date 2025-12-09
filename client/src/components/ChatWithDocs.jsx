@@ -64,7 +64,7 @@ const ChatWithDocs = ({ isOpen, onClose, context, onInsert, mode = 'overlay' }) 
 
     // if (!isOpen) return null; // Removed for animation
 
-    const baseClasses = "bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-300 ease-in-out z-40";
+    const baseClasses = "bg-white border-l border-gray-200 flex flex-col transition-all duration-300 ease-in-out z-40";
 
     // Overlay Mode: Slide in from right
     const overlayClasses = `fixed inset-y-0 right-0 w-96 shadow-2xl transform ${isOpen ? 'translate-x-0' : 'translate-x-full'}`;
@@ -75,21 +75,28 @@ const ChatWithDocs = ({ isOpen, onClose, context, onInsert, mode = 'overlay' }) 
     return (
         <div className={`${mode === 'sidebar' ? sidebarClasses : baseClasses + ' ' + overlayClasses}`}>
             {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
-                    <Sparkles size={20} />
-                    <h3 className="font-semibold text-lg">Chat Docs</h3>
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white/50 backdrop-blur-sm">
+                <div className="flex items-center space-x-2">
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-md transition-all bg-gradient-to-tr from-blue-500 to-purple-600">
+                        AI
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-sm text-gray-800">Hap IA Docs</h3>
+                        <p className="text-[10px] text-gray-500">
+                            Online • Ver Habilidades
+                        </p>
+                    </div>
                 </div>
                 <button
                     onClick={onClose}
-                    className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full transition-colors text-gray-500"
+                    className="p-1 hover:bg-gray-100 rounded-full transition-colors text-gray-500"
                 >
                     <X size={20} />
                 </button>
             </div>
 
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 pb-8 space-y-6 bg-gray-50/50 dark:bg-gray-900/50 scroll-smooth">
+            <div className="flex-1 overflow-y-auto p-4 pb-8 space-y-6 bg-gray-50/50 scroll-smooth">
                 {messages.length === 0 && (
                     <div className="text-center text-gray-400 mt-10 animate-fade-in">
                         <Bot size={48} className="mx-auto mb-2 opacity-20" />
@@ -105,20 +112,20 @@ const ChatWithDocs = ({ isOpen, onClose, context, onInsert, mode = 'overlay' }) 
                         style={{ animationDelay: `${idx * 0.05}s`, opacity: 0, animationFillMode: 'forwards' }}
                     >
                         {msg.sender === 'ai' && (
-                            <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center flex-shrink-0">
-                                <Bot size={16} className="text-indigo-600 dark:text-indigo-300" />
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-md text-white">
+                                <Bot size={16} className="text-white" />
                             </div>
                         )}
 
                         <div
                             className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm shadow-sm ${msg.sender === 'user'
-                                ? 'bg-indigo-600 text-white rounded-br-none'
+                                ? 'bg-blue-600 text-white rounded-br-none'
                                 : msg.isError
-                                    ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded-bl-none'
-                                    : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-700 rounded-bl-none'
+                                    ? 'bg-red-50 text-red-700 border border-red-100 rounded-bl-none'
+                                    : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none'
                                 }`}
                         >
-                            <div className="prose prose-sm dark:prose-invert max-w-none">
+                            <div className="prose prose-sm max-w-none">
                                 <ReactMarkdown>
                                     {msg.text}
                                 </ReactMarkdown>
@@ -127,7 +134,7 @@ const ChatWithDocs = ({ isOpen, onClose, context, onInsert, mode = 'overlay' }) 
                                 <div className="mt-2 flex justify-end">
                                     <button
                                         onClick={() => onInsert(msg.text)}
-                                        className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded"
+                                        className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium transition-colors bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded"
                                         title="Inserir no documento"
                                     >
                                         <Sparkles size={12} />
@@ -139,8 +146,8 @@ const ChatWithDocs = ({ isOpen, onClose, context, onInsert, mode = 'overlay' }) 
 
                         {
                             msg.sender === 'user' && (
-                                <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
-                                    <User size={16} className="text-gray-600 dark:text-gray-300" />
+                                <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
+                                    <User size={16} className="text-gray-600" />
                                 </div>
                             )
                         }
@@ -149,10 +156,10 @@ const ChatWithDocs = ({ isOpen, onClose, context, onInsert, mode = 'overlay' }) 
 
                 {isLoading && (
                     <div className="flex gap-3 justify-start">
-                        <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center flex-shrink-0">
-                            <Bot size={16} className="text-indigo-600 dark:text-indigo-300" />
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-md">
+                            <Bot size={16} className="text-white" />
                         </div>
-                        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm flex items-center gap-2">
+                        <div className="bg-white border border-gray-100 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm flex items-center gap-2">
                             <Loader2 size={16} className="animate-spin text-gray-400" />
                             <span className="text-xs text-gray-400">Lendo documentos...</span>
                         </div>
@@ -163,21 +170,21 @@ const ChatWithDocs = ({ isOpen, onClose, context, onInsert, mode = 'overlay' }) 
             </div>
 
             {/* Input Area */}
-            <div className="p-4 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+            <div className="p-4 bg-white border-t border-gray-200">
                 <div className="relative">
                     <textarea
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
                         placeholder="Digite sua pergunta..."
-                        className="w-full pl-4 pr-12 py-3 bg-gray-100 dark:bg-gray-900 border-0 rounded-xl focus:ring-2 focus:ring-indigo-500 resize-none text-sm max-h-32 custom-scrollbar"
+                        className="w-full pl-4 pr-12 py-3 bg-gray-50 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 resize-none text-sm max-h-32 custom-scrollbar"
                         rows={1}
                         style={{ minHeight: '44px' }}
                     />
                     <button
                         onClick={handleSend}
                         disabled={!input.trim() || isLoading}
-                        className="absolute right-2 bottom-2 p-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:hover:bg-indigo-600 text-white rounded-lg transition-colors"
+                        className="absolute right-2 bottom-2 p-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 text-white rounded-lg transition-colors"
                     >
                         <Send size={16} />
                     </button>

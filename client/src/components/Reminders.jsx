@@ -138,10 +138,10 @@ function KanbanColumn({ id, title, reminders, color, headerColor, borderColor, t
     );
 }
 
-function Reminders({ isVisible }) {
+function Reminders({ isVisible, reminders, setReminders }) {
     if (!isVisible) return null;
 
-    const [reminders, setReminders] = useState([]);
+    // const [reminders, setReminders] = useState([]); // Lifted to App.jsx
     const [showModal, setShowModal] = useState(false);
     const [viewModal, setViewModal] = useState(null); // For viewing details
     const [editingId, setEditingId] = useState(null);
@@ -166,6 +166,8 @@ function Reminders({ isVisible }) {
         useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
     );
 
+    // LocalStorage logic moved to App.jsx
+    /*
     useEffect(() => {
         const saved = localStorage.getItem('hap_reminders');
         if (saved) {
@@ -184,10 +186,11 @@ function Reminders({ isVisible }) {
             }
         }
     }, []);
+    */
 
     const saveReminders = (newReminders) => {
         setReminders(newReminders);
-        localStorage.setItem('hap_reminders', JSON.stringify(newReminders));
+        // localStorage.setItem('hap_reminders', JSON.stringify(newReminders)); // Handled in App.jsx
     };
 
     const handleDragStart = (event) => {
