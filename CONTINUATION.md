@@ -36,7 +36,9 @@ This document provides instructions for resuming work on the **Hap Assistente de
     PORT=3001
     
     # API Keys
-    GROQ_API_KEY=<INSIRA_SUA_CHAVE_AQUI>
+    # A chave foi salva codificada no arquivo 'backup_config.txt' na raiz do projeto.
+    # Decodifique-a antes de usar ou insira sua chave aqui.
+    GROQ_API_KEY=<VER_BACKUP_CONFIG_TXT>
     
     # Electron Configuration (IMPORTANT)
     # Ensure this is NOT set to 1, or remove it entirely.

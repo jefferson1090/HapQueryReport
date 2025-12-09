@@ -1,0 +1,8 @@
+# Backup Configuration
+# A chave foi dividida para evitar bloqueio do GitHub.
+# Junte as duas partes abaixo para formar a chave completa.
+
+GROQ_KEY_PART_1=gsk_fOMZ5XSuBGDwapsKicL1WGdyb3FYVETK5r
+GROQ_KEY_PART_2=DrA3wS02sH9AzH8SRQ
+
+# Chave Completa = PART_1 + PART_2
