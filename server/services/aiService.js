@@ -202,128 +202,8 @@ class AiService {
         };
     }
 
-    async processWithGroq(message, history = []) {
-        try {
-            const dbKeywords = ['tabela', 'table', 'dados', 'data', 'registro', 'record', 'busca', 'find', 'encontre', 'select', 'estrutura', 'schema', 'coluna', 'column', 'listar', 'list', 'mostre', 'show', 'quais', 'onde'];
-            const isDbQuery = dbKeywords.some(w => message.toLowerCase().includes(w));
-
-            let tableContext = "";
-            if (isDbQuery) {
-                try {
-                    const tables = await db.getTables();
-                    tableContext = tables.slice(0, 50).join(", ");
-                } catch (e) {
-                    console.error("Error fetching tables for context:", e);
-                }
-            }
-
-            const basePersona = `
-            # ROLE & PERSONALITY
-            Você é um **Assistente de Dados Inteligente** chamado "Assistente HAP".
-            
-            # PRIME DIRECTIVE (CRITICAL)
-            **REGRA DE OURO**: Se o usuário mencionar qualquer termo relacionado a dados (ex: "tabela", "buscar", "listar", "ver", "dados", "estrutura", "SQL", "criar"), você DEVE assumir que é uma tarefa técnica.
-            
-            1. **NÃO PEÇA PERMISSÃO** para executar ações de leitura (listar, buscar, descrever). FAÇA!
-            2. **NÃO CONVERSE** se puder mostrar dados. "Aqui estão as tabelas" + JSON é melhor que "Posso listar as tabelas para você?".
-            3. IGNORE a diretiva de bate-papo se houver intenção técnica.
-
-            # DATABASE CONTEXT RULES
-            Use o contexto abaixo para identificar tabelas existentes.
-            
-            # ORACLE NAMING STANDARDS & LOGIC
-            **Scenario A: LAYMAN User**
-            - "Criar tabela de clientes" -> Sugira TT_CLIENTE.
-            
-            **Scenario B: EXPERT User**
-            - "Create table my_table" -> Respeite MY_TABLE.
-            
-            **Scenario C: UNDERSPECIFIED**
-            - "Criar tabela" -> Retorne 'text_response' pedindo campos.
-
-            # ACTIONS (JSON JÁ)
-            Retorne APENAS o JSON para ações. Use o campo **"data"** para os parâmetros.
-            
-            1. **"list_tables"**: Se usuário disser "listar tabelas", "ver tabelas", "quais tabelas tem".
-               data: { "search_term": "..." (ou vazio) }
-            
-            2. **"describe_table"**: Se usuário disser "estrutura da tabela X", "quais colunas tem na tabela X", "desc table X".
-               data: { "table_name": "X" }
-            
-            3. **"find_record"**: Se usuário disser "buscar cliente X", "quem é o ID 123", "procure por X na tabela Y".
-               data: { "table_name": "Y", "value": "X" }
-
-            4. **"chat"**: APENAS para saudações ("Oi", "Bom dia") ou perguntas gerais NÃO relacionadas a banco ("Como fazer bolo").
-               **IMPORTANTE**: Coloque a sua resposta no campo **"text"**.
-               Ex: { "action": "chat", "text": "Olá! Como posso ajudar com seus dados hoje?" }
-            `;
-
-            const systemMessage = {
-                role: "system",
-                content: `${basePersona}\n\nContexto Atual: [${tableContext}]`
-            };
-
-            const historyMessages = history.map(h => ({
-                role: h.sender === 'user' ? 'user' : 'assistant',
-                content: h.text
-            }));
-
-            const completion = await this.groq.chat.completions.create({
-                messages: [systemMessage, ...historyMessages, { role: "user", content: message }],
-                model: this.modelName,
-                temperature: 0.5,
-                max_completion_tokens: 1024,
-                top_p: 1,
-                stop: null,
-                stream: false
-            });
-
-            const content = completion.choices[0]?.message?.content || "";
-
-            const jsonMatch = content.match(/\{[\s\S]*\}/);
-            let text = "";
-
-            if (jsonMatch) {
-                text = jsonMatch[0];
-            } else {
-                text = content.replace(/```json/g, '').replace(/```/g, '').trim();
-            }
-
-            let aiResponse;
-            try {
-                aiResponse = JSON.parse(text);
-            } catch (e) {
-                try {
-                    const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-                    aiResponse = JSON.parse(cleanText);
-                } catch (e2) {
-                    return { text: content, action: 'chat' };
-                }
-            }
-
-            // CRITICAL LOGGING: See exactly what AI returns
-            console.log("🤖 AI RAW RESPONSE:", aiResponse);
-
-            if (aiResponse.action === 'drop_table') {
-                return aiResponse;
-            }
-
-            return await this.executeAction(aiResponse);
-
-        } catch (err) {
-            console.error("Groq Error:", err);
-            const msg = err.message || "";
-            if (msg.includes('429') || msg.includes('Quota')) {
-                return { text: "⏳ **Muitas requisições!** Aguarde um pouco.", action: 'text_response' };
-            }
-            return { text: "Ops, problema técnico: " + msg, action: null };
-        }
-    }
-
     async executeAction(aiResponse) {
         let { action, data, text } = aiResponse;
-
-        // PROTOCOL FIX: If 'data' is missing, try 'params' (common hallucination)
         data = data || aiResponse.params || {};
 
         if (!text && data) {
@@ -399,7 +279,65 @@ class AiService {
             }
 
             if (action === 'text_response') {
-                return { text: (data && data.message) ? data.message : text, action: 'chat' };
+                try {
+                    // RAG: Retrieval Step
+                    const docService = require('./localDocService');
+                    const relevantNodes = await docService.searchNodes(message);
+
+                    let contextText = "";
+
+                    // 1. Priority: Current Open Document (if User asks for "this" or "summary")
+                    // We include it regardless if it's open, marking it strongly.
+                    if (currentContext && currentContext.content) {
+                        contextText += `=== DOCUMENTO ABERTO (Foco Principal) ===\n[Título: ${currentContext.title}]\nConteúdo: ${currentContext.content.substring(0, 3000)}\n\n`;
+                    }
+
+                    // 2. Global Search Results
+                    if (relevantNodes.length > 0) {
+                        contextText += `=== OUTROS DOCUMENTOS RELACIONADOS ===\n` + relevantNodes.map(n =>
+                            `[Título: ${n.NM_TITLE}]\nConteúdo: ${n.SNIPPET.substring(0, 1000)}...`
+                        ).join("\n\n---\n\n");
+                    }
+
+                    if (!contextText) {
+                        contextText = "Nenhum documento relevante encontrado.";
+                    }
+
+                    const systemPrompt = `
+            Você é um assistente especialista na documentação do projeto.
+            Use o contexto fornecido abaixo para responder à pergunta do usuário.
+            
+            # REGRAS
+            1. Se houver um "DOCUMENTO ABERTO", priorize ele para perguntas como "resuma este documento", "o que diz aqui", etc.
+            2. Se a resposta não estiver no contexto, diga que não sabe, mas tente ser útil.
+            3. Mantenha as respostas concisas e formatadas em Markdown.
+
+            # CONTEXTO (Documentos Recuperados)
+            ${contextText}
+            `;
+
+                    const historyMessages = history.map(h => ({
+                        role: h.sender === 'user' ? 'user' : 'assistant',
+                        content: h.text
+                    }));
+
+                    const completion = await this.groq.chat.completions.create({
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            ...historyMessages,
+                            { role: "user", content: message }
+                        ],
+                        model: this.modelName,
+                        temperature: 0.3,
+                    });
+
+                    const answer = completion.choices[0]?.message?.content || "Houve um erro ao gerar a resposta.";
+                    return { text: answer, action: 'chat' };
+
+                } catch (e) {
+                    console.error("Docs Chat Error:", e);
+                    return { text: `Erro no chat: ${e.message}`, action: 'error' };
+                }
             }
 
             return { text: text, action: 'chat' };
@@ -516,70 +454,101 @@ class AiService {
             return `Erro ao processar texto: ${e.message}`;
         }
     }
+    async fixSqlError(sql, error) {
+        if (!this.groq) return { text: "⚠️ IA não configurada." };
+        const systemPrompt = `Você é um especialista em Oracle SQL.
+        Sua tarefa é CORRIGIR a query SQL abaixo baseada no erro.
+        
+        REGRAS:
+        1. Retorne APENAS o código SQL corrigido dentro de um bloco markdown (\`\`\`sql ... \`\`\`).
+        2. A primeira linha do SQL DEVE ser um comentário (\`--\`) explicando o que foi corrigido.
+        3. Formate o código para leitura.`;
 
-    async processDocsChat(message, history = [], currentContext = null) {
-        if (!this.groq) {
-            return { text: "⚠️ IA não configurada (Sem API Key).", action: 'chat' };
-        }
+        const userPrompt = `SQL Incorreto:\n\`\`\`sql\n${sql}\n\`\`\`\n\nErro:\n${error}`;
 
         try {
-            // RAG: Retrieval Step
-            const docService = require('./localDocService');
-            const relevantNodes = await docService.searchNodes(message);
-
-            let contextText = "";
-
-            // 1. Priority: Current Open Document (if User asks for "this" or "summary")
-            // We include it regardless if it's open, marking it strongly.
-            if (currentContext && currentContext.content) {
-                contextText += `=== DOCUMENTO ABERTO (Foco Principal) ===\n[Título: ${currentContext.title}]\nConteúdo: ${currentContext.content.substring(0, 3000)}\n\n`;
-            }
-
-            // 2. Global Search Results
-            if (relevantNodes.length > 0) {
-                contextText += `=== OUTROS DOCUMENTOS RELACIONADOS ===\n` + relevantNodes.map(n =>
-                    `[Título: ${n.NM_TITLE}]\nConteúdo: ${n.SNIPPET.substring(0, 1000)}...`
-                ).join("\n\n---\n\n");
-            }
-
-            if (!contextText) {
-                contextText = "Nenhum documento relevante encontrado.";
-            }
-
-            const systemPrompt = `
-            Você é um assistente especialista na documentação do projeto.
-            Use o contexto fornecido abaixo para responder à pergunta do usuário.
-            
-            # REGRAS
-            1. Se houver um "DOCUMENTO ABERTO", priorize ele para perguntas como "resuma este documento", "o que diz aqui", etc.
-            2. Se a resposta não estiver no contexto, diga que não sabe, mas tente ser útil.
-            3. Mantenha as respostas concisas e formatadas em Markdown.
-
-            # CONTEXTO (Documentos Recuperados)
-            ${contextText}
-            `;
-
-            const historyMessages = history.map(h => ({
-                role: h.sender === 'user' ? 'user' : 'assistant',
-                content: h.text
-            }));
-
             const completion = await this.groq.chat.completions.create({
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    ...historyMessages,
-                    { role: "user", content: message }
-                ],
+                messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
                 model: this.modelName,
-                temperature: 0.3,
+                temperature: 0.1
             });
-
-            const answer = completion.choices[0]?.message?.content || "Houve um erro ao gerar a resposta.";
-            return { text: answer, action: 'chat' };
-
+            const content = completion.choices[0]?.message?.content || "";
+            return { text: content };
         } catch (e) {
-            console.error("Docs Chat Error:", e);
-            return { text: `Erro no chat: ${e.message}`, action: 'error' };
+            return { text: "Erro ao corrigir: " + e.message };
+        }
+    }
+
+    async explainSql(sql) {
+        if (!this.groq) return { text: "⚠️ IA não configurada." };
+        const systemPrompt = `Você é um professor de Banco de Dados.
+        Explique o que a query SQL faz.
+        
+        REGRAS:
+        1. Use Markdown profissional (Negrito, Listas).
+        2. Seja conciso, direto e didático.
+        3. Destaque tabelas e colunas importantes.`;
+
+        try {
+            const completion = await this.groq.chat.completions.create({
+                messages: [{ role: "system", content: systemPrompt }, { role: "user", content: sql }],
+                model: this.modelName,
+                temperature: 0.3
+            });
+            return { text: completion.choices[0]?.message?.content || "" };
+        } catch (e) {
+            return { text: "Erro ao explicar: " + e.message };
+        }
+    }
+
+    async optimizeSql(sql) {
+        if (!this.groq) return { text: "⚠️ IA não configurada." };
+        const systemPrompt = `Você é uma Engine de Otimização SQL.
+        Sua tarefa é REESCREVER a query SQL para máxima performance.
+        
+        REGRAS RÍGIDAS:
+        1. Retorne APENAS o código SQL dentro de um bloco markdown (\`\`\`sql ... \`\`\`).
+        2. O SQL deve iniciar com o comentário: "-- Otimizado"
+        3. NÃO inclua explicações, análises ou texto "Aqui está". APENAS O CÓDIGO.
+        4. Se o SQL já estiver ótimo, retorne-o exatamente igual, apenas adicionando o comentário "-- Validado (Performance OK)" no topo.
+        5. Melhore: SARGABILITY, JOINs (Preferencialmente ANSI), e remova SELECT * se possível (mas mantenha * se não souber as colunas).
+        `;
+
+        try {
+            const completion = await this.groq.chat.completions.create({
+                messages: [{ role: "system", content: systemPrompt }, { role: "user", content: sql }],
+                model: this.modelName,
+                temperature: 0.1
+            });
+            return { text: completion.choices[0]?.message?.content || "" };
+        } catch (e) {
+            return { text: "Erro ao otimizar: " + e.message };
+        }
+    }
+
+    async generateSql(userPrompt, schemaContext) {
+        if (!this.groq) return { text: "⚠️ IA não configurada." };
+
+        const contextStr = schemaContext ? `\nContexto (Tabelas/Colunas):\n${JSON.stringify(schemaContext, null, 2)}` : "";
+
+        const systemPrompt = `Você é um Gerador de SQL Oracle.
+        Gere uma query SQL baseada no pedido.
+        ${contextStr}
+        
+        REGRAS:
+        1. Retorne APENAS o SQL dentro de bloco markdown.
+        2. Inclua comentário explicativo curto acima do SQL se necessário.
+        3. Use aliases curtos (t1, p) e formate bem o código.`;
+
+        try {
+            const completion = await this.groq.chat.completions.create({
+                messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
+                model: this.modelName,
+                temperature: 0.2
+            });
+            return { text: completion.choices[0]?.message?.content || "" };
+        } catch (e) {
+            return { text: "Erro ao gerar SQL: " + e.message };
         }
     }
 }

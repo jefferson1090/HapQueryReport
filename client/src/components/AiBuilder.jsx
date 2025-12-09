@@ -3,9 +3,20 @@ import { ThemeContext } from '../context/ThemeContext';
 import ReactMarkdown from 'react-markdown';
 import RemarkGfm from 'remark-gfm';
 import ColumnSelection from './ColumnSelection';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
 const AiBuilder = ({ isVisible }) => {
     const { theme } = useContext(ThemeContext);
+    // ... state ... (we need to be careful not to overwrite the whole file, but replace_file is chunk based)
+
+    // skipping the logic parts to focus on render...
+
+    // We need to target the RETURN statement for the major structural change.
+    // However, replace_file works on chunks. I will do this in two passes or use a large chunk if I can identify steady anchors.
+    // The imports are at the top.
+
+    // Changing imports first
+
     const [messages, setMessages] = useState([
         {
             id: 1,
@@ -344,7 +355,7 @@ const AiBuilder = ({ isVisible }) => {
             const grants = Array.isArray(draftData.grants) ? draftData.grants : [];
 
             return (
-                <div className="w-full h-full overflow-auto p-4 bg-gray-50">
+                <div className="w-full h-full overflow-auto p-4 bg-gray-50 custom-scroll">
                     <div className="mb-6 flex justify-between items-center bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
                         <div className="flex-1 mr-4">
                             <label className="text-xs text-purple-600 font-bold uppercase tracking-wider mb-1 block">Nome da Tabela</label>
@@ -426,19 +437,17 @@ const AiBuilder = ({ isVisible }) => {
                             <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
                                 <h3 className="font-bold text-gray-700 text-sm mb-3 border-b pb-2 flex justify-between items-center">
                                     <span>Índices Sugeridos</span>
-                                    {/* Manual add removed for now to favor automation */}
                                 </h3>
 
                                 {indices.length === 0 ? <p className="text-sm text-gray-400 italic">Nenhum índice definido.</p> : (
                                     <div className="flex flex-col gap-2">
                                         {indices.map((idx, i) => (
                                             <div key={i} className="flex items-center gap-2">
-                                                {/* If it's an object, show column name, else generic */}
                                                 <span className="text-[10px] bg-blue-50 text-blue-500 px-1 rounded w-16 truncate text-right font-bold" title={idx.column || '?'}>
                                                     {idx.column || 'CUSTOM'}
                                                 </span>
                                                 <input
-                                                    value={idx.name || idx} /* Handle legacy strings or objects */
+                                                    value={idx.name || idx}
                                                     onChange={(e) => {
                                                         const newData = { ...draftData };
                                                         if (typeof newData.indices[i] === 'object') {
@@ -517,31 +526,13 @@ const AiBuilder = ({ isVisible }) => {
     const renderDataView = () => {
         if (!viewData || !viewData.length) return <div className="p-4 text-gray-500">Nenhum dado para exibir.</div>;
 
-        // Intelligent Date Formatter
         const formatCell = (val) => {
             if (val === null || val === undefined) return '';
             if (typeof val === 'object') return JSON.stringify(val);
-
-            // Check if string looks like an ISO date (e.g., 2025-04-13T03:00:00.000Z)
             if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val)) {
                 const date = new Date(val);
                 if (!isNaN(date.getTime())) {
-                    // Check if meaningful time exists (not 00:00:00 or 03:00:00 - common timezone offset specific)
-                    // Actually, simpler heuristic: 
-                    // If the time is exactly midnight UTC or 03:00 (Brasilia offset for midnight), treat as Date Only.
-                    // But simpler: just check if the output time is 00:00 in local or standard.
-
-                    // Let's rely on standard PT-BR formatting
                     const hasTime = date.getHours() !== 0 || date.getMinutes() !== 0 || date.getSeconds() !== 0;
-
-                    // Specific fix for "03:00:00" which is often midnight in UTC-3
-                    // If we blindly convert, it might show time.
-                    // Let's use logic: If string ends in T03:00:00.000Z or T00:00:00.000Z, treat as Date Only?
-                    // User complained about "1965-04-13T03:00:00.000Z". Since Brazil is UTC-3, this is midnight.
-
-                    // Try to format to Local String
-                    // If the database stored just DATE, Oracle returns start of day.
-
                     return date.toLocaleString('pt-BR', {
                         day: '2-digit', month: '2-digit', year: 'numeric',
                         hour: hasTime ? '2-digit' : undefined,
@@ -555,9 +546,9 @@ const AiBuilder = ({ isVisible }) => {
 
         const columns = Object.keys(viewData[0]);
         return (
-            <div className="w-full h-full overflow-auto">
+            <div className="w-full h-full overflow-auto custom-scroll">
                 <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50 sticky top-0">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
                         <tr>
                             {columns.map(col => (
                                 <th key={col} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{col}</th>
@@ -578,10 +569,8 @@ const AiBuilder = ({ isVisible }) => {
         );
     };
 
-
-
     return (
-        <div className={`flex h-full ${theme.bg} overflow-hidden font-sans`}>
+        <div className={`h-full ${theme.bg} overflow-hidden font-sans`}>
 
             {/* --- SKILLS MODAL --- */}
             {showSkillsModal && (
@@ -625,192 +614,195 @@ const AiBuilder = ({ isVisible }) => {
                 </div>
             )}
 
-            {/* LEFT: Chat Interface */}
-            <div className={`w-[40%] flex flex-col border-r ${theme.border} ${theme.sidebar} shadow-sm z-10`}>
-                {/* Header */}
-                <div className={`p-4 border-b ${theme.border} flex items-center justify-between bg-white/50 backdrop-blur-sm`}>
-                    <div className="flex items-center space-x-2">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-md transition-all ${mode === 'ai' ? 'bg-gradient-to-tr from-blue-500 to-purple-600' : 'bg-green-600'}`}>
-                            {mode === 'ai' ? 'AI' : 'LG'}
-                        </div>
-                        <div>
-                            <h2 className={`font-bold text-sm ${theme.text}`}>Hap AI</h2>
-                            <p className="text-[10px] text-gray-500 cursor-pointer hover:underline" onClick={() => setShowSkillsModal(true)}>
-                                {mode === 'ai' ? 'Online • Ver Habilidades' : 'Modo Offline'}
-                            </p>
-                        </div>
-                    </div>
-                    <div className="flex items-center bg-gray-200 rounded-full p-1 cursor-pointer" onClick={() => setMode(mode === 'ai' ? 'local' : 'ai')}>
-                        <div className={`px-3 py-1 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'ai' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>AI</div>
-                        <div className={`px-3 py-1 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'local' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}>Off</div>
-                    </div>
-                </div>
-
-                {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50">
-                    {messages.map((msg) => (
-                        <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm ${msg.sender === 'user'
-                                ? 'bg-blue-600 text-white rounded-br-none'
-                                : (msg.isSystem ? 'bg-indigo-50 text-indigo-900 border border-indigo-100' : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none')
-                                }`}>
-                                {msg.sender === 'ai' ? (
-                                    <ReactMarkdown
-                                        remarkPlugins={[RemarkGfm]}
-                                        components={{
-                                            code({ node, inline, className, children, ...props }) {
-                                                const match = /language-(\w+)/.exec(className || '')
-                                                return !inline ? (
-                                                    <pre className="bg-gray-800 text-gray-100 p-3 rounded-lg my-2 text-xs font-mono overflow-x-auto border border-gray-700 shadow-inner">
-                                                        <code className={className} {...props}>
-                                                            {children}
-                                                        </code>
-                                                    </pre>
-                                                ) : (
-                                                    <code className="bg-gray-100 px-1 py-0.5 rounded text-red-500 font-mono text-xs" {...props}>
-                                                        {children}
-                                                    </code>
-                                                )
-                                            },
-                                            p({ children }) {
-                                                return <div className="mb-2 whitespace-pre-wrap leading-relaxed">{children}</div>
-                                            }
-                                        }}
-                                    >
-                                        {msg.text}
-                                    </ReactMarkdown>
-                                ) : (
-                                    <div className="whitespace-pre-wrap leading-relaxed">{msg.text}</div>
-                                )}
+            <PanelGroup direction="horizontal" className="h-full">
+                {/* LEFT: Chat Interface */}
+                <Panel defaultSize={25} minSize={20} maxSize={40} className={`flex flex-col border-r ${theme.border} ${theme.sidebar} shadow-sm z-10 custom-scroll`}>
+                    {/* Header */}
+                    <div className={`p-4 border-b ${theme.border} flex items-center justify-between bg-white/50 backdrop-blur-sm`}>
+                        <div className="flex items-center space-x-2">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-md transition-all ${mode === 'ai' ? 'bg-gradient-to-tr from-blue-500 to-purple-600' : 'bg-green-600'}`}>
+                                {mode === 'ai' ? 'AI' : 'LG'}
                             </div>
-                        </div>
-                    ))}
-                    {loading && (
-                        <div className="flex justify-start">
-                            <div className="bg-white border border-gray-100 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm flex space-x-1 items-center">
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                            </div>
-                        </div>
-                    )}
-                    <div ref={messagesEndRef} />
-                </div>
-
-                {/* Input */}
-                <div className={`p-3 border-t ${theme.border} bg-white`}>
-                    <div className="relative">
-                        <textarea
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            placeholder={mode === 'ai' ? "Ex: Quero ver os clientes de São Paulo..." : "Comandos: Busque tabelas..., Estrutura de..."}
-                            className={`w-full border-gray-200 rounded-xl pr-12 pl-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none shadow-sm ${theme.input} ${theme.border}`}
-                            rows={1}
-                            style={{ minHeight: '44px', maxHeight: '120px' }}
-                        />
-                        <button
-                            onClick={() => handleSend()}
-                            disabled={!input.trim() || loading}
-                            className={`absolute right-2 bottom-2 p-1.5 rounded-lg transition-colors ${input.trim() ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                                <path d="M3.478 2.404a.75.75 0 00-.926.941l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.404z" />
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {/* RIGHT: Content / Context Area */}
-            <div className={`flex-1 flex flex-col bg-white overflow-hidden relative border-l border-gray-100`}>
-
-                {/* Header */}
-                <div className={`h-14 border-b ${theme.border} flex items-center justify-between px-6 bg-white overflow-hidden`}>
-                    <h3 className="font-bold text-gray-700 text-sm uppercase tracking-wider flex items-center">
-                        <span className="text-lg mr-2">📄</span>
-                        {activeView === 'welcome' && 'Início'}
-                        {activeView === 'table_results' && 'Resultados da Busca'}
-                        {activeView === 'schema_view' && 'Estrutura da Tabela'}
-                        {activeView === 'data_view' && 'Dados'}
-                        {activeView === 'draft_view' && 'Rascunho'}
-                    </h3>
-                    <div className="flex space-x-2">
-                        {activeView !== 'welcome' && (
-                            <button onClick={() => { setActiveView('welcome'); setDraftData(null); }} className="text-xs text-gray-400 hover:text-gray-600">Voltar ao Início</button>
-                        )}
-                        <button onClick={() => setShowSkillsModal(true)} className="text-xs text-purple-600 font-bold bg-purple-50 px-2 py-1 rounded hover:bg-purple-100">
-                            Ajuda
-                        </button>
-                    </div>
-                </div>
-
-                {/* Body */}
-                <div className={`flex-1 overflow-hidden relative ${activeView === 'welcome' ? 'bg-gray-50 flex flex-col justify-center' : 'bg-white'}`}>
-
-                    {activeView === 'welcome' && (
-                        <div className="max-w-4xl mx-auto p-8 w-full">
-                            <div className="text-center mb-10">
-                                <h1 className="text-4xl font-extrabold text-gray-900 mb-2 tracking-tight">
-                                    O que vamos construir hoje?
-                                </h1>
-                                <p className="text-lg text-gray-500">
-                                    Escolha um atalho ou digite sua pergunta ao lado.
+                            <div>
+                                <h2 className={`font-bold text-sm ${theme.text}`}>Hap AI</h2>
+                                <p className="text-[10px] text-gray-500 cursor-pointer hover:underline" onClick={() => setShowSkillsModal(true)}>
+                                    {mode === 'ai' ? 'Online • Ver Habilidades' : 'Modo Offline'}
                                 </p>
                             </div>
-
-                            {/* DYNAMIC HEADLINES (Cards) */}
-                            {/* DYNAMIC HEADLINES (Cards) - HORIZONTAL SCROLL FIXED */}
-                            <div className="flex overflow-x-auto pb-6 space-x-6 px-2 snap-x">
-                                {headlines.map((headline) => (
-                                    <div
-                                        key={headline.id}
-                                        onClick={() => handleHeadlineClick(headline)}
-                                        className="snap-start shrink-0 w-96 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 cursor-pointer transition-all duration-300 hover:shadow-md hover:-translate-y-1 hover:border-blue-200 group flex flex-col justify-between"
-                                    >
-                                        <div>
-                                            <div className="flex justify-between items-start mb-4">
-                                                <span className="p-2 bg-blue-50 text-blue-600 rounded-lg text-xl group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                                    {headline.type === 'learned' ? '🧠' : (headline.type === 'template' ? '✏️' : '🚀')}
-                                                </span>
-                                                {headline.type === 'learned' && <span className="text-[10px] font-bold uppercase tracking-wider text-green-600 bg-green-50 px-2 py-1 rounded-full">Frequente</span>}
-                                            </div>
-                                            <h3 className="font-bold text-gray-800 text-lg mb-2 group-hover:text-blue-600 transition-colors whitespace-normal">
-                                                {headline.title}
-                                            </h3>
-                                            <p className="text-sm text-gray-500 line-clamp-3 whitespace-normal">
-                                                "{headline.prompt}"
-                                            </p>
-                                        </div>
-                                    </div>
-                                ))}
-
-                                {/* Static Fallback if headlines empty/fail */}
-                                {headlines.length === 0 && (
-                                    <div className="w-full text-center text-gray-400 py-10">
-                                        Carregando sugestões inteligentes...
-                                    </div>
-                                )}
-                            </div>
                         </div>
-                    )}
+                        <div className="flex items-center bg-gray-200 rounded-full p-1 cursor-pointer" onClick={() => setMode(mode === 'ai' ? 'local' : 'ai')}>
+                            <div className={`px-3 py-1 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'ai' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>AI</div>
+                            <div className={`px-3 py-1 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'local' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}>Off</div>
+                        </div>
+                    </div>
 
-                    {activeView === 'draft_view' && renderDraftView()}
-                    {activeView === 'table_results' && viewData && renderTableList()}
-                    {activeView === 'schema_view' && viewData && renderSchemaView()}
-                    {activeView === 'column_selection' && viewData && (
-                        <ColumnSelection
-                            viewData={viewData}
-                            onSearch={handleSend}
-                            onCancel={() => { setActiveView('welcome'); setViewData(null); }}
-                        />
-                    )}
-                    {activeView === 'data_view' && viewData && renderDataView()}
+                    {/* Messages */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50 code-scroll">
+                        {messages.map((msg) => (
+                            <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm ${msg.sender === 'user'
+                                    ? 'bg-blue-600 text-white rounded-br-none'
+                                    : (msg.isSystem ? 'bg-indigo-50 text-indigo-900 border border-indigo-100' : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none')
+                                    }`}>
+                                    {msg.sender === 'ai' ? (
+                                        <ReactMarkdown
+                                            remarkPlugins={[RemarkGfm]}
+                                            components={{
+                                                code({ node, inline, className, children, ...props }) {
+                                                    const match = /language-(\w+)/.exec(className || '')
+                                                    return !inline ? (
+                                                        <pre className="bg-gray-800 text-gray-100 p-3 rounded-lg my-2 text-xs font-mono overflow-x-auto border border-gray-700 shadow-inner">
+                                                            <code className={className} {...props}>
+                                                                {children}
+                                                            </code>
+                                                        </pre>
+                                                    ) : (
+                                                        <code className="bg-gray-100 px-1 py-0.5 rounded text-red-500 font-mono text-xs" {...props}>
+                                                            {children}
+                                                        </code>
+                                                    )
+                                                },
+                                                p({ children }) {
+                                                    return <div className="mb-2 whitespace-pre-wrap leading-relaxed">{children}</div>
+                                                }
+                                            }}
+                                        >
+                                            {msg.text}
+                                        </ReactMarkdown>
+                                    ) : (
+                                        <div className="whitespace-pre-wrap leading-relaxed">{msg.text}</div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                        {loading && (
+                            <div className="flex justify-start">
+                                <div className="bg-white border border-gray-100 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm flex space-x-1 items-center">
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                                </div>
+                            </div>
+                        )}
+                        <div ref={messagesEndRef} />
+                    </div>
 
-                </div>
-            </div>
+                    {/* Input */}
+                    <div className={`p-3 border-t ${theme.border} bg-white`}>
+                        <div className="flex items-end gap-2">
+                            <textarea
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                placeholder={mode === 'ai' ? "Ex: Quero ver os clientes de São Paulo..." : "Comandos: Busque tabelas..., Estrutura de..."}
+                                className={`flex-1 border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y shadow-sm ${theme.input} ${theme.border}`}
+                                rows={3}
+                                style={{ minHeight: '80px', maxHeight: '600px' }}
+                            />
+                            <button
+                                onClick={() => handleSend()}
+                                disabled={!input.trim() || loading}
+                                className={`p-3 rounded-xl transition-colors mb-0.5 ${input.trim() ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-md transform active:scale-95' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
+                                    <path d="M3.478 2.404a.75.75 0 00-.926.941l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.404z" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </Panel>
+
+                <PanelResizeHandle className="w-2 bg-gray-300 hover:bg-blue-500 transition-colors cursor-col-resize z-50 shadow-sm" />
+
+                <Panel className={`flex flex-col bg-white overflow-hidden relative min-w-0`}>
+                    {/* Header */}
+                    <div className={`h-14 border-b ${theme.border} flex items-center justify-between px-6 bg-white overflow-hidden flex-shrink-0`}>
+                        <h3 className="font-bold text-gray-700 text-sm uppercase tracking-wider flex items-center">
+                            <span className="text-lg mr-2">📄</span>
+                            {activeView === 'welcome' && 'Início'}
+                            {activeView === 'table_results' && 'Resultados da Busca'}
+                            {activeView === 'schema_view' && 'Estrutura da Tabela'}
+                            {activeView === 'data_view' && 'Dados'}
+                            {activeView === 'draft_view' && 'Rascunho'}
+                        </h3>
+                        <div className="flex space-x-2">
+                            {activeView !== 'welcome' && (
+                                <button onClick={() => { setActiveView('welcome'); setDraftData(null); }} className="text-xs text-gray-400 hover:text-gray-600">Voltar ao Início</button>
+                            )}
+                            <button onClick={() => setShowSkillsModal(true)} className="text-xs text-purple-600 font-bold bg-purple-50 px-2 py-1 rounded hover:bg-purple-100">
+                                Ajuda
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Body */}
+                    <div className={`flex-1 overflow-hidden relative ${activeView === 'welcome' ? 'bg-gray-50 flex flex-col justify-center' : 'bg-white'}`}>
+
+                        {activeView === 'welcome' && (
+                            <div className="w-full h-full overflow-y-auto p-4 custom-scroll">
+                                <div className="text-center mb-10 mt-10">
+                                    <h1 className="text-4xl font-extrabold text-gray-900 mb-2 tracking-tight">
+                                        O que vamos construir hoje?
+                                    </h1>
+                                    <p className="text-lg text-gray-500">
+                                        Escolha um atalho ou digite sua pergunta ao lado.
+                                    </p>
+                                </div>
+
+                                {/* DYNAMIC HEADLINES (Cards) - Grid Layout for Responsiveness */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-6 max-w-[1600px] mx-auto">
+                                    {headlines.map((headline) => (
+                                        <div
+                                            key={headline.id}
+                                            onClick={() => handleHeadlineClick(headline)}
+                                            className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 cursor-pointer transition-all duration-300 hover:shadow-md hover:-translate-y-1 hover:border-blue-200 group flex flex-col justify-between h-full min-h-[160px]"
+                                        >
+                                            <div>
+                                                <div className="flex justify-between items-start mb-4">
+                                                    <span className="p-2 bg-blue-50 text-blue-600 rounded-lg text-xl group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                                        {headline.type === 'learned' ? '🧠' : (headline.type === 'template' ? '✏️' : '🚀')}
+                                                    </span>
+                                                    {headline.type === 'learned' && <span className="text-[10px] font-bold uppercase tracking-wider text-green-600 bg-green-50 px-2 py-1 rounded-full">Frequente</span>}
+                                                </div>
+                                                <h3 className="font-bold text-gray-800 text-lg mb-2 group-hover:text-blue-600 transition-colors whitespace-normal">
+                                                    {headline.title}
+                                                </h3>
+                                                <p className="text-sm text-gray-500 line-clamp-3 whitespace-normal">
+                                                    "{headline.prompt}"
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+
+                                    {/* Static Fallback if headlines empty/fail */}
+                                    {headlines.length === 0 && (
+                                        <div className="w-full text-center text-gray-400 py-10">
+                                            Carregando sugestões inteligentes...
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeView === 'draft_view' && renderDraftView()}
+                        {activeView === 'table_results' && viewData && renderTableList()}
+                        {activeView === 'schema_view' && viewData && renderSchemaView()}
+                        {activeView === 'column_selection' && viewData && (
+                            <ColumnSelection
+                                initialColumns={viewData.map(c => c.COLUMN_NAME)}
+                                onConfirm={(selected) => {
+                                    handleSend(`Mostrar colunas: ${selected.join(', ')}`);
+                                }}
+                                onCancel={() => setActiveView('welcome')}
+                            />
+                        )}
+                        {activeView === 'data_view' && viewData && renderDataView()}
+
+                    </div>
+                </Panel>
+            </PanelGroup>
         </div>
     );
-}
+};
 
 export default AiBuilder;

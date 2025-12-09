@@ -12,6 +12,8 @@ import hapLogo from './assets/hap_logo_v4.png';
 // --- Theme Context & Definitions ---
 import { ThemeContext, THEMES } from './context/ThemeContext';
 
+const VERSION = "v1.15.45";
+
 function App() {
     const [connection, setConnection] = useState(null);
     const [activeTab, setActiveTab] = useState('query-builder');
@@ -31,7 +33,14 @@ function App() {
         const saved = localStorage.getItem('hap_sql_tabs');
         if (saved) {
             try {
-                return JSON.parse(saved);
+                const tabs = JSON.parse(saved);
+                return tabs.map(t => ({
+                    ...t,
+                    loading: false,
+                    error: null,
+                    // Ensure we don't show stale totals if there are no results
+                    totalRecords: t.results ? t.totalRecords : undefined
+                }));
             } catch (e) {
                 console.error("Failed to parse saved tabs", e);
             }
@@ -61,8 +70,8 @@ function App() {
     const [updateDownloaded, setUpdateDownloaded] = useState(false);
 
     useEffect(() => {
-        // v1.15.26 - Robust Auto-Save
-        document.title = "Hap Assistente de Dados v1.15.26";
+        // v1.15.42 - Robust Auto-Save
+        document.title = `Hap Assistente de Dados ${VERSION}`;
         if (window.electronAPI) {
             window.electronAPI.onUpdateAvailable(() => setUpdateAvailable(true));
             window.electronAPI.onUpdateDownloaded(() => {
@@ -123,7 +132,8 @@ function App() {
             ...t,
             results: null, // Don't save results to avoid localStorage limits
             error: null,
-            loading: false
+            loading: false,
+            totalRecords: undefined // Don't save total records as results are not saved
         }));
         localStorage.setItem('hap_sql_tabs', JSON.stringify(tabsToSave));
     }, [sqlTabs]);
@@ -259,12 +269,12 @@ function App() {
                     <div className="absolute inset-0 overflow-auto p-0"> {/* Removed padding for full width docs */}
                         <div className="h-full flex flex-col relative w-full">
                             {/* Content Wrappers (Preserving State) */}
-                            <div className={`${activeTab === 'query-builder' ? 'block h-full' : 'hidden'} p-4 sm:p-6 max-w-7xl mx-auto w-full`}>
+                            <div className={`${activeTab === 'query-builder' ? 'block h-full' : 'hidden'} w-full`}>
                                 <ErrorBoundary>
                                     <AiBuilder isVisible={activeTab === 'query-builder'} />
                                 </ErrorBoundary>
                             </div>
-                            <div className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} p-4 sm:p-6 max-w-7xl mx-auto w-full`}>
+                            <div className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} w-full`}>
                                 <SqlRunner
                                     isVisible={activeTab === 'sql-runner'}
                                     tabs={sqlTabs}

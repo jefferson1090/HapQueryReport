@@ -191,17 +191,43 @@ async function getColumns(tableNameInput) {
             console.error("View check error", e);
         }
 
+        // 1.2 Try to fetch columns (Owner Specific or First Match)
+        let columnSql = `
+            SELECT column_name, data_type, data_length, nullable, data_default, owner
+            FROM ALL_TAB_COLUMNS 
+            WHERE UPPER(TABLE_NAME) = UPPER(:tableName)
+        `;
+        const columnParams = { tableName };
+
+        if (owner) {
+            columnSql += ` AND UPPER(OWNER) = UPPER(:owner)`;
+            columnParams.owner = owner;
+        } else {
+            // Prioritize current user if no owner specified, but allow others
+            columnSql += ` ORDER BY (CASE WHEN UPPER(OWNER) = UPPER('${connectionParams.user}') THEN 0 ELSE 1 END), OWNER, COLUMN_ID`;
+        }
+
+        if (owner) {
+            columnSql += ` ORDER BY COLUMN_ID`;
+        }
+
         const result = await conn.execute(
-            `SELECT column_name, data_type, data_length, nullable, data_default
-             FROM ALL_TAB_COLUMNS 
-             WHERE UPPER(OWNER) = UPPER(:owner) AND UPPER(TABLE_NAME) = UPPER(:tableName) 
-             ORDER BY column_id`,
-            [owner, tableName],
-            { outFormat: oracledb.OUT_FORMAT_OBJECT } // Return objects!
+            columnSql,
+            columnParams,
+            { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 
+        // If generic search returned rows from multiple schemas (unlikely due to we need column list of ONE table),
+        // we should filter by the first owner found.
+        let finalRows = result.rows;
+        if (!owner && finalRows.length > 0) {
+            const firstOwner = finalRows[0].OWNER;
+            finalRows = finalRows.filter(r => r.OWNER === firstOwner);
+        }
+
         // Map to ensure uppercase keys (just in case) and add view definition if exists
-        const structure = result.rows.map(row => ({
+        // Map to ensure uppercase keys (just in case) and add view definition if exists
+        const structure = finalRows.map(row => ({
             COLUMN_NAME: row.COLUMN_NAME,
             DATA_TYPE: row.DATA_TYPE,
             DATA_LENGTH: row.DATA_LENGTH,
@@ -218,11 +244,145 @@ async function getColumns(tableNameInput) {
             structure.viewDefinition = viewText;
         }
 
+        if (viewText) {
+            structure.viewDefinition = viewText;
+        }
+
         return structure;
     } finally {
         if (conn) await conn.close();
     }
 }
+
+async function getSchemaDictionary() {
+    let conn;
+    try {
+        conn = await getConnection();
+
+        // Blocklist for system schemas
+        const ownerBlocklist = `
+            'SYS', 'SYSTEM', 'OUTLN', 'DBSNMP', 'APPQOSSYS', 'WMSYS', 'CTXSYS', 
+            'XDB', 'ORDDATA', 'ORDSYS', 'MDSYS', 'OLAPSYS', 'LBACSYS', 'DVSYS', 
+            'GSMADMIN_INTERNAL', 'APEX_040000', 'APEX_030200', 'AUDSYS'
+        `;
+
+        // Fetch columns for tables and views
+        // Prioritize schemas: Current User, HUMASTER, INCORPORA, then others.
+        const sql = `
+            SELECT OWNER, TABLE_NAME, COLUMN_NAME, DATA_TYPE
+            FROM ALL_TAB_COLUMNS
+            WHERE OWNER NOT IN (${ownerBlocklist})
+            ORDER BY 
+                CASE 
+                    WHEN OWNER = '${currentUser}' THEN 0
+                    WHEN OWNER IN ('HUMASTER', 'INCORPORA') THEN 1
+                    ELSE 2 
+                END,
+                OWNER, TABLE_NAME, COLUMN_ID
+        `;
+
+        // Set a safe limit (200,000 columns) to prevent browser crash, 
+        // but rely on prioritization to get the important stuff.
+        const result = await conn.execute(sql, [], { maxRows: 200000 });
+
+        const dictionary = {};
+        const ownersFound = new Set();
+
+        // Current User (to prioritize short names)
+        const currentUser = connectionParams.user.toUpperCase();
+
+        result.rows.forEach(row => {
+            const [owner, tableName, colName, dataType] = row;
+
+            // 1. Fully Qualified Name: OWNER.TABLE_NAME
+            const fullName = `${owner}.${tableName}`;
+            if (!dictionary[fullName]) dictionary[fullName] = [];
+            dictionary[fullName].push(colName);
+
+            // 2. Short Name: TABLE_NAME (Only if it belongs to current user or isn't taken yet)
+            // If collision (same table name in multiple schemas), current user wins.
+            if (owner === currentUser) {
+                // Always overwrite/set for current user
+                if (!dictionary[tableName]) dictionary[tableName] = [];
+                dictionary[tableName].push(colName);
+            } else {
+                // Only set if not already present (avoid overwriting current user's table with same name from another schema)
+                if (!dictionary[tableName]) {
+                    dictionary[tableName] = [];
+                    dictionary[tableName].push(colName);
+                } else {
+                    // If it exists, append only if it's the SAME array (meaning it was set by this block previously)
+                    // Actually, if dictionary[tableName] exists, it might be from current user OR another schema.
+                    // It's complex to track "who owns the short key".
+                    // Simplification: Short name `TABLE` maps to the first one found (alphabetic owner order mostly) OR current user.
+                    // Since we process row by row, and we want current user priority, we should ideally simply maintain two sets or just trust the overwrite logic above?
+                    // My logic above: 
+                    // - If owner is current user -> Force write to dictionary[tableName] (because subsequent lines for same table will just append).
+                    // - If owner is NOT current user -> Only write if dictionary[tableName] is empty.
+                    // The issue: What if we processed 'OTHER_USER' first, filled dictionary['T1'], and then encounter 'CURRENT_USER' later?
+                    // We would overwrite dictionary['T1'] with a NEW array, essentially clearing the 'OTHER_USER' columns from the short name entry.
+                    // That is CORRECT behavior for prioritization. 
+
+                    // However, we need to make sure we are appending to the *correct* array instance.
+                    // When we do dictionary[tableName] = [], we create a new array.
+                    // Subsequent rows for that same table:
+                    // Owner matches -> dictionary[tableName].push
+                    // Owner doesn't match -> dictionary[tableName].push (if it was created by that non-owner logic).
+
+                    // Optimization: Just push to `dictionary[fullName]`.
+                    // Then handle `dictionary[tableName]` carefully.
+                }
+            }
+        });
+
+        // Second Pass for Short Names to avoid the "overwrite clears previous columns" issue during iteration
+        // Actually, let's simpler:
+        // Use the `fullName` entries to populate `tableName` entries.
+        // Filter keys by owner == current user, set those first.
+        // Then remaining keys that don't conflict.
+
+        // Optimized Single Pass approach:
+        // Map: Owner -> Table -> [Cols]
+        const tempMap = {};
+        result.rows.forEach(row => {
+            const [owner, name, col] = row;
+            if (!tempMap[owner]) tempMap[owner] = {};
+            if (!tempMap[owner][name]) tempMap[owner][name] = [];
+            tempMap[owner][name].push(col);
+        });
+
+        // Build final dictionary
+        Object.keys(tempMap).forEach(owner => {
+            Object.keys(tempMap[owner]).forEach(table => {
+                const cols = tempMap[owner][table];
+                const fullName = `${owner}.${table}`;
+
+                // Always add full name
+                dictionary[fullName] = cols;
+
+                // Add short name logic
+                if (owner === currentUser) {
+                    // Always win
+                    dictionary[table] = cols;
+                } else {
+                    // Only if empty
+                    if (!dictionary[table]) {
+                        dictionary[table] = cols;
+                    }
+                }
+            });
+        });
+
+        console.log(`[Schema Dictionary] Loaded ${Object.keys(dictionary).length} keys from ${ownersFound.size} schemas.`);
+        console.log(`[Schema Dictionary] Schemas found: ${Array.from(ownersFound).sort().join(', ')}`);
+
+        return dictionary;
+
+    } finally {
+        if (conn) await conn.close();
+    }
+}
+
 
 async function executeQuery(sql, params = [], limit = 1000, extraOptions = {}) {
     let conn;
@@ -428,5 +588,6 @@ module.exports = {
     getConnection,
     execute,
     oracledb,
-    findObjects
+    findObjects,
+    getSchemaDictionary
 };

@@ -138,7 +138,8 @@ try {
 // In production/packaged mode, serve the React app from 'client/dist'
 const clientDistPath = path.join(__dirname, '..', 'client', 'dist');
 if (fs.existsSync(clientDistPath)) {
-  console.log(`Serving static files from: ${clientDistPath}`);
+  console.log(`[DEBUG] Serving static files from: ${clientDistPath}`);
+  console.log(`[DEBUG] Directory contents: ${fs.readdirSync(clientDistPath).join(', ')}`);
   app.use(express.static(clientDistPath));
   // SPA Fallback
   // SPA Fallback
@@ -179,6 +180,17 @@ app.get('/api/columns/:table', async (req, res) => {
     const columns = await db.getColumns(req.params.table);
     res.json(columns);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3.1 Get Schema Dictionary (Tables & Columns)
+app.get('/api/schema/dictionary', async (req, res) => {
+  try {
+    const dictionary = await db.getSchemaDictionary();
+    res.json(dictionary);
+  } catch (err) {
+    console.error("Schema Dictionary Error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -239,6 +251,16 @@ app.post('/api/ai/chat', async (req, res) => {
   try {
     const { message, mode, history } = req.body;
     const result = await aiService.processMessage(message, mode, history);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/ai/sql/optimize', async (req, res) => {
+  try {
+    const { sql } = req.body;
+    const result = await aiService.optimizeSql(sql);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -927,6 +949,33 @@ app.post('/api/docs/ai/process', async (req, res) => {
     res.json({ text: result.text || result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// --- NEW SQL AI ENDPOINTS ---
+app.post('/api/ai/sql/fix', async (req, res) => {
+  try {
+    const { sql, error } = req.body;
+    const result = await aiService.fixSqlError(sql, error);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/ai/sql/explain', async (req, res) => {
+  try {
+    const { sql } = req.body;
+    const result = await aiService.explainSql(sql);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/ai/sql/chat', async (req, res) => {
+  try {
+    const { prompt, schemaContext } = req.body;
+    // schemaContext might be client-side filtered schema or full text
+    const result = await aiService.generateSql(prompt, schemaContext);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 
 app.post('/api/docs/nodes', async (req, res) => {
   try {

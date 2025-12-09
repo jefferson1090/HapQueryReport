@@ -1,10 +1,14 @@
+import { format } from 'sql-formatter';
 import React, { useState, useEffect, useContext, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import { ThemeContext } from '../context/ThemeContext';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql, PLSQL } from '@codemirror/lang-sql';
 import { autocompletion } from '@codemirror/autocomplete';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import PropTypes from 'prop-types';
 
 // Custom AutoSizer to avoid build issues with the library
@@ -208,7 +212,10 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const [queryName, setQueryName] = useState('');
     const [showSaveInput, setShowSaveInput] = useState(false);
     const [showSidebar, setShowSidebar] = useState(true);
-    const [activeSidebarTab, setActiveSidebarTab] = useState('saved'); // 'saved' or 'schema'
+    const [activeSidebarTab, setActiveSidebarTab] = useState('saved'); // 'saved', 'schema', 'chat'
+    const [aiChatHistory, setAiChatHistory] = useState([]);
+    const [aiChatInput, setAiChatInput] = useState('');
+    const [aiLoading, setAiLoading] = useState(false);
 
     // Schema Browser State
     const [schemaSearch, setSchemaSearch] = useState('');
@@ -227,6 +234,53 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const [serverSideFilter, setServerSideFilter] = useState(false);
     const [draggingCol, setDraggingCol] = useState(null);
 
+    // --- Auto Column Width Calculation ---
+    const calculateColumnWidths = (results) => {
+        if (!results || !results.metaData || !results.rows) return {};
+        const widths = {};
+        const MAX_WIDTH = 400;
+        const MIN_WIDTH = 100;
+        const CHAR_WIDTH = 8; // approx px per char
+
+        results.metaData.forEach((col, idx) => {
+            let maxLen = col.name.length;
+
+            // Check first 100 rows for content length to be fast
+            const sampleRows = results.rows.slice(0, 100);
+            sampleRows.forEach(row => {
+                const val = row[idx];
+                if (val !== null && val !== undefined) {
+                    const strLen = String(val).length;
+                    if (strLen > maxLen) maxLen = strLen;
+                }
+            });
+
+            const calculated = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, maxLen * CHAR_WIDTH + 30)); // +30 for padding/icons
+            widths[col.name] = calculated;
+        });
+        return widths;
+    };
+
+    const handleDoubleClickResizer = (colName) => {
+        if (!activeTab.results) return;
+        const colIdx = activeTab.results.metaData.findIndex(m => m.name === colName);
+        if (colIdx === -1) return;
+
+        let maxLen = colName.length;
+        // Check all rows for this specific column resize
+        activeTab.results.rows.forEach(row => {
+            const val = row[colIdx];
+            if (val !== null && val !== undefined) {
+                const strLen = String(val).length;
+                if (strLen > maxLen) maxLen = strLen;
+            }
+        });
+
+        const CHAR_WIDTH = 8;
+        const calculated = Math.min(800, Math.max(100, maxLen * CHAR_WIDTH + 30));
+        setColumnWidths(prev => ({ ...prev, [colName]: calculated }));
+    };
+
     // Initialize column state when results change
     useEffect(() => {
         if (activeTab.results && activeTab.results.metaData) {
@@ -237,8 +291,27 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
             setVisibleColumns(initialVisible);
             setColumnOrder(initialOrder);
             setColumnFilters({});
+
+            // Auto Calculate Widths
+            const autoWidths = calculateColumnWidths(activeTab.results);
+            setColumnWidths(autoWidths);
         }
     }, [activeTab.results]);
+
+    // Initial Schema Fetch for Autocomplete
+    /* PAUSED BY USER REQUEST
+    useEffect(() => {
+        const loadSchemaDictionary = async () => {
+            try {
+                // ... (implementation hidden)
+            } catch (err) {
+               // ...
+            }
+        };
+        // const timer = setTimeout(loadSchemaDictionary, 500);
+        // return () => clearTimeout(timer);
+    }, []); 
+    */
 
     const fetchSchemaTables = async (search = '') => {
         setLoadingSchema(true);
@@ -695,32 +768,21 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         if (typeof val !== 'string') return val;
 
         // Strict ISO Date regex (YYYY-MM-DDTHH:mm:ss...)
-        // We only want to format typical database timestamps
         const isoDateRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?$/;
 
         if (isoDateRegex.test(val)) {
             const date = new Date(val);
             if (isNaN(date.getTime())) return val;
 
-            // Check if it has "meaningful" time.
-            // Often "03:00:00.000Z" effectively means "Midnight in Brazil" (GMT-3) or just Midnight UTC
-            // If the UTC time is Turn-of-Day or if Local time is Turn-of-Day, we might show just Date.
-            // However, sticking to the standard: 
-            // If local time has 00:00:00, show only date.
-
-            // To be precise: If the string ends in T00:00:00.000Z or T03:00:00.000Z (typical Oracle Date w/o Time in BRT context)
-            // But let's rely on the Date object values.
-
             const hours = date.getHours();
             const minutes = date.getMinutes();
             const seconds = date.getSeconds();
-
             const hasTime = hours !== 0 || minutes !== 0 || seconds !== 0;
 
             if (!hasTime) {
-                return date.toLocaleDateString('pt-BR'); // DD/MM/YYYY
+                return date.toLocaleDateString('pt-BR');
             } else {
-                return date.toLocaleString('pt-BR'); // DD/MM/YYYY HH:mm:ss
+                return date.toLocaleString('pt-BR');
             }
         }
         return val;
@@ -769,6 +831,157 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         );
     };
 
+    // --- AI & Formatter Logic ---
+    const handleFormat = () => {
+        try {
+            const formatted = format(activeTab.sqlContent, {
+                language: 'plsql',
+                keywordCase: 'upper',
+                linesBetweenQueries: 2
+            });
+            updateActiveTab({ sqlContent: formatted });
+            // showToast("SQL Formatado!", "success", 1500);
+        } catch (e) {
+            console.error("Format Error", e);
+            showToast("Erro ao formatar: " + e.message, "error");
+        }
+    };
+
+    const handleAiChatSubmit = async (e) => {
+        if (e) e.preventDefault();
+        if (!aiChatInput.trim()) return;
+
+        const userMsg = { role: 'user', content: aiChatInput };
+        setAiChatHistory(prev => [userMsg, ...prev]);
+        setAiChatInput('');
+        setAiLoading(true);
+
+        try {
+            // Prepare reduced schema context (just table names map)
+            const schemaContext = Object.keys(schemaData).reduce((acc, table) => {
+                acc[table] = schemaData[table];
+                return acc;
+            }, {});
+
+            const res = await fetch('http://localhost:3001/api/ai/sql/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: userMsg.content, schemaContext })
+            });
+            const data = await res.json();
+
+            const aiMsg = { role: 'assistant', content: data.text };
+            setAiChatHistory(prev => [aiMsg, ...prev]);
+
+        } catch (err) {
+            setAiChatHistory(prev => [{ role: 'assistant', content: "Erro na comunicação com a IA." }, ...prev]);
+        } finally {
+            setAiLoading(false);
+        }
+    };
+
+    const handleFixError = async () => {
+        if (!activeTab.error) return;
+        setAiLoading(true);
+        showToast("IA analisando erro...", "info", 2000);
+
+        try {
+            const res = await fetch('http://localhost:3001/api/ai/sql/fix', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql: activeTab.sqlContent, error: activeTab.error })
+            });
+            const data = await res.json();
+
+            // Auto-apply if SQL block found
+            const sqlMatch = data.text.match(/```sql\s*([\s\S]*?)\s*```/);
+
+            let finalMessage = data.text;
+            if (sqlMatch && sqlMatch[1]) {
+                const fixedSql = sqlMatch[1].trim();
+                updateActiveTab({ sqlContent: fixedSql });
+                showToast("✨ SQL Corrigido e Aplicado!", "success");
+                finalMessage = `**Correção Aplicada:**\n\n${data.text}`;
+            } else {
+                showToast("Sugestão recebida no chat.", "success");
+            }
+
+            setActiveSidebarTab('chat');
+            setAiChatHistory(prev => [
+                { role: 'system', content: finalMessage },
+                ...prev
+            ]);
+
+        } catch (err) {
+            showToast("Falha ao corrigir: " + err.message, "error");
+        } finally {
+            setAiLoading(false);
+        }
+    };
+
+    const handleExplainSql = async () => {
+        if (!activeTab.sqlContent) return;
+        setAiLoading(true);
+        showToast("Gerando explicação...", "info", 2000);
+        try {
+            const res = await fetch('http://localhost:3001/api/ai/sql/explain', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql: activeTab.sqlContent })
+            });
+            const data = await res.json();
+
+            setActiveSidebarTab('chat');
+            setAiChatHistory(prev => [
+                { role: 'system', content: `**Explicação:**\n\n${data.text}` },
+                ...prev
+            ]);
+            showToast("Explicação gerada no Chat!", "success");
+        } catch (err) {
+            showToast("Erro: " + err.message, "error");
+        } finally {
+            setAiLoading(false);
+        }
+    };
+
+    const handleOptimizeSql = async () => {
+        if (!activeTab.sqlContent) return;
+        setAiLoading(true);
+        showToast("Analisando performance...", "info", 2000);
+        try {
+            const res = await fetch('http://localhost:3001/api/ai/sql/optimize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql: activeTab.sqlContent })
+            });
+            const data = await res.json();
+
+            // Extract SQL blocks if present, or use raw text if it looks like SQL
+            let optimizedSql = data.text;
+            const sqlMatch = data.text.match(/```sql\n([\s\S]+?)\n```/);
+            if (sqlMatch && sqlMatch[1]) {
+                optimizedSql = sqlMatch[1];
+            }
+
+            // Ensure comment exists
+            if (!optimizedSql.trim().startsWith("--")) {
+                optimizedSql = "-- Otimizado por IA\n" + optimizedSql;
+            }
+
+            updateActiveTab({ sqlContent: optimizedSql });
+            showToast("SQL Otimizado e atualizado no editor!", "success");
+
+            // Optional: Add small note to chat only if significant explanation exists?
+            // User requested NO explanation in chat, just update.
+            // So we do nothing in 'setAiChatHistory'.
+
+        } catch (err) {
+            showToast("Erro: " + err.message, "error");
+        } finally {
+            setAiLoading(false);
+        }
+    };
+
     // Container click handler to ensure focus
     const handleContainerClick = () => {
         if (viewRef.current && !viewRef.current.hasFocus) {
@@ -796,484 +1009,565 @@ function SqlRunner({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                 </div>
             )}
 
-            <div className="flex gap-4 h-full overflow-hidden">
+            <PanelGroup direction="horizontal" className="h-full">
                 {/* Main Editor Area */}
-                <div className="flex-1 space-y-2 flex flex-col overflow-hidden">
-
-                    {/* Tabs Header */}
-                    <div className="flex items-center space-x-1 overflow-x-auto border-b border-gray-200 pb-1">
-                        {tabs.map(tab => (
-                            <div
-                                key={tab.id}
-                                onClick={() => setActiveTabId(tab.id)}
-                                className={`group flex items-center px-3 py-1.5 text-xs font-medium rounded-t-lg cursor-pointer border-t border-l border-r ${activeTabId === tab.id
-                                    ? 'bg-white text-blue-600 border-gray-200 relative top-[1px]'
-                                    : 'bg-gray-100 text-gray-500 hover:bg-gray-50 border-transparent'
-                                    }`}
-                            >
-                                <span className="mr-2 max-w-[100px] truncate">{tab.title}</span>
-                                <button
-                                    onClick={(e) => closeTab(e, tab.id)}
-                                    className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500"
-                                >
-                                    ✕
-                                </button>
-                            </div>
-                        ))}
-                        <button
-                            onClick={addTab}
-                            className="px-2 py-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
-                            title="Nova Aba"
-                        >
-                            +
-                        </button>
-                    </div>
-
-                    <div className="flex-none">
-                        <div ref={containerRef} onClick={handleContainerClick} className={`border rounded overflow-hidden ${theme.border} cursor-text`}>
-                            {isVisible && (
-                                <CodeMirror
-                                    value={activeTab.sqlContent}
-                                    height="200px"
-                                    extensions={[
-                                        sql({ schema: schemaData, dialect: PLSQL }),
-                                        autocompletion({
-                                            override: [(context) => {
-                                                let word = context.matchBefore(/\w*/)
-                                                if (!word) return null
-                                                if (word.from == word.to && !context.explicit) return null
-
-                                                const oracleFunctions = [
-                                                    { label: "NVL", type: "function", detail: "nvl(expr1, expr2)" },
-                                                    { label: "NVL2", type: "function", detail: "nvl2(expr1, expr2, expr3)" },
-                                                    { label: "DECODE", type: "function", detail: "decode(expr, search, result...)" },
-                                                    { label: "TO_CHAR", type: "function", detail: "to_char(n, [fmt])" },
-                                                    { label: "TO_DATE", type: "function", detail: "to_date(char, [fmt])" },
-                                                    { label: "TO_NUMBER", type: "function", detail: "to_number(expr, [fmt])" },
-                                                    { label: "SUBSTR", type: "function", detail: "substr(char, position, [len])" },
-                                                    { label: "INSTR", type: "function", detail: "instr(string, substring)" },
-                                                    { label: "REPLACE", type: "function", detail: "replace(char, search, [replace])" },
-                                                    { label: "TRUNC", type: "function", detail: "trunc(date, [fmt])" },
-                                                    { label: "ROUND", type: "function", detail: "round(n, [integer])" },
-                                                    { label: "SYSDATE", type: "keyword", detail: "Current Date" },
-                                                    { label: "UPPER", type: "function", detail: "upper(char)" },
-                                                    { label: "LOWER", type: "function", detail: "lower(char)" },
-                                                    { label: "COALESCE", type: "function", detail: "coalesce(expr1, ...)" },
-                                                    { label: "LISTAGG", type: "function", detail: "listagg(measure, delimiter)" },
-                                                    { label: "CASE", type: "keyword", detail: "CASE WHEN ... END" },
-                                                    { label: "WHEN", type: "keyword" },
-                                                    { label: "THEN", type: "keyword" },
-                                                    { label: "ELSE", type: "keyword" },
-                                                    { label: "END", type: "keyword" }
-                                                ];
-
-                                                return {
-                                                    from: word.from,
-                                                    options: oracleFunctions
-                                                }
-                                            }]
-                                        })
-                                    ]}
-                                    onChange={(value) => updateActiveTab({ sqlContent: value })}
-                                    theme={theme.name === 'Modo Escuro' || theme.name === 'Dracula' ? 'dark' : 'light'}
-                                    className="text-sm"
-                                    onCreateEditor={(view) => {
-                                        viewRef.current = view;
-                                        view.focus();
-                                    }}
-                                />
-                            )}
-                        </div>
-
-                        <div className={`mt-2 flex items-center justify-between p-2 rounded border ${theme.panel} ${theme.border}`}>
-                            <div className="flex items-center space-x-3">
-                                <button
-                                    onClick={executeQuery}
-                                    disabled={!activeTab.sqlContent || activeTab.loading}
-                                    className={`py-2 px-6 rounded-lg shadow-md transition-all font-semibold flex items-center disabled:opacity-50 ${theme.primaryBtn}`}
-                                >
-                                    {activeTab.loading ? (
-                                        <>
-                                            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
-                                            Executando...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <span className="mr-2">▶</span> Executar
-                                        </>
-                                    )}
-                                </button>
-
-                                {activeTab.totalRecords !== undefined && (
-                                    <span className="text-xs font-medium text-gray-500 ml-2">
-                                        Total: {activeTab.totalRecords.toLocaleString()} registros
-                                    </span>
-                                )}
-
-                                <button
-                                    onClick={() => setShowSidebar(!showSidebar)}
-                                    className={`p-2 rounded border transition-colors flex items-center justify-center ${showSidebar ? `${theme.primaryBtn}` : `${theme.secondaryBtn}`}`}
-                                    title={showSidebar ? "Ocultar Menu Lateral" : "Mostrar Menu Lateral"}
-                                >
-                                    {/* Sidebar Layout Icon */}
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 6v12" />
-                                    </svg>
-                                </button>
-                                <label className="cursor-pointer p-2 rounded border transition-colors text-gray-500 hover:bg-blue-50 hover:text-blue-600" title="Carregar Arquivo SQL">
-                                    <input
-                                        type="file"
-                                        accept=".sql"
-                                        onChange={handleFileUpload}
-                                        className="hidden"
-                                    />
-                                    {/* Paperclip Icon */}
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                                    </svg>
-                                </label>
-
-                                <div className={`flex items-center border-l pl-2 ${theme.border}`}>
-                                    <select
-                                        value={limit}
-                                        onChange={(e) => setLimit(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                                        title="Limite de Linhas"
-                                        className={`border rounded p-1.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none w-24 ${theme.input} ${theme.border}`}
+                <Panel defaultSize={80} minSize={30}>
+                    <PanelGroup direction="vertical" className="h-full">
+                        {/* Top Panel: Tabs + Editor + Actions */}
+                        <Panel defaultSize={50} minSize={20} className="flex flex-col">
+                            {/* Tabs Header */}
+                            <div className="flex items-center space-x-1 overflow-x-auto border-b border-gray-200 pb-1 flex-none">
+                                {tabs.map(tab => (
+                                    <div
+                                        key={tab.id}
+                                        onClick={() => setActiveTabId(tab.id)}
+                                        className={`group flex items-center px-3 py-1.5 text-xs font-medium rounded-t-lg cursor-pointer border-t border-l border-r ${activeTabId === tab.id
+                                            ? 'bg-white text-blue-600 border-gray-200 relative top-[1px]'
+                                            : 'bg-gray-100 text-gray-500 hover:bg-gray-50 border-transparent'
+                                            }`}
                                     >
-                                        <option value={100}>100 linhas</option>
-                                        <option value={500}>500 linhas</option>
-                                        <option value={1000}>1000 linhas</option>
-                                        <option value={5000}>5000 linhas</option>
-                                        <option value="all">Todas</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div className="flex items-center space-x-2">
-                                {showSaveInput ? (
-                                    <div className="flex items-center space-x-2 animate-fade-in">
-                                        <input
-                                            type="text"
-                                            value={queryName}
-                                            onChange={(e) => setQueryName(e.target.value)}
-                                            placeholder="Nome da Query"
-                                            className={`border rounded p-1.5 text-sm focus:ring-2 focus:ring-[#f37021] outline-none ${theme.input} ${theme.border}`}
-                                            autoFocus
-                                        />
-                                        <button onClick={saveQuery} className="text-green-600 hover:bg-green-50 p-1.5 rounded" title="Confirmar">✅</button>
-                                        <button onClick={() => setShowSaveInput(false)} className="text-red-600 hover:bg-red-50 p-1.5 rounded" title="Cancelar">❌</button>
-                                    </div>
-                                ) : (
-                                    <button
-                                        onClick={() => setShowSaveInput(true)}
-                                        disabled={!activeTab.sqlContent}
-                                        className={`px-3 py-2 rounded transition-colors text-sm font-medium flex items-center disabled:opacity-50 ${theme.secondaryBtn}`}
-                                    >
-                                        <span className="mr-1">💾</span> Salvar Query
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-
-                    {activeTab.error && (
-                        <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded shadow-sm">
-                            <p className="text-red-700 font-medium">Erro ao executar query:</p>
-                            <p className="text-sm text-red-600 mt-1">{activeTab.error}</p>
-                        </div>
-                    )}
-
-                    {activeTab.results && (
-                        <div className={`rounded-lg shadow-md border flex-1 flex flex-col overflow-hidden min-h-0 ${theme.panel} ${theme.border}`}>
-                            <div className={`p-3 border-b flex justify-between items-center ${theme.header}`}>
-                                <div className="flex items-center space-x-4">
-                                    <h3 className={`text-sm font-bold ${theme.sidebarText}`}>
-                                        Resultados: {filteredRows.length} {activeTab.totalRecords !== undefined ? `de ${activeTab.totalRecords.toLocaleString()} (Total)` : ''} {limit !== 'all' && activeTab.results.rows.length >= limit ? '(Limitado)' : ''}
-                                    </h3>
-
-                                    {/* Column Controls */}
-                                    <div className="relative">
+                                        <span className="mr-2 max-w-[100px] truncate">{tab.title}</span>
                                         <button
-                                            onClick={() => setShowColumnMenu(!showColumnMenu)}
-                                            className={`text-xs px-2 py-1 rounded border flex items-center ${theme.secondaryBtn} ${theme.border}`}
+                                            onClick={(e) => closeTab(e, tab.id)}
+                                            className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500"
                                         >
-                                            👁️ Colunas
+                                            ✕
                                         </button>
-                                        {showColumnMenu && (
-                                            <div className={`absolute top-full left-0 mt-1 w-48 border rounded shadow-lg z-20 max-h-60 overflow-y-auto p-2 ${theme.panel} ${theme.border}`}>
-                                                <div className="text-xs font-bold text-gray-500 mb-2 uppercase">Exibir/Ocultar</div>
-                                                {columnOrder.map(col => (
-                                                    <label key={col} className="flex items-center space-x-2 mb-1 cursor-pointer hover:bg-gray-50 p-1 rounded">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={visibleColumns[col]}
-                                                            onChange={(e) => setVisibleColumns({ ...visibleColumns, [col]: e.target.checked })}
-                                                            className="rounded text-blue-600 focus:ring-blue-500"
-                                                        />
-                                                        <span className={`text-sm truncate ${theme.sidebarText}`}>{col}</span>
-                                                    </label>
-                                                ))}
+                                    </div>
+                                ))}
+                                <button
+                                    onClick={addTab}
+                                    className="px-2 py-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
+                                    title="Nova Aba"
+                                >
+                                    +
+                                </button>
+                            </div>
+
+                            <div className="flex-1 min-h-0 relative flex flex-col">
+                                <div ref={containerRef} onClick={handleContainerClick} className={`border rounded overflow-hidden ${theme.border} cursor-text flex-1 relative`}>
+                                    {isVisible && (
+                                        <CodeMirror
+                                            value={activeTab.sqlContent}
+                                            height="100%"
+                                            extensions={[
+                                                sql({
+                                                    schema: {},
+                                                    dialect: PLSQL,
+                                                    upperCaseKeywords: true
+                                                }),
+                                                autocompletion({
+                                                    override: [
+                                                        async (context) => {
+                                                            const word = context.matchBefore(/([a-zA-Z0-9_$]+)(\.)/);
+                                                            if (!word) return null;
+                                                            let objectName = word.text.slice(0, -1).toUpperCase();
+
+                                                            // --- ALIAS RESOLUTION ---
+                                                            const docText = context.state.doc.toString();
+                                                            const aliasMap = {};
+                                                            // Capture: FROM/JOIN table [AS] alias
+                                                            const aliasRegex = /(?:FROM|JOIN)\s+([a-zA-Z0-9_$.]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_$]+))?/gi;
+
+                                                            let match;
+                                                            while ((match = aliasRegex.exec(docText)) !== null) {
+                                                                if (match[2]) {
+                                                                    aliasMap[match[2].toUpperCase()] = match[1].toUpperCase();
+                                                                }
+                                                            }
+
+                                                            if (aliasMap[objectName]) {
+                                                                objectName = aliasMap[objectName];
+                                                            }
+
+                                                            // Check Cache
+                                                            if (schemaData[objectName] && schemaData[objectName].length > 0) {
+                                                                return {
+                                                                    from: word.to,
+                                                                    options: schemaData[objectName].map(col => ({ label: col, type: "property" }))
+                                                                };
+                                                            }
+
+                                                            // Fetch from API
+                                                            try {
+                                                                const res = await fetch(`http://localhost:3001/api/columns/${encodeURIComponent(objectName)}`);
+                                                                const cols = await res.json();
+                                                                if (cols && cols.length > 0) {
+                                                                    const colNames = cols.map(c => c.name);
+                                                                    setSchemaData(prev => ({ ...prev, [objectName]: colNames }));
+                                                                    return {
+                                                                        from: word.to,
+                                                                        options: colNames.map(name => ({ label: name, type: "property" }))
+                                                                    };
+                                                                }
+                                                            } catch (e) {
+                                                                console.warn("Column fetch failed", e);
+                                                            }
+                                                            return null;
+                                                        },
+                                                        (context) => {
+                                                            const word = context.matchBefore(/\w*/);
+                                                            if (!word || (word.from === word.to && !context.explicit)) return null;
+                                                            const keywords = [
+                                                                "SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "HAVING", "INSERT INTO", "UPDATE", "DELETE FROM",
+                                                                "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "OUTER JOIN", "ON", "AS", "DISTINCT", "CASE", "WHEN", "THEN", "ELSE", "END",
+                                                                "AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE", "IS NULL", "IS NOT NULL",
+                                                                "UNION", "UNION ALL", "INTERSECT", "MINUS",
+                                                                "NVL", "NVL2", "DECODE", "TO_CHAR", "TO_DATE", "TO_NUMBER", "SUBSTR", "INSTR",
+                                                                "TRUNC", "ROUND", "SYSDATE", "UPPER", "LOWER", "COALESCE", "LISTAGG", "COUNT", "SUM", "AVG", "MAX", "MIN"
+                                                            ].map(k => ({ label: k, type: "keyword" }));
+                                                            return { from: word.from, options: keywords };
+                                                        }
+                                                    ]
+                                                })
+                                            ]}
+                                            onChange={(value) => updateActiveTab({ sqlContent: value })}
+                                            theme={theme.name === 'Modo Escuro' || theme.name === 'Dracula' ? 'dark' : 'light'}
+                                            className="text-sm h-full"
+                                            onCreateEditor={(view) => {
+                                                viewRef.current = view;
+                                                view.focus();
+                                            }}
+                                        />
+                                    )}
+                                </div>
+
+                                <div className={`mt-2 flex items-center justify-between p-2 rounded border flex-none ${theme.panel} ${theme.border}`}>
+                                    <div className="flex items-center space-x-3">
+                                        <button
+                                            onClick={executeQuery}
+                                            disabled={!activeTab.sqlContent || activeTab.loading}
+                                            className={`py-2 px-6 rounded-lg shadow-md transition-all font-semibold flex items-center disabled:opacity-50 ${theme.primaryBtn}`}
+                                        >
+                                            {activeTab.loading ? (
+                                                <>
+                                                    <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
+                                                    Executando...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="mr-2">▶</span> Executar
+                                                </>
+                                            )}
+                                        </button>
+
+                                        {activeTab.totalRecords !== undefined && (
+                                            <span className="text-xs font-medium text-gray-500 ml-2">
+                                                Total: {activeTab.totalRecords.toLocaleString()} registros
+                                            </span>
+                                        )}
+
+                                        <button
+                                            onClick={() => setShowSidebar(!showSidebar)}
+                                            className={`p-2 rounded border transition-colors flex items-center justify-center ${showSidebar ? `${theme.primaryBtn}` : `${theme.secondaryBtn}`}`}
+                                            title={showSidebar ? "Ocultar Menu Lateral" : "Mostrar Menu Lateral"}
+                                        >
+                                            {/* Sidebar Layout Icon */}
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 6v12" />
+                                            </svg>
+                                        </button>
+                                        <label className="cursor-pointer p-2 rounded border transition-colors text-gray-500 hover:bg-blue-50 hover:text-blue-600" title="Carregar Arquivo SQL">
+                                            <input
+                                                type="file"
+                                                accept=".sql"
+                                                onChange={handleFileUpload}
+                                                className="hidden"
+                                            />
+                                            {/* Paperclip Icon */}
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                            </svg>
+                                        </label>
+
+                                        <div className={`flex items-center border-l pl-2 ${theme.border}`}>
+                                            <select
+                                                value={limit}
+                                                onChange={(e) => setLimit(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                                                title="Limite de Linhas"
+                                                className={`border rounded p-1.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none w-24 ${theme.input} ${theme.border}`}
+                                            >
+                                                <option value={100}>100 linhas</option>
+                                                <option value={500}>500 linhas</option>
+                                                <option value={1000}>1000 linhas</option>
+                                                <option value={5000}>5000 linhas</option>
+                                                <option value="all">Todas</option>
+                                            </select>
+                                        </div>
+
+                                        <button onClick={handleFormat} className={`p-2 rounded border hover:bg-yellow-50 text-yellow-600 ${theme.border}`} title="Formatar SQL">
+                                            {/* Magic Wand / Format Icon */}
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                                            </svg>
+                                        </button>
+
+                                        <button onClick={handleExplainSql} className={`p-2 rounded border hover:bg-purple-50 text-purple-600 ${theme.border}`} title="Explicar com IA">
+                                            {/* Lightbulb Icon */}
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                            </svg>
+                                        </button>
+
+                                        <button onClick={handleOptimizeSql} className={`p-2 rounded border hover:bg-green-50 text-green-600 ${theme.border}`} title="Otimizar/Melhorar SQL">
+                                            {/* Zap Icon */}
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                            </svg>
+                                        </button>
+                                    </div>
+
+                                    <div className="flex items-center space-x-2">
+
+
+
+                                        {showSaveInput ? (
+                                            <div className="flex items-center space-x-2 animate-fade-in">
+                                                <input
+                                                    type="text"
+                                                    value={queryName}
+                                                    onChange={(e) => setQueryName(e.target.value)}
+                                                    placeholder="Nome da Query"
+                                                    className={`border rounded p-1.5 text-sm focus:ring-2 focus:ring-[#f37021] outline-none ${theme.input} ${theme.border}`}
+                                                    autoFocus
+                                                />
+                                                <button onClick={saveQuery} className="text-green-600 hover:bg-green-50 p-1.5 rounded" title="Confirmar">✅</button>
+                                                <button onClick={() => setShowSaveInput(false)} className="text-red-600 hover:bg-red-50 p-1.5 rounded" title="Cancelar">❌</button>
                                             </div>
+                                        ) : (
+                                            <button
+                                                onClick={() => setShowSaveInput(true)}
+                                                className={`py-1.5 px-4 rounded-lg shadow-md transition-all font-semibold flex items-center text-sm ${theme.secondaryBtn}`}
+                                            >
+                                                Salvar Query
+                                            </button>
                                         )}
                                     </div>
-
-                                    <button
-                                        onClick={() => setShowFilters(!showFilters)}
-                                        className={`text-xs px-2 py-1 rounded border flex items-center ${showFilters ? `${theme.primaryBtn}` : `${theme.secondaryBtn} ${theme.border}`}`}
-                                    >
-                                        🔍 Filtros
-                                    </button>
-
-                                    {showFilters && (
-                                        <label className="flex items-center space-x-1 cursor-pointer select-none" title="Filtrar em todo o banco de dados (ignora limite)">
-                                            <input
-                                                type="checkbox"
-                                                checked={serverSideFilter}
-                                                onChange={(e) => setServerSideFilter(e.target.checked)}
-                                                className="rounded text-blue-600 focus:ring-blue-500 h-3 w-3"
-                                            />
-                                            <span className={`text-[10px] font-medium ${theme.sidebarText}`}>Filtrar Tudo (Servidor)</span>
-                                        </label>
-                                    )}
-                                </div>
-
-                                <div className="flex space-x-2">
-
-                                    <button onClick={() => exportData('csv')} className={`text-xs border px-3 py-1.5 rounded transition-colors font-medium flex items-center ${theme.secondaryBtn} ${theme.border}`}>
-                                        <span className="mr-1">📄</span> CSV
-                                    </button>
-                                    <button onClick={() => exportData('xlsx')} className={`text-xs px-3 py-1.5 rounded shadow-sm transition-colors font-medium flex items-center ${theme.primaryBtn}`}>
-                                        <span className="mr-1">📊</span> Excel
-                                    </button>
                                 </div>
                             </div>
+                        </Panel>
 
-                            <div className="flex-1 w-full relative overflow-hidden">
-                                <AutoSizer>
-                                    {({ height, width }) => {
-                                        const visibleCount = columnOrder.filter(c => visibleColumns[c]).length;
-                                        // Calculate total width based on individual column widths
-                                        const totalMinWidth = columnOrder.reduce((acc, col) => {
-                                            if (visibleColumns[col]) {
-                                                return acc + (columnWidths[col] || 150);
-                                            }
-                                            return acc;
-                                        }, 0);
+                        <PanelResizeHandle className="h-2 bg-gray-100 hover:bg-blue-400 transition-colors cursor-row-resize z-50 border-t border-b flex justify-center items-center">
+                            <div className="w-8 h-1 bg-gray-300 rounded-full"></div>
+                        </PanelResizeHandle>
 
-                                        // Prepare Header Row
-                                        const headerRow = (
-                                            <div className={`flex divide-x ${theme.border} ${theme.tableHeader} border-b font-bold text-xs uppercase tracking-wider h-full items-center bg-gray-50`}>
-                                                {columnOrder.map(colName => {
-                                                    if (!visibleColumns[colName]) return null;
-                                                    const width = columnWidths[colName] || 150;
-                                                    return (
-                                                        <div
-                                                            key={colName}
-                                                            draggable
-                                                            onDragStart={(e) => handleDragStart(e, colName)}
-                                                            onDragOver={(e) => handleDragOver(e, colName)}
-                                                            onDragEnd={handleDragEnd}
-                                                            className={`relative px-2 py-3 flex-none overflow-hidden text-ellipsis cursor-move transition-colors ${draggingCol === colName ? 'opacity-50 bg-blue-50' : ''}`}
-                                                            style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
-                                                        >
-                                                            <div className="flex flex-col space-y-2 w-full">
-                                                                <span
-                                                                    className="whitespace-normal break-words leading-tight cursor-pointer hover:text-blue-600"
-                                                                    title="Clique duplo para auto-ajustar largura"
-                                                                    onDoubleClick={() => {
-                                                                        // Precise measurement using Canvas
-                                                                        const canvas = document.createElement('canvas');
-                                                                        const context = canvas.getContext('2d');
-                                                                        context.font = '12px "Inter", "Segoe UI", sans-serif'; // Match table font roughly
-
-                                                                        let maxWidth = context.measureText(colName).width; // Start with header width
-
-                                                                        // Sample first 2000 rows for performance
-                                                                        const rowsToScan = activeTab.results.rows.length > 2000 ? activeTab.results.rows.slice(0, 2000) : activeTab.results.rows;
-
-                                                                        rowsToScan.forEach(row => {
-                                                                            const originalIdx = activeTab.results.metaData.findIndex(m => m.name === colName);
-                                                                            const val = String(row[originalIdx] || ''); // Use originalIdx to get correct column value
-                                                                            const w = context.measureText(val).width;
-                                                                            if (w > maxWidth) maxWidth = w;
-                                                                        });
-
-                                                                        // Add padding (approx 24px)
-                                                                        const finalWidth = Math.min(Math.max(100, Math.ceil(maxWidth + 24)), 800);
-                                                                        setColumnWidths(prev => ({ ...prev, [colName]: finalWidth }));
-                                                                    }}
-                                                                >
-                                                                    {colName}
-                                                                </span>
-                                                                {showFilters && (
-                                                                    <input
-                                                                        type="text"
-                                                                        placeholder={serverSideFilter ? "Filtrar (Enter)..." : "Filtrar..."}
-                                                                        value={columnFilters[colName] || ''}
-                                                                        onChange={(e) => setColumnFilters({ ...columnFilters, [colName]: e.target.value })}
-                                                                        onKeyDown={(e) => {
-                                                                            if (e.key === 'Enter' && serverSideFilter) {
-                                                                                executeQuery();
-                                                                            }
-                                                                        }}
-                                                                        className={`w-full text-xs p-1 border rounded font-normal normal-case ${theme.input} ${theme.border} ${serverSideFilter ? 'border-blue-400 bg-blue-50' : ''}`}
-                                                                        onClick={(e) => e.stopPropagation()}
-                                                                        title={serverSideFilter ? "Pressione Enter para buscar no servidor" : "Filtragem local"}
-                                                                    />
-                                                                )}
-                                                            </div>
-                                                            {/* Resizer Handle */}
-                                                            <div
-                                                                className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 z-10"
-                                                                onMouseDown={(e) => startResizing(e, colName)}
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            />
-                                                        </div>
-                                                    );
-                                                })}
+                        {/* Bottom Panel: Results Pane */}
+                        <Panel defaultSize={50} minSize={20}>
+                            <div className="flex-1 overflow-hidden flex flex-col h-full pt-1">
+                                {activeTab.error && (
+                                    <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-4 flex-none">
+                                        <div className="flex">
+                                            <div className="flex-shrink-0">
+                                                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                                                </svg>
                                             </div>
-                                        );
+                                            <div className="ml-3 flex-1">
+                                                <p className="text-sm text-red-700 font-mono whitespace-pre-wrap">{activeTab.error}</p>
+                                                <button
+                                                    onClick={handleFixError}
+                                                    disabled={aiLoading}
+                                                    className="mt-2 flex items-center bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded text-xs font-semibold transition-colors"
+                                                >
+                                                    {aiLoading ? "Corrigindo..." : "✨ Corrigir com IA"}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
 
-                                        return (
-                                            <VirtualList
-                                                height={height}
-                                                width={width}
-                                                itemCount={filteredRows.length}
-                                                itemSize={40}
-                                                minWidth={totalMinWidth}
-                                                header={headerRow}
-                                                headerHeight={showFilters ? 80 : 45} // Adjust height if filters are shown
-                                            >
-                                                {Row}
-                                            </VirtualList>
-                                        );
-                                    }}
-                                </AutoSizer>
+                                {activeTab.results && (
+                                    <div className="flex-1 border rounded overflow-hidden flex flex-col bg-white shadow-sm h-full">
+                                        <div className="flex justify-between items-center px-4 py-2 bg-gray-50 border-b flex-none">
+                                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Resultados</h3>
+                                            <div className="flex space-x-2">
+                                                <button
+                                                    onClick={() => setShowFilters(!showFilters)}
+                                                    className={`text-xs flex items-center px-2 py-1 rounded transition-colors ${showFilters ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:text-gray-700'}`}
+                                                    title={showFilters ? "Ocultar Filtros" : "Mostrar Filtros"}
+                                                >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                                                    </svg>
+                                                    Filtros
+                                                </button>
+                                                <div className="h-4 border-l border-gray-300 mx-1"></div>
+                                                <button onClick={() => exportData('xlsx')} className="text-xs flex items-center text-green-600 hover:text-green-800" title="Exportar Excel">
+                                                    📊 Excel
+                                                </button>
+                                                <button onClick={() => exportData('csv')} className="text-xs flex items-center text-blue-600 hover:text-blue-800" title="Exportar CSV">
+                                                    📄 CSV
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 overflow-auto relative">
+                                            <AutoSizer>
+                                                {({ height, width }) => (
+                                                    <VirtualList
+                                                        height={height}
+                                                        width={width}
+                                                        itemCount={filteredRows.length}
+                                                        itemSize={40} // Default Row Height
+                                                        minWidth={activeTab.results.metaData.length * 150} // Approximate Width
+                                                        headerHeight={showFilters ? 75 : 35}
+                                                        header={
+                                                            <div className={`flex divide-x border-b ${theme.border} ${theme.panel} sticky top-0 z-10 font-semibold text-xs text-gray-600`}>
+                                                                {columnOrder.map((colName, idx) => {
+                                                                    if (!visibleColumns[colName]) return null;
+                                                                    const width = columnWidths[colName] || 150;
+                                                                    return (
+                                                                        <div
+                                                                            key={colName}
+                                                                            className="relative px-2 py-2 flex items-center justify-between select-none group hover:bg-gray-100 transition-colors bg-gray-50 border-gray-200"
+                                                                            style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px`, height: showFilters ? '75px' : '35px' }}
+                                                                            draggable
+                                                                            onDragStart={(e) => handleDragStart(e, colName)}
+                                                                            onDragOver={(e) => handleDragOver(e, colName)}
+                                                                            onDragEnd={handleDragEnd}
+                                                                        >
+                                                                            <div className="flex-1 flex flex-col h-full overflow-hidden">
+                                                                                {/* Row 1: Title and Sort/Handles */}
+                                                                                <div className="flex items-center justify-between h-[25px]">
+                                                                                    <span className="truncate flex-1 font-bold px-1" title={colName}>{colName}</span>
+                                                                                </div>
+
+                                                                                {/* Row 2: Filter Input (Conditional) */}
+                                                                                {showFilters && (
+                                                                                    <div className="mt-1">
+                                                                                        <input
+                                                                                            type="text"
+                                                                                            placeholder="Filtrar..."
+                                                                                            className="w-full text-[10px] border border-gray-300 rounded px-1.5 py-1 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 font-normal bg-white"
+                                                                                            value={columnFilters[colName] || ''}
+                                                                                            onChange={(e) => setColumnFilters(prev => ({ ...prev, [colName]: e.target.value }))}
+                                                                                            onClick={(e) => e.stopPropagation()}
+                                                                                        />
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+
+                                                                            <div
+                                                                                className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 group-hover:bg-blue-200"
+                                                                                onMouseDown={(e) => startResizing(e, colName)}
+                                                                                onDoubleClick={() => handleDoubleClickResizer(colName)}
+                                                                            />
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        }
+                                                    >
+                                                        {Row}
+                                                    </VirtualList>
+                                                )}
+                                            </AutoSizer>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                        </div>
-                    )}
-                </div>
+                        </Panel>
+                    </PanelGroup>
+                </Panel>
+
+                {showSidebar && <PanelResizeHandle className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors cursor-col-resize z-50" />}
 
                 {/* Sidebar (Saved Queries & Schema) */}
                 {showSidebar && (
-                    <div className={`w-64 border-l flex flex-col shadow-sm transition-all duration-300 ${theme.panel} ${theme.border} overflow-hidden`}>
+                    <Panel defaultSize={20} minSize={15} maxSize={40} className={`border-l ${theme.border} flex flex-col`}>
                         <div className={`flex border-b ${theme.border}`}>
                             <button
                                 onClick={() => setActiveSidebarTab('saved')}
-                                className={`flex-1 py-2 text-xs font-bold uppercase ${activeSidebarTab === 'saved' ? `border-b-2 border-blue-500 ${theme.accent}` : 'text-gray-400'}`}
+                                className={`flex-1 py-2 text-sm font-medium transition-colors ${activeSidebarTab === 'saved' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                             >
-                                Salvas
+                                Salvos
                             </button>
                             <button
                                 onClick={() => setActiveSidebarTab('schema')}
-                                className={`flex-1 py-2 text-xs font-bold uppercase ${activeSidebarTab === 'schema' ? `border-b-2 border-blue-500 ${theme.accent}` : 'text-gray-400'}`}
+                                className={`flex-1 py-2 text-sm font-medium transition-colors ${activeSidebarTab === 'schema' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                             >
                                 Schema
                             </button>
-                            <button onClick={() => setShowSidebar(false)} className="px-3 text-gray-400 hover:text-gray-600">✕</button>
+                            <button
+                                onClick={() => setActiveSidebarTab('chat')}
+                                className={`flex-1 py-2 text-sm font-medium transition-colors ${activeSidebarTab === 'chat' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                            >
+                                IA
+                            </button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                        <div className="flex-1 overflow-y-auto p-2">
                             {activeSidebarTab === 'saved' ? (
-                                <>
-                                    {savedQueries.length === 0 && (
-                                        <p className="text-gray-400 text-xs text-center italic mt-4">Nenhuma query salva.</p>
-                                    )}
+                                <div className="space-y-2">
+                                    {savedQueries.length === 0 && <p className="text-center text-gray-400 text-sm mt-8">Nenhuma query salva.</p>}
                                     {savedQueries.map(q => (
-                                        <div key={q.id} className={`group p-3 rounded border transition-all cursor-pointer relative ${theme.border} hover:border-blue-300 hover:bg-blue-50`} onClick={() => loadQuery(q)}>
-                                            <div className={`font-medium text-sm truncate pr-6 ${theme.text}`}>{q.name}</div>
-                                            <div className="text-xs text-gray-400 truncate mt-1">{q.sql.substring(0, 30)}...</div>
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); deleteQuery(q.id); }}
-                                                className="absolute top-2 right-2 text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                title="Excluir"
-                                            >
-                                                🗑️
-                                            </button>
+                                        <div key={q.id} className={`group p-3 rounded border ${theme.border} hover:border-blue-400 transition-all cursor-pointer ${theme.panel}`} onClick={() => loadQuery(q)}>
+                                            <div className="flex justify-between items-start mb-1">
+                                                <span className={`font-semibold text-sm ${theme.text}`}>{q.name}</span>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); deleteQuery(q.id); }}
+                                                    className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                >
+                                                    X
+                                                </button>
+                                            </div>
+                                            <div className="text-xs text-gray-500 truncate font-mono">{q.sql}</div>
                                         </div>
                                     ))}
-                                </>
-                            ) : (
-                                <div className={`${theme.bg} p-2 border-t space-y-1 flex flex-col h-full`}>
-                                    {/* Search Controls */}
-                                    <div className="flex space-x-2 mb-2">
-                                        <input
-                                            type="text"
-                                            placeholder="Buscar tabelas..."
-                                            value={schemaSearch}
-                                            onChange={(e) => setSchemaSearch(e.target.value)}
-                                            onKeyDown={(e) => e.key === 'Enter' && fetchSchemaTables(schemaSearch)}
-                                            className={`w-full text-xs p-1.5 rounded border outline-none ${theme.input} ${theme.border}`}
-                                        />
-                                        <button
-                                            onClick={() => fetchSchemaTables(schemaSearch)}
-                                            disabled={loadingSchema}
-                                            className={`px-3 py-1 text-xs rounded font-medium transition-colors ${theme.primaryBtn} disabled:opacity-50`}
-                                        >
-                                            {loadingSchema ? '...' : '🔍'}
+                                </div>
+                            ) : activeSidebarTab === 'schema' ? (
+                                <div className="space-y-2">
+                                    <input
+                                        value={schemaSearch}
+                                        onChange={(e) => { setSchemaSearch(e.target.value); fetchSchemaTables(e.target.value); }}
+                                        placeholder="Buscar tabelas..."
+                                        className={`w-full px-3 py-1.5 text-sm rounded border ${theme.border} ${theme.bg} ${theme.text} mb-2`}
+                                    />
+                                    <div className="flex gap-2">
+                                        <button onClick={() => fetchSchemaTables(schemaSearch)} className="flex-1 bg-gray-100 dark:bg-gray-700 text-xs py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                                            Atualizar
                                         </button>
                                     </div>
 
-                                    {/* Table List */}
-                                    <div className="flex-1 overflow-y-auto space-y-1">
-                                        {schemaTables.length === 0 && !loadingSchema && (
-                                            <div className="text-[10px] text-gray-400 italic text-center mt-4">
-                                                Use a busca para encontrar tabelas.
-                                            </div>
-                                        )}
+                                    {loadingSchema && <div className="text-center py-4 text-gray-400 text-xs">Carregando...</div>}
 
-                                        {schemaTables.map(tableName => (
-                                            <div key={tableName} className={`rounded border ${theme.border} overflow-hidden`}>
+                                    <div className="space-y-1 mt-2">
+                                        {schemaTables.map(table => (
+                                            <div key={table} className="border-b border-gray-100 dark:border-gray-800 last:border-0">
                                                 <div
-                                                    onClick={() => handleExpandTable(tableName)}
-                                                    className={`px-2 py-1.5 text-xs font-medium cursor-pointer flex justify-between items-center hover:bg-opacity-50 ${expandedTable === tableName ? 'bg-blue-50 text-blue-700' : theme.sidebarText} ${theme.tableRowHover}`}
+                                                    className={`px-2 py-1.5 text-xs font-mono cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center justify-between ${expandedTable === table ? 'text-blue-600 font-bold' : theme.text}`}
+                                                    onClick={() => handleExpandTable(table)}
                                                 >
-                                                    <span className="truncate" title={tableName}>{tableName}</span>
-                                                    <span className="text-[10px] opacity-50">{expandedTable === tableName ? '▼' : '▶'}</span>
+                                                    <span>{table}</span>
+                                                    <span className="text-[10px] text-gray-400">{expandedTable === table ? '▼' : '▶'}</span>
                                                 </div>
-
-                                                {expandedTable === tableName && (
-                                                    <div className={`p-1 pl-3 border-t ${theme.border} bg-opacity-30 ${theme.bg}`}>
-                                                        {(schemaData[tableName] || []).length === 0 ? (
-                                                            <div className="text-[10px] text-gray-400 italic px-2">Carregando colunas...</div>
-                                                        ) : (
-                                                            <>
-                                                                {(schemaData[tableName] || []).map(col => (
-                                                                    <div
-                                                                        key={col}
-                                                                        className={`text-[10px] ${theme.text} flex justify-between group cursor-pointer hover:text-blue-600 py-0.5 px-1 rounded hover:bg-gray-100`}
-                                                                        title="Clique duplo para inserir"
-                                                                        onDoubleClick={() => insertTextAtCursor(col)}
-                                                                    >
-                                                                        <span>{col}</span>
-                                                                    </div>
-                                                                ))}
-                                                                <div className="pt-1 mt-1 border-t border-dashed border-gray-200">
-                                                                    <button
-                                                                        onClick={() => insertTextAtCursor(`SELECT * FROM ${tableName}`)}
-                                                                        className="w-full text-[10px] bg-blue-50 text-blue-600 rounded py-0.5 hover:bg-blue-100 transition-colors"
-                                                                    >
-                                                                        Gerar SELECT
-                                                                    </button>
-                                                                </div>
-                                                            </>
-                                                        )}
+                                                {/* Expanded Columns */}
+                                                {expandedTable === table && (
+                                                    <div className="pl-4 py-1 bg-gray-50 dark:bg-gray-900/50">
+                                                        {tableColumns.map(col => (
+                                                            <div
+                                                                key={col.name}
+                                                                className="text-[10px] text-gray-500 flex justify-between group cursor-pointer hover:text-blue-500"
+                                                                onClick={() => insertTextAtCursor(col.name)}
+                                                            >
+                                                                <span className="font-mono">{col.name}</span>
+                                                                <span className="opacity-50 group-hover:opacity-100">{col.type}</span>
+                                                            </div>
+                                                        ))}
+                                                        <div className="pt-1 mt-1 border-t border-dashed border-gray-200">
+                                                            <button
+                                                                onClick={() => insertTextAtCursor(`SELECT * FROM ${table}`)}
+                                                                className="w-full text-[10px] bg-blue-50 text-blue-600 rounded py-0.5 hover:bg-blue-100 transition-colors"
+                                                            >
+                                                                Gerar SELECT
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>
                                         ))}
                                     </div>
                                 </div>
+                            ) : null}
+
+                            {activeSidebarTab === 'chat' && (
+                                <div className="flex flex-col h-full bg-white dark:bg-gray-900">
+                                    <div className="flex-1 overflow-y-auto space-y-4 p-3">
+                                        {aiChatHistory.length === 0 && (
+                                            <div className="text-center text-gray-400 text-sm mt-10 flex flex-col items-center">
+                                                <span className="text-4xl mb-2">🤖</span>
+                                                <p>Olá! Sou a Hap IA.</p>
+                                                <p className="text-xs opacity-70 mt-1">Peça para criar queries ou explicar comandos.</p>
+                                            </div>
+                                        )}
+                                        {aiChatHistory.map((msg, i) => (
+                                            <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                                                <div className={`max-w-[95%] rounded-2xl px-4 py-3 shadow-sm text-sm ${msg.role === 'user'
+                                                    ? 'bg-blue-600 text-white rounded-br-none'
+                                                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-none'
+                                                    }`}>
+                                                    {msg.role !== 'user' && (
+                                                        <div className="flex items-center gap-2 mb-2 border-b pb-1 border-gray-200 dark:border-gray-700 opacity-70">
+                                                            <span className="font-bold text-xs uppercase tracking-wide text-blue-500">Hap IA</span>
+                                                        </div>
+                                                    )}
+
+                                                    {msg.role === 'user' ? (
+                                                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                                                    ) : (
+                                                        <div className="prose prose-sm dark:prose-invert max-w-none">
+                                                            <ReactMarkdown
+                                                                remarkPlugins={[remarkGfm]}
+                                                                components={{
+                                                                    code({ node, inline, className, children, ...props }) {
+                                                                        const match = /language-(\w+)/.exec(className || '')
+                                                                        const isSql = match && (match[1] === 'sql' || match[1] === 'plsql');
+
+                                                                        if (!inline && match) {
+                                                                            return (
+                                                                                <div className="relative group my-4">
+                                                                                    {isSql && (
+                                                                                        <button
+                                                                                            onClick={() => updateActiveTab({ sqlContent: String(children).replace(/\n$/, '') })}
+                                                                                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-600 hover:bg-blue-700 text-white text-[10px] uppercase font-bold px-2 py-1 rounded shadow-md z-10 flex items-center gap-1"
+                                                                                            title="Usar este SQL"
+                                                                                        >
+                                                                                            ⚡ Usar
+                                                                                        </button>
+                                                                                    )}
+                                                                                    <pre className={`${className} !bg-gray-900 !text-gray-100 rounded-lg p-4 overflow-x-auto shadow-inner border border-gray-800`}>
+                                                                                        <code {...props}>
+                                                                                            {children}
+                                                                                        </code>
+                                                                                    </pre>
+                                                                                </div>
+                                                                            )
+                                                                        }
+                                                                        return <code className={`${className} bg-gray-200 dark:bg-gray-700 px-1 rounded`} {...props}>{children}</code>
+                                                                    }
+                                                                }}
+                                                            >
+                                                                {msg.content}
+                                                            </ReactMarkdown>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <form onSubmit={handleAiChatSubmit} className="p-3 border-t bg-gray-50 dark:bg-gray-800">
+                                        <div className="flex gap-2">
+                                            <input
+                                                value={aiChatInput}
+                                                onChange={(e) => setAiChatInput(e.target.value)}
+                                                placeholder="Digite sua pergunta..."
+                                                className={`flex-1 text-sm border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-400 ${theme.input} ${theme.border} bg-white dark:bg-gray-900`}
+                                                disabled={aiLoading}
+                                            />
+                                            <button
+                                                type="submit"
+                                                disabled={aiLoading}
+                                                className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-md"
+                                            >
+                                                {aiLoading ? (
+                                                    <span className="animate-spin h-4 w-4 block rounded-full border-2 border-white border-t-transparent"></span>
+                                                ) : (
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                                                    </svg>
+                                                )}
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
                             )}
                         </div>
-                    </div>
+                    </Panel>
                 )}
-            </div>
+            </PanelGroup>
         </div>
     );
 }
-
 
 SqlRunner.propTypes = {
     isVisible: PropTypes.bool,
