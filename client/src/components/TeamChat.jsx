@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useContext } from 'react';
+import React, { useState, useEffect, useRef, useContext, useLayoutEffect } from 'react';
 import { io } from "socket.io-client";
 import { ThemeContext } from '../context/ThemeContext';
 import { Send, User, Users, Lock, LogIn, Database, Bell, FileText, Check, X, ChevronRight, ChevronDown, Book, Paperclip, Cloud, Server, RefreshCw, Radio, Sparkles, Copy, Share2 } from 'lucide-react';
@@ -95,6 +95,8 @@ const DocsTreeSelector = ({ onShare }) => {
                     )}
                 </div>
             ))}
+
+
         </div>
     );
 };
@@ -112,14 +114,26 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
     const [messages, setMessages] = useState([]);
     const [inputMessage, setInputMessage] = useState('');
     const [unreadCounts, setUnreadCounts] = useState({}); // { username: count }
+    const [toast, setToast] = useState(null); // Toast State
+    const [typingUsers, setTypingUsers] = useState(new Set()); // Set of usernames
+    const typingTimeoutRef = useRef(null);
 
     // Share Modal State
     const [showShareModal, setShowShareModal] = useState(false);
+    const [acceptedItems, setAcceptedItems] = useState(new Set()); // Track accepted items locally
+
+    // Scroll ref to track user switching
+    const isSwitchingUser = useRef(false);
     const [shareType, setShareType] = useState('SQL'); // SQL, REMINDER, DOC
     const [showShareMenu, setShowShareMenu] = useState(false);
     const { apiUrl } = useApi();
 
     const messagesEndRef = useRef(null);
+
+    const showToast = (message, type = 'success', duration = 3000) => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), duration);
+    };
 
     useEffect(() => {
         if (user && socket) {
@@ -133,7 +147,29 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                 setConnectionStatus('CONNECTED');
             };
             const handleMessage = (msg) => {
-                setMessages(prev => [...prev, msg]);
+                setMessages(prev => {
+                    // Deduplication Logic
+                    const exists = prev.some(existingMsg => {
+                        // 1. Check by client_id (Robust)
+                        if (existingMsg.metadata?.client_id && msg.metadata?.client_id) {
+                            return existingMsg.metadata.client_id === msg.metadata.client_id;
+                        }
+                        // 2. Check by ID (if from DB)
+                        if (existingMsg.id && msg.id && existingMsg.id === msg.id) {
+                            return true;
+                        }
+                        // 3. Fallback: Content + Sender + Timestamp (within 5s)
+                        // Only if one of them is missing client_id (e.g. legacy or system msg)
+                        if (existingMsg.sender === msg.sender && existingMsg.content === msg.content) {
+                            const timeDiff = Math.abs(new Date(existingMsg.timestamp) - new Date(msg.timestamp));
+                            return timeDiff < 5000;
+                        }
+                        return false;
+                    });
+
+                    if (exists) return prev;
+                    return [...prev, msg];
+                });
                 scrollToBottom();
 
                 // Unread Logic
@@ -162,15 +198,56 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
 
             socket.on('update_user_list', handleUsersUpdate);
             socket.on('message', handleMessage);
+            socket.on('message_update', (updatedMsg) => {
+                setMessages(prev => prev.map(msg => {
+                    if (msg.id === updatedMsg.id) {
+                        return { ...msg, ...updatedMsg };
+                    }
+                    return msg;
+                }));
+            });
             socket.on('shared_item_received', handleSharedItem);
+
+            socket.on('typing', ({ username }) => {
+                if (username !== user.username) {
+                    setTypingUsers(prev => new Set(prev).add(username));
+                }
+            });
+
+            socket.on('stop_typing', ({ username }) => {
+                setTypingUsers(prev => {
+                    const next = new Set(prev);
+                    next.delete(username);
+                    return next;
+                });
+            });
 
             // Load history
             loadHistory(user.username);
 
+            // Heartbeat for Global Presence (Distributed Users)
+            // Sends a hidden message every 4 minutes to keep user "Online" in SupabaseAdapter's pollPresence
+            const heartbeatInterval = setInterval(() => {
+                if (socket && user) {
+                    console.log("[TeamChat] Sending Heartbeat...");
+                    socket.emit('message', {
+                        sender: user.username,
+                        content: '[HEARTBEAT]',
+                        type: 'TEXT',
+                        recipient: 'ALL',
+                        metadata: { hidden: true }
+                    });
+                }
+            }, 4 * 60 * 1000); // 4 minutes
+
             return () => {
+                clearInterval(heartbeatInterval);
                 socket.off('update_user_list', handleUsersUpdate);
                 socket.off('message', handleMessage);
                 socket.off('shared_item_received', handleSharedItem);
+                socket.off('message_update');
+                socket.off('typing');
+                socket.off('stop_typing');
             };
         }
     }, [user, socket]);
@@ -180,6 +257,7 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
     const [switching, setSwitching] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState('IDLE'); // IDLE, LOADING, CONNECTED, ERROR
     const [statusMsg, setStatusMsg] = useState('');
+    const [isReadyToView, setIsReadyToView] = useState(false); // Controls opacity for instant scroll
 
     const handleSync = () => {
         if (!socket || switching) return;
@@ -232,20 +310,63 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
         }
     };
 
-    useEffect(() => {
-        scrollToBottom();
+    const scrollToUnreadOrBottom = (behavior = "auto") => {
+        // Use requestAnimationFrame to ensure DOM is painted
+        requestAnimationFrame(() => {
+            // Find first unread message from OTHERS
+            const firstUnread = document.querySelector(`.message-item[data-read="false"]:not([data-sender="${user.username}"])`);
+            if (firstUnread) {
+                console.log("Scrolling to unread message");
+                firstUnread.scrollIntoView({ behavior, block: "center" });
+            } else {
+                console.log("Scrolling to bottom");
+                messagesEndRef.current?.scrollIntoView({ behavior });
+            }
+            // Reveal chat after positioning
+            setTimeout(() => setIsReadyToView(true), 50);
+        });
+    };
+
+    // Scroll Logic (New Messages & User Switch)
+    useLayoutEffect(() => {
+        if (isVisible && messages.length > 0) {
+            if (isSwitchingUser.current) {
+                // Hide view, wait for paint, scroll, then show
+                setIsReadyToView(false);
+                setTimeout(() => scrollToUnreadOrBottom("auto"), 100);
+                isSwitchingUser.current = false;
+            } else {
+                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            }
+        }
     }, [messages, isVisible]);
 
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Instant scroll on visibility change (Tab switch)
+    useEffect(() => {
+        if (isVisible && messages.length > 0) {
+            // If we are just switching tabs, maybe we don't need to hide?
+            // But to be safe and avoid jump, let's do it.
+            // Actually, for tab switch, the user might have scrolled manually.
+            // Requirement: "Garantindo que a janela irá exibir como ponto de partida a mensagem não lida"
+            // So yes, re-position.
+            setIsReadyToView(false);
+            setTimeout(() => scrollToUnreadOrBottom("auto"), 100);
+        }
+    }, [isVisible]);
+
+    const scrollToBottom = (behavior = "smooth") => {
+        messagesEndRef.current?.scrollIntoView({ behavior });
     };
 
     const loadHistory = async (username) => {
+        isSwitchingUser.current = true; // Mark as switching
         try {
             const res = await fetch(`${apiUrl}/api/chat/history?username=${username}`);
             const data = await res.json();
             if (Array.isArray(data)) {
-                setMessages(data);
+                // Filter heartbeats from history
+                const cleanData = data.filter(m => m.content !== '[HEARTBEAT]');
+                setMessages(cleanData);
             }
         } catch (e) { console.error("Failed to load history", e); }
     };
@@ -268,19 +389,47 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
             type = 'CODE';
         }
 
-        socket.emit('message', {
+        const clientId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+
+        const msgPayload = {
             sender: user.username,
             content: content,
             type: type,
-            recipient: selectedUser ? selectedUser.username : 'ALL'
-        });
+            recipient: selectedUser ? selectedUser.username : 'ALL',
+            metadata: { client_id: clientId },
+            timestamp: new Date()
+        };
+
+        socket.emit('message', msgPayload);
+
+        // Optimistic UI: Add immediately
+        setMessages(prev => [...prev, msgPayload]);
+
         setInputMessage('');
+
+        // Stop typing immediately on send
+        socket.emit('stop_typing', { username: user.username });
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
+
+    const handleInputChange = (e) => {
+        setInputMessage(e.target.value);
+
+        if (socket) {
+            socket.emit('typing', { username: user.username });
+
+            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+            typingTimeoutRef.current = setTimeout(() => {
+                socket.emit('stop_typing', { username: user.username });
+            }, 2000);
+        }
     };
 
     const handleShare = (item, type) => {
         try {
             if (!socket) {
-                alert("Erro: Não conectado ao chat.");
+                showToast("Erro: Não conectado ao chat.", "error");
                 return;
             }
 
@@ -288,7 +437,7 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                 sender: user.username,
                 recipient: selectedUser ? selectedUser.username : 'ALL',
                 itemType: type,
-                itemData: item
+                itemData: { ...item, title: item.title || item.name || 'Sem Título' } // Ensure title exists
             });
 
             // Optimistic UI Update (Show to sender immediately)
@@ -296,7 +445,8 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                 sender: user.username,
                 content: `Compartilhou um ${type}`,
                 type: 'SHARED_ITEM',
-                metadata: { itemType: type, itemData: item },
+                metadata: { itemType: type, itemData: { ...item, title: item.title || item.name || 'Sem Título' } },
+                recipient: selectedUser ? selectedUser.username : 'ALL',
                 timestamp: new Date()
             };
             setMessages(prev => [...prev, msg]);
@@ -304,7 +454,7 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
             setTimeout(scrollToBottom, 100);
         } catch (e) {
             console.error("HandleShare Error:", e);
-            alert("Erro ao compartilhar item: " + e.message);
+            showToast("Erro ao compartilhar item: " + e.message, "error");
         }
     };
 
@@ -347,7 +497,7 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                 }
             } catch (err) {
                 console.error("Upload failed", err);
-                alert("Falha ao enviar imagem.");
+                showToast("Falha ao enviar imagem.", "error");
             }
         }
         // SQL File Read
@@ -364,7 +514,7 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
             };
             reader.readAsText(file);
         } else {
-            alert("Apenas imagens e arquivos .sql são permitidos.");
+            showToast("Apenas imagens e arquivos .sql são permitidos.", "warning");
         }
     };
 
@@ -387,17 +537,29 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
     const handleAcceptSharedItem = (msg) => {
         const { itemType, itemData } = msg.metadata;
 
+        // Calculate Shared By String
+        const senderInfo = usersOnline.find(u => u.username === msg.sender);
+        const teamName = senderInfo ? senderInfo.team : 'Externo';
+        const sharedByStr = `${msg.sender} (${teamName})`;
+
         if (itemType === 'SQL') {
             // itemData: { title, sql }
             // Check if already exists
             const exists = savedQueries.some(q => q.title === itemData.title);
             if (exists) {
-                alert('Já existe uma consulta salva com este nome.');
+                showToast('Já existe uma consulta salva com este nome.', 'warning');
                 return;
             }
-            const newQuery = { ...itemData, id: Date.now(), title: `${itemData.title} (de ${msg.sender})` };
+
+            const newQuery = {
+                ...itemData,
+                id: Date.now(),
+                title: itemData.title, // Keep original title
+                sharedBy: sharedByStr,  // Badge info with Team
+                sharedAt: new Date().toISOString()
+            };
             setSavedQueries(prev => [...prev, newQuery]);
-            alert(`Consulta "${newQuery.title}" salva com sucesso!`);
+            showToast(`Consulta "${newQuery.title}" salva com sucesso!`);
         } else if (itemType === 'REMINDER') {
             // itemData: { title, description, date, ... }
             const exists = reminders.some(r => r.title === itemData.title);
@@ -406,9 +568,20 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                     return;
                 }
             }
-            const newReminder = { ...itemData, id: Date.now(), title: `${itemData.title} (de ${msg.sender})`, status: 'PENDING', createdAt: new Date().toISOString() };
+            // Preserve status/phase
+            const newReminder = {
+                ...itemData,
+                id: Date.now(),
+                title: itemData.title,
+                sharedBy: sharedByStr,
+                status: itemData.status || 'PENDING',
+                createdAt: itemData.createdAt || new Date().toISOString()
+            };
             setReminders([...reminders, newReminder]);
-            alert(`Lembrete "${newReminder.title}" adicionado com sucesso!`);
+            showToast(`Lembrete "${newReminder.title}" adicionado com sucesso!`);
+
+            // Mark as accepted
+            setAcceptedItems(prev => new Set(prev).add(msg.id || msg.timestamp)); // Use ID or Timestamp as key
         } else if (itemType === 'DOC') {
             // itemData: { id, title, bookId }
             // Dispatch event to open doc
@@ -418,6 +591,55 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
             window.dispatchEvent(event);
         }
     };
+
+    // Read Receipt Observer
+    const observer = useRef(null);
+    useEffect(() => {
+        if (!selectedUser || !socket) return;
+
+        // Disconnect previous
+        if (observer.current) observer.current.disconnect();
+
+        observer.current = new IntersectionObserver((entries) => {
+            const toMark = [];
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const msgId = entry.target.getAttribute('data-message-id');
+                    const sender = entry.target.getAttribute('data-sender');
+                    const isRead = entry.target.getAttribute('data-read') === 'true';
+
+                    if (msgId && sender !== user.username && !isRead) {
+                        toMark.push(msgId);
+                        observer.current.unobserve(entry.target);
+                    }
+                }
+            });
+
+            if (toMark.length > 0) {
+                socket.emit('mark_read', { messageIds: toMark, reader: user.username });
+
+                // Optimistic Update: Mark as read locally immediately
+                setMessages(prev => prev.map(msg => {
+                    if (toMark.includes(String(msg.id)) || toMark.includes(Number(msg.id))) { // Handle string/number ID mismatch
+                        return { ...msg, read_at: new Date().toISOString() };
+                    }
+                    return msg;
+                }));
+            }
+        }, { threshold: 0.5 });
+
+        // Observe unread messages
+        const unreadMsgs = document.querySelectorAll('.message-item[data-read="false"]');
+        unreadMsgs.forEach(el => {
+            if (el.getAttribute('data-sender') !== user.username) {
+                observer.current.observe(el);
+            }
+        });
+
+        return () => {
+            if (observer.current) observer.current.disconnect();
+        };
+    }, [messages, selectedUser, socket]);
 
     if (!isVisible) return null;
 
@@ -446,7 +668,7 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                 onChange={handleFileSelect}
             />
             {/* Sidebar - Online Users */}
-            <div className={`w-64 border-r border-gray-200 flex flex-col hidden md:flex bg-white`}>
+            <div className={`w-64 border-r border-gray-200 flex flex-col hidden md:flex bg-white flex-shrink-0`}>
                 <div className="p-4 border-b border-gray-100 flex items-center justify-between">
                     <h3 className="font-bold text-gray-700 flex items-center">
                         <Users className="w-5 h-5 mr-2" /> Online ({usersOnline.length})
@@ -568,147 +790,222 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                 </div>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50 code-scroll">
-                    {messages.filter(msg => {
-                        if (selectedUser) {
-                            // Private Chat: Show if (Sender is Me AND Recipient is Selected) OR (Sender is Selected AND Recipient is Me)
-                            // Case-Insensitive Comparison for robustness
-                            const sSender = String(msg.sender).toLowerCase().trim();
-                            const sRecipient = String(msg.recipient).toLowerCase().trim();
-                            const uUsername = String(user.username).toLowerCase().trim();
-                            const selUsername = String(selectedUser.username).toLowerCase().trim();
+                <div className={`flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50 code-scroll transition-opacity duration-200 ${isReadyToView ? 'opacity-100' : 'opacity-0'}`}>
+                    {(() => {
+                        const filteredMessages = messages.filter(msg => {
+                            if (selectedUser) {
+                                // Private Chat: Show if (Sender is Me AND Recipient is Selected) OR (Sender is Selected AND Recipient is Me)
+                                const sSender = String(msg.sender).toLowerCase().trim();
+                                const sRecipient = String(msg.recipient).toLowerCase().trim();
+                                const uUsername = String(user.username).toLowerCase().trim();
+                                const selUsername = String(selectedUser.username).toLowerCase().trim();
 
-                            return (sSender === uUsername && sRecipient === selUsername) ||
-                                (sSender === selUsername && sRecipient === uUsername);
-                        } else {
-                            // Global Chat: Show if Recipient is ALL
-                            return String(msg.recipient).toUpperCase() === 'ALL';
-                        }
-                    }).map((msg, idx) => {
-                        const isMe = msg.sender === user.username;
-                        return (
-                            <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[85%] rounded-2xl text-sm shadow-sm ${msg.type === 'CODE' ? 'p-0 overflow-hidden border border-gray-200 shadow-md' : 'px-4 py-3'} ${isMe
-                                    ? (msg.type === 'CODE' ? 'bg-white' : 'bg-blue-600 text-white rounded-br-none')
-                                    : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none'
-                                    }`}>
-                                    {!isMe && <p className="text-xs font-bold mb-1 opacity-70">{msg.sender}</p>}
+                                const match = (sSender === uUsername && sRecipient === selUsername) ||
+                                    (sSender === selUsername && sRecipient === uUsername);
+                                return match;
+                            } else {
+                                // Global Chat: Show if Recipient is ALL
+                                return String(msg.recipient).toUpperCase() === 'ALL';
+                            }
+                        });
 
-                                    {/* Message Content */}
-                                    {msg.type === 'CODE' ? (
-                                        <div className="mt-1">
-                                            <div className="bg-[#1e1e1e] border border-[#333] text-[#d4d4d4] rounded-lg overflow-hidden shadow-sm group-code relative">
-                                                <div className="flex justify-between items-center px-3 py-1 bg-[#252526] border-b border-[#333]">
-                                                    <span className="text-[10px] font-mono text-blue-400 font-bold uppercase tracking-wider">SQL</span>
-                                                    <div className="flex gap-2">
-                                                        {/* AUTO-DETECT SQL RUN BUTTON: Always show for CODE type */}
-                                                        {true && (
-                                                            <button
-                                                                onClick={() => {
+                        const firstUnreadIndex = filteredMessages.findIndex(msg => !msg.read_at && msg.sender !== user.username);
+
+                        return filteredMessages.map((msg, idx) => {
+                            const isMe = msg.sender === user.username;
+                            return (
+                                <React.Fragment key={idx}>
+                                    {idx === firstUnreadIndex && (
+                                        <div className="w-full flex items-center justify-center my-4">
+                                            <span className="bg-blue-100 text-blue-800 text-xs px-3 py-1 rounded-full shadow-sm font-bold">
+                                                Mensagens Não Lidas
+                                            </span>
+                                        </div>
+                                    )}
+                                    <div
+                                        className={`flex ${isMe ? 'justify-end' : 'justify-start'} message-item`}
+                                        data-message-id={msg.id}
+                                        data-sender={msg.sender}
+                                        data-read={!!msg.read_at}
+                                    >
+                                        <div className={`max-w-[85%] rounded-2xl text-sm shadow-sm ${msg.type === 'CODE' ? 'p-0 overflow-hidden border border-gray-200 shadow-md' : 'px-4 py-3'} ${isMe
+                                            ? (msg.type === 'CODE' ? 'bg-white' : 'bg-blue-600 text-white rounded-br-none')
+                                            : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none'
+                                            }`}>
+                                            {!isMe && <p className="text-xs font-bold mb-1 opacity-70">{msg.sender}</p>}
+
+                                            {/* Message Content */}
+                                            {msg.type === 'CODE' ? (
+                                                <div className="mt-1">
+                                                    <div className="bg-[#1e1e1e] border border-[#333] text-[#d4d4d4] rounded-lg overflow-hidden shadow-sm group-code relative">
+                                                        <div className="flex justify-between items-center px-3 py-1 bg-[#252526] border-b border-[#333]">
+                                                            <span className="text-[10px] font-mono text-blue-400 font-bold uppercase tracking-wider">SQL</span>
+                                                            <div className="flex gap-2">
+                                                                {/* AUTO-DETECT SQL RUN BUTTON: Always show for CODE type */}
+                                                                {true && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            try {
+                                                                                const formatted = format(msg.content, { language: 'plsql', keywordCase: 'upper' });
+                                                                                window.dispatchEvent(new CustomEvent('hap-run-sql', { detail: { query: formatted } }));
+                                                                            } catch (e) {
+                                                                                // Fallback if format fails
+                                                                                window.dispatchEvent(new CustomEvent('hap-run-sql', { detail: { query: msg.content } }));
+                                                                            }
+                                                                        }}
+                                                                        className="flex items-center gap-1 bg-green-700 hover:bg-green-600 text-white px-2 py-0.5 rounded text-[10px] font-bold shadow transition-colors"
+                                                                        title="Executar no Editor SQL (Formatado)"
+                                                                    >
+                                                                        <Sparkles size={10} /> RUN
+                                                                    </button>
+                                                                )}
+                                                                <button
+                                                                    onClick={() => {
+                                                                        navigator.clipboard.writeText(msg.content);
+                                                                        // Optional: show toast, but for now simple copy
+                                                                    }}
+                                                                    className="text-gray-400 hover:text-white"
+                                                                    title="Copiar"
+                                                                >
+                                                                    <Copy size={12} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <pre className="p-3 overflow-x-auto text-xs font-mono leading-relaxed custom-scrollbar">
+                                                            <code>
+                                                                {(() => {
                                                                     try {
-                                                                        const formatted = format(msg.content, { language: 'plsql', keywordCase: 'upper' });
-                                                                        window.dispatchEvent(new CustomEvent('hap-run-sql', { detail: { query: formatted } }));
+                                                                        // Attempt to format for display
+                                                                        return format(msg.content, { language: 'plsql', keywordCase: 'upper', linesBetweenQueries: 2 });
                                                                     } catch (e) {
-                                                                        // Fallback if format fails
-                                                                        window.dispatchEvent(new CustomEvent('hap-run-sql', { detail: { query: msg.content } }));
+                                                                        return msg.content;
                                                                     }
-                                                                }}
-                                                                className="flex items-center gap-1 bg-green-700 hover:bg-green-600 text-white px-2 py-0.5 rounded text-[10px] font-bold shadow transition-colors"
-                                                                title="Executar no Editor SQL (Formatado)"
-                                                            >
-                                                                <Sparkles size={10} /> RUN
-                                                            </button>
-                                                        )}
-                                                        <button
-                                                            onClick={() => {
-                                                                navigator.clipboard.writeText(msg.content);
-                                                                // Optional: show toast, but for now simple copy
-                                                            }}
-                                                            className="text-gray-400 hover:text-white"
-                                                            title="Copiar"
-                                                        >
-                                                            <Copy size={12} />
-                                                        </button>
+                                                                })()}
+                                                            </code>
+                                                        </pre>
                                                     </div>
                                                 </div>
-                                                <pre className="p-3 overflow-x-auto text-xs font-mono leading-relaxed custom-scrollbar">
-                                                    <code>
-                                                        {(() => {
-                                                            try {
-                                                                // Attempt to format for display
-                                                                return format(msg.content, { language: 'plsql', keywordCase: 'upper', linesBetweenQueries: 2 });
-                                                            } catch (e) {
-                                                                return msg.content;
-                                                            }
-                                                        })()}
-                                                    </code>
-                                                </pre>
-                                            </div>
-                                        </div>
-                                    ) : msg.type === 'IMAGE' ? (
-                                        <div className="mt-1">
-                                            <img
-                                                src={msg.content}
-                                                alt="Upload"
-                                                className="max-w-[300px] max-h-[300px] rounded-lg shadow-sm border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity"
-                                                onClick={() => window.open(msg.content, '_blank')}
-                                            />
-                                        </div>
-                                    ) : msg.type === 'SHARED_ITEM' ? (
-                                        <div className="mt-1">
-                                            <div className="flex items-center space-x-2 mb-2">
-                                                {msg.metadata.itemType === 'SQL' && <Database size={16} />}
-                                                {msg.metadata.itemType === 'REMINDER' && <Bell size={16} />}
-                                                {msg.metadata.itemType === 'DOC' && <FileText size={16} />}
-                                                {msg.metadata.itemType === 'DOC' && <FileText size={16} />}
-                                                <span className="font-semibold">{msg.metadata.itemType} Compartilhado</span>
-                                                <span className="ml-auto text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full">
-                                                    por {msg.sender}
-                                                </span>
-                                            </div>
-                                            <div className="bg-white/10 p-2 rounded mb-2 text-sm">
-                                                {msg.metadata.itemType === 'SQL' && (
-                                                    <>
-                                                        <p className="font-bold">{msg.metadata.itemData.title}</p>
-                                                        <pre className="text-xs opacity-70 mt-1 truncate">{msg.metadata.itemData.sql}</pre>
-                                                    </>
-                                                )}
-                                                {msg.metadata.itemType === 'DOC' && (
-                                                    <>
-                                                        <p className="font-bold">{msg.metadata.itemData.title}</p>
-                                                        <p className="text-xs opacity-70 mt-1">{msg.metadata.itemData.bookTitle}</p>
-                                                    </>
-                                                )}
-                                                {msg.metadata.itemType !== 'SQL' && msg.metadata.itemType !== 'DOC' && <p>{JSON.stringify(msg.metadata.itemData)}</p>}
-                                            </div>
-                                            {!isMe && (
-                                                <button
-                                                    onClick={() => handleAcceptSharedItem(msg)}
-                                                    className="w-full bg-white text-blue-600 py-1 rounded text-xs font-bold hover:bg-gray-100 flex items-center justify-center"
-                                                >
-                                                    {msg.metadata.itemType === 'DOC' ? (
-                                                        <><FileText size={12} className="mr-1" /> Abrir</>
-                                                    ) : (
-                                                        <><Check size={12} className="mr-1" /> Adicionar</>
-                                                    )}
-                                                </button>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                                    )}
+                                            ) : msg.type === 'IMAGE' ? (
+                                                <div className="mt-1">
+                                                    <img
+                                                        src={msg.content}
+                                                        alt="Upload"
+                                                        className="max-w-[300px] max-h-[300px] rounded-lg shadow-sm border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity"
+                                                        onClick={() => window.open(msg.content, '_blank')}
+                                                    />
+                                                </div>
+                                            ) : msg.type === 'SHARED_ITEM' ? (
+                                                <div className={`mt-1 w-full bg-white rounded-lg p-3 shadow-sm transition-all relative overflow-hidden ${msg.metadata?.itemType === 'REMINDER'
+                                                    ? (isMe || acceptedItems.has(msg.id || msg.timestamp))
+                                                        ? 'led-border-green-static' // Green Static (Sent or Accepted)
+                                                        : 'led-border-yellow-anim'  // Yellow Anim (Pending)
+                                                    : 'border border-gray-200'
+                                                    }`}>
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <div className="flex items-center space-x-2">
+                                                            {msg.metadata?.itemType === 'SQL' && <Database size={20} className="text-blue-600" />}
+                                                            {msg.metadata?.itemType === 'REMINDER' && <Bell size={20} className="text-yellow-500" />}
+                                                            {msg.metadata?.itemType === 'DOC' && <FileText size={20} className="text-orange-500" />}
+                                                            <div>
+                                                                <p className="font-bold text-gray-800 text-sm leading-tight">{msg.metadata?.itemData?.title || 'Sem título'}</p>
+                                                                <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">
+                                                                    {msg.metadata?.itemType === 'REMINDER' ? 'LEMBRETE' : msg.metadata?.itemType}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
 
-                                    <div className="flex items-center justify-end mt-1 space-x-1 opacity-60">
-                                        <p className="text-[10px]">
-                                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                        </p>
-                                        {isMe && <Check size={12} className="text-blue-200" />}
+                                                    {/* Content Summary (No Raw Data) */}
+                                                    <div className="text-xs text-gray-600 mb-3 pl-1 border-l-2 border-gray-100">
+                                                        {msg.metadata?.itemType === 'SQL' && (
+                                                            <p className="italic">Consulta SQL pronta para uso.</p>
+                                                        )}
+                                                        {msg.metadata?.itemType === 'DOC' && (
+                                                            <p>Livro: {msg.metadata?.itemData?.bookTitle || 'Desconhecido'}</p>
+                                                        )}
+                                                        {msg.metadata?.itemType === 'REMINDER' && (
+                                                            <div className="flex flex-col mt-1">
+                                                                <span className="text-xs font-semibold text-gray-700">
+                                                                    {new Date(msg.metadata?.itemData?.createdAt || Date.now()).toLocaleDateString()}
+                                                                </span>
+                                                                <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded w-fit mt-0.5">
+                                                                    {(() => {
+                                                                        const statusMap = {
+                                                                            'PENDING': 'Pendente',
+                                                                            'IN_PROGRESS': 'Em Andamento',
+                                                                            'OVERDUE': 'Em Atraso',
+                                                                            'COMPLETED': 'Concluído'
+                                                                        };
+                                                                        return statusMap[msg.metadata?.itemData?.status] || msg.metadata?.itemData?.status || 'Pendente';
+                                                                    })()}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Actions */}
+                                                    {!isMe ? (
+                                                        <button
+                                                            onClick={() => handleAcceptSharedItem(msg)}
+                                                            className="w-full bg-blue-600 text-white py-2 rounded-md text-xs font-bold hover:bg-blue-700 transition-colors flex items-center justify-center shadow-sm"
+                                                        >
+                                                            {msg.metadata?.itemType === 'DOC' ? (
+                                                                <><FileText size={14} className="mr-2 flex-shrink-0" /> Abrir Documento</>
+                                                            ) : (
+                                                                <><Check size={14} className="mr-2 flex-shrink-0" /> Adicionar {
+                                                                    msg.metadata?.itemType === 'REMINDER' ? 'Lembrete' :
+                                                                        msg.metadata?.itemType === 'SQL' ? 'Consulta' :
+                                                                            msg.metadata?.itemType
+                                                                }</>
+                                                            )}
+                                                        </button>
+                                                    ) : (
+                                                        <div className="w-full bg-gray-50 text-gray-500 py-1.5 rounded-md text-[10px] font-medium text-center border border-gray-100 flex items-center justify-center">
+                                                            <Check size={12} className="mr-1 text-green-500" /> Compartilhado com sucesso
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm whitespace-pre-wrap">
+                                                    {msg.content === '[HEARTBEAT]' ? null : msg.content}
+                                                </p>
+                                            )}
+
+                                            <div className="flex items-center justify-end mt-1 space-x-1 opacity-60">
+                                                <p className="text-[10px]">
+                                                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </p>
+
+                                                {isMe && (
+                                                    <div className={`flex ${msg.read_at ? 'text-white font-bold' : 'text-blue-300'}`} title={msg.read_at ? `Lido em ${new Date(msg.read_at).toLocaleString()}` : "Entregue"}>
+                                                        <Check size={14} />
+                                                        <Check size={14} className="-ml-1.5" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            </div>
-                        );
-                    })}
+                                </React.Fragment>
+                            );
+                        });
+                    })()
+                    }
+
                     <div ref={messagesEndRef} />
+
+                    {/* Typing Indicator Bubble */}
+                    {typingUsers.size > 0 && (
+                        <div className="px-4 py-2">
+                            <div className="bg-gray-100 rounded-full px-3 py-1 inline-flex items-center space-x-1">
+                                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></span>
+                                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-100"></span>
+                                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-200"></span>
+                                <span className="text-xs text-gray-500 ml-2 font-medium">
+                                    {Array.from(typingUsers).join(', ')} está digitando...
+                                </span>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Input Area */}
@@ -746,8 +1043,9 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                         <button
                             type="button"
                             onClick={() => setShowShareMenu(!showShareMenu)}
-                            className={`p-3 transition-colors mb-0.5 rounded-full ${showShareMenu ? 'bg-blue-100 text-blue-600 rotate-90 transform' : 'text-gray-500 hover:text-blue-600'}`}
-                            title="Compartilhar..."
+                            disabled={!selectedUser}
+                            className={`p-3 transition-colors mb-0.5 rounded-full ${!selectedUser ? 'text-gray-300 cursor-not-allowed' : showShareMenu ? 'bg-blue-100 text-blue-600 rotate-90 transform' : 'text-gray-500 hover:text-blue-600'}`}
+                            title={!selectedUser ? "Chat Geral Desativado" : "Compartilhar..."}
                         >
                             <Share2 size={24} />
                         </button>
@@ -758,112 +1056,124 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                     <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        className="p-3 text-gray-500 hover:text-blue-600 transition-colors mb-0.5"
+                        disabled={!selectedUser}
+                        className={`p-3 transition-colors mb-0.5 ${!selectedUser ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:text-blue-600'}`}
                         title="Anexar Imagem ou SQL"
                     >
                         <Paperclip size={24} />
                     </button>
                     <textarea
                         value={inputMessage}
-                        onChange={(e) => setInputMessage(e.target.value)}
+                        onChange={handleInputChange}
                         onKeyDown={(e) => {
                             if (e.key === 'Enter' && !e.shiftKey) {
                                 e.preventDefault();
                                 sendMessage(e);
                             }
                         }}
-                        placeholder="Digite sua mensagem (SQL é detectado automaticamente)..."
-                        className={`flex-1 border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y shadow-sm ${theme.input} ${theme.border}`}
+                        placeholder={!selectedUser ? "Chat Geral está desativado. Selecione um usuário." : "Digite sua mensagem (SQL é detectado automaticamente)..."}
+                        disabled={!selectedUser}
+                        className={`flex-1 border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y shadow-sm ${theme.input} ${theme.border} ${!selectedUser ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                         rows={1}
                         style={{ minHeight: '50px', maxHeight: '200px' }}
                     />
                     <button
                         type="submit"
-                        disabled={!inputMessage.trim()}
-                        className={`p-3 rounded-xl transition-colors mb-0.5 ${inputMessage.trim() ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-md transform active:scale-95' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                        disabled={!inputMessage.trim() || !selectedUser}
+                        className={`p-3 rounded-xl transition-colors mb-0.5 ${inputMessage.trim() && selectedUser ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-md transform active:scale-95' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
                     >
                         <Send size={24} />
                     </button>
                 </form>
-            </div>
+            </div >
 
             {/* Share Modal */}
-            {showShareModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className={`w-full max-w-lg p-6 bg-white rounded-2xl shadow-2xl border border-gray-100`}>
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-xl font-bold text-gray-800">Compartilhar Item</h3>
-                            <button onClick={() => setShowShareModal(false)} className="text-gray-500 hover:text-red-500">
-                                <X size={24} />
-                            </button>
-                        </div>
+            {
+                showShareModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                        <div className={`w-full max-w-lg p-6 bg-white rounded-2xl shadow-2xl border border-gray-100`}>
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-xl font-bold text-gray-800">Compartilhar Item</h3>
+                                <button onClick={() => setShowShareModal(false)} className="text-gray-500 hover:text-red-500">
+                                    <X size={24} />
+                                </button>
+                            </div>
 
-                        <div className="flex space-x-4 mb-4 border-b border-gray-100 pb-2">
-                            <button
-                                onClick={() => setShareType('SQL')}
-                                className={`pb-2 px-2 ${shareType === 'SQL' ? 'border-b-2 border-blue-500 font-bold text-blue-600' : 'text-gray-500'}`}
-                            >
-                                SQL Salvo
-                            </button>
-                            <button
-                                onClick={() => setShareType('REMINDER')}
-                                className={`pb-2 px-2 ${shareType === 'REMINDER' ? 'border-b-2 border-blue-500 font-bold text-blue-600' : 'text-gray-500'}`}
-                            >
-                                Lembretes
-                            </button>
-                            <button
-                                onClick={() => setShareType('DOC')}
-                                className={`pb-2 px-2 ${shareType === 'DOC' ? 'border-b-2 border-blue-500 font-bold text-blue-600' : 'text-gray-500'}`}
-                            >
-                                Docs
-                            </button>
-                        </div>
+                            <div className="flex space-x-4 mb-4 border-b border-gray-100 pb-2">
+                                <button
+                                    onClick={() => setShareType('SQL')}
+                                    className={`pb-2 px-2 ${shareType === 'SQL' ? 'border-b-2 border-blue-500 font-bold text-blue-600' : 'text-gray-500'}`}
+                                >
+                                    SQL Salvo
+                                </button>
+                                <button
+                                    onClick={() => setShareType('REMINDER')}
+                                    className={`pb-2 px-2 ${shareType === 'REMINDER' ? 'border-b-2 border-blue-500 font-bold text-blue-600' : 'text-gray-500'}`}
+                                >
+                                    Lembretes
+                                </button>
+                                <button
+                                    onClick={() => setShareType('DOC')}
+                                    className={`pb-2 px-2 ${shareType === 'DOC' ? 'border-b-2 border-blue-500 font-bold text-blue-600' : 'text-gray-500'}`}
+                                >
+                                    Docs
+                                </button>
+                            </div>
 
-                        <div className="max-h-60 overflow-y-auto space-y-2">
-                            {shareType === 'SQL' && (
-                                savedQueries.length === 0 ? <p className="text-gray-500">Nenhum SQL salvo.</p> :
-                                    savedQueries.map((q, idx) => (
-                                        <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl hover:bg-gray-100 border border-transparent hover:border-gray-200 transition-all">
-                                            <div className="overflow-hidden">
-                                                <p className="font-bold text-sm truncate text-gray-800">{q.title || 'Sem Título'}</p>
-                                                {/* <p className="text-xs text-gray-500 truncate">{q.sql}</p> */}
+                            <div className="max-h-60 overflow-y-auto space-y-2">
+                                {shareType === 'SQL' && (
+                                    savedQueries.length === 0 ? <p className="text-gray-500">Nenhum SQL salvo.</p> :
+                                        savedQueries.map((q, idx) => (
+                                            <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl hover:bg-gray-100 border border-transparent hover:border-gray-200 transition-all">
+                                                <div className="overflow-hidden">
+                                                    <p className="font-bold text-sm truncate text-gray-800">{q.title || 'Sem Título'}</p>
+                                                    {/* <p className="text-xs text-gray-500 truncate">{q.sql}</p> */}
+                                                </div>
+                                                <button
+                                                    onClick={() => handleShare(q, 'SQL')}
+                                                    className="ml-2 px-3 py-1 bg-blue-100 text-blue-700 rounded text-xs font-bold hover:bg-blue-200"
+                                                >
+                                                    Enviar
+                                                </button>
                                             </div>
-                                            <button
-                                                onClick={() => handleShare(q, 'SQL')}
-                                                className="ml-2 px-3 py-1 bg-blue-100 text-blue-700 rounded text-xs font-bold hover:bg-blue-200"
-                                            >
-                                                Enviar
-                                            </button>
-                                        </div>
-                                    ))
-                            )}
-                            {shareType === 'REMINDER' && (
-                                (!reminders || reminders.length === 0) ? <p className="text-gray-500">Nenhum lembrete.</p> :
-                                    reminders.map((r, idx) => (
-                                        <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl hover:bg-gray-100 border border-transparent hover:border-gray-200 transition-all">
-                                            <div className="overflow-hidden">
-                                                <p className="font-bold text-sm truncate text-gray-800">{r.title}</p>
-                                                <p className="text-xs text-gray-500">
-                                                    {r.date && !isNaN(new Date(r.date)) ? new Date(r.date).toLocaleDateString() : 'Sem data'}
-                                                </p>
+                                        ))
+                                )}
+                                {shareType === 'REMINDER' && (
+                                    (!reminders || reminders.length === 0) ? <p className="text-gray-500">Nenhum lembrete.</p> :
+                                        reminders.map((r, idx) => (
+                                            <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl hover:bg-gray-100 border border-transparent hover:border-gray-200 transition-all">
+                                                <div className="overflow-hidden">
+                                                    <p className="font-bold text-sm truncate text-gray-800">{r.title}</p>
+                                                    <p className="text-xs text-gray-500">
+                                                        {r.date && !isNaN(new Date(r.date)) ? new Date(r.date).toLocaleDateString() : 'Sem data'}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleShare(r, 'REMINDER')}
+                                                    className="ml-2 px-3 py-1 bg-blue-100 text-blue-700 rounded text-xs font-bold hover:bg-blue-200"
+                                                >
+                                                    Enviar
+                                                </button>
                                             </div>
-                                            <button
-                                                onClick={() => handleShare(r, 'REMINDER')}
-                                                className="ml-2 px-3 py-1 bg-blue-100 text-blue-700 rounded text-xs font-bold hover:bg-blue-200"
-                                            >
-                                                Enviar
-                                            </button>
-                                        </div>
-                                    ))
-                            )}
-                            {shareType === 'DOC' && (
-                                <DocsTreeSelector onShare={(item) => handleShare(item, 'DOC')} />
-                            )}
+                                        ))
+                                )}
+                                {shareType === 'DOC' && (
+                                    <DocsTreeSelector onShare={(item) => handleShare(item, 'DOC')} />
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+            {/* Toast Notification */}
+            {
+                toast && (
+                    <div className={`fixed top-4 right-4 z-[60] px-4 py-3 rounded-lg shadow-lg text-white font-medium transform transition-all duration-300 ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'warning' ? 'bg-yellow-500' : 'bg-green-500'}`}>
+                        {toast.message}
+                    </div>
+                )
+            }
+        </div >
     );
 };
 

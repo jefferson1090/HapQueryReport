@@ -161,15 +161,15 @@ if (fs.existsSync(clientDistPath)) {
   console.log(`[DEBUG] Directory contents: ${fs.readdirSync(clientDistPath).join(', ')}`);
   app.use(express.static(clientDistPath));
   // SPA Fallback
-  // SPA Fallback
   app.get(/.*/, (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
       return next();
     }
+    console.log(`[DEBUG] Serving index.html for path: ${req.path}`);
     res.sendFile(path.join(clientDistPath, 'index.html'));
   });
 } else {
-  console.log(`Client dist not found at: ${clientDistPath}. Assuming Dev Mode.`);
+  console.log(`[ERROR] Client dist not found at: ${clientDistPath}. Run 'npm run build' in client folder.`);
 }
 // -----------------------------
 app.post('/api/connect', async (req, res) => {
@@ -242,6 +242,8 @@ io.on('connection', (socket) => {
     const username = typeof data === 'object' ? data.username : data;
     const team = typeof data === 'object' ? data.team : 'Geral';
 
+    console.log(`[DEBUG] Socket JOIN received: ${username} (${team}) ID: ${socket.id}`);
+
     chatService.users.set(socket.id, { username, team });
 
     // Ensure Adapter knows about this user (Critical for Presence in Polling Mode)
@@ -261,6 +263,25 @@ io.on('connection', (socket) => {
     console.log(`${username} (${team}) joined chat. Total users: ${userList.length}`);
   });
 
+  // Typing Indicators
+  socket.on('typing', (data) => {
+    socket.broadcast.emit('typing', data); // data: { username }
+  });
+
+  socket.on('stop_typing', (data) => {
+    socket.broadcast.emit('stop_typing', data);
+  });
+
+  socket.on('mark_read', async (data) => {
+    try {
+      if (data.messageIds && data.messageIds.length > 0) {
+        await chatService.markAsRead(data.messageIds);
+      }
+    } catch (e) {
+      console.error("MarkRead Error:", e);
+    }
+  });
+
   socket.on('message', async (data) => {
     // data: { sender, content, type, metadata, recipient }
     try {
@@ -278,15 +299,15 @@ io.on('connection', (socket) => {
       let sent = false;
       for (const [id, user] of chatService.users.entries()) {
         if (user.username === data.recipient) {
-          io.to(id).emit('message', msgPayload);
+          // io.to(id).emit('message', msgPayload); // REMOVED: Rely on Adapter/Supabase broadcast only
           sent = true;
         }
       }
       // Also send back to sender (so it appears in their chat)
-      socket.emit('message', msgPayload);
+      // socket.emit('message', msgPayload); // REMOVED: Client now uses Optimistic UI
     } else {
       // Broadcast to all
-      io.emit('message', msgPayload);
+      // io.emit('message', msgPayload); // REMOVED: Rely on Adapter/Supabase broadcast only
     }
   });
 
@@ -1202,6 +1223,17 @@ app.delete('/api/docs/nodes/:id', async (req, res) => {
     await docService.deleteNode(req.params.id);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/chat/history', async (req, res) => {
+  try {
+    const limit = req.query.limit || 100;
+    const history = await chatService.getHistory(limit);
+    res.json(history);
+  } catch (e) {
+    console.error("History error:", e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Serve static files from the public directory

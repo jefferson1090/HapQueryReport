@@ -194,6 +194,12 @@ class AiService {
 
         } catch (e) {
             console.error("Groq Chat Error:", e);
+            if (e.message && (e.message.includes('Connection error') || e.message.includes('fetch failed'))) {
+                return {
+                    text: `⚠️ **Erro de Conexão com a IA**\n\nNão consegui conectar ao servidor da IA (Groq). Isso geralmente acontece por:\n1. Bloqueio de Firewall/Proxy na rede da empresa.\n2. Falha na conexão de internet.\n\nPor favor, verifique se o domínio \`api.groq.com\` está liberado.`,
+                    action: 'error'
+                };
+            }
             return { text: `Erro na IA: ${e.message}`, action: 'error' };
         }
     }

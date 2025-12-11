@@ -19,7 +19,7 @@ import { getApiUrl } from './config';
 import { ThemeContext, THEMES } from './context/ThemeContext';
 import { useApi } from './context/ApiContext';
 
-const VERSION = "v1.15.66";
+const VERSION = "v1.15.72";
 
 function App() {
     // Chat User State (Main Entry)
@@ -29,7 +29,7 @@ function App() {
     });
     const [socket, setSocket] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
-    const { apiUrl } = useApi();
+    const { apiUrl, isReady } = useApi();
 
     useEffect(() => {
         const timer = setTimeout(() => setShowSplash(false), 2500);
@@ -37,22 +37,33 @@ function App() {
     }, []);
 
     // Auto-Connect Socket on Refresh
-    // Auto-Connect Socket on Refresh
     useEffect(() => {
-        if (chatUser && !socket && apiUrl) {
+        if (chatUser && isReady && apiUrl) {
             console.log("Auto-connecting socket for:", chatUser.username, "to", apiUrl);
+
+            // Disconnect existing if any (though usually null on mount)
+            if (socket) {
+                console.log("Disconnecting old socket...");
+                socket.disconnect();
+            }
+
             const newSocket = io(apiUrl);
             setSocket(newSocket);
 
             // Re-join logic
             newSocket.emit('join', { username: chatUser.username, team: chatUser.team });
+
+            return () => {
+                newSocket.disconnect();
+            };
         }
-    }, [chatUser, socket, apiUrl]);
+    }, [chatUser, isReady, apiUrl]); // Re-run if apiUrl changes
 
     // Oracle Connection State (Gated Features)
     const [connection, setConnection] = useState(null);
 
     const [activeTab, setActiveTab] = useState('team-chat'); // Default to chat after login
+    const [pendingDoc, setPendingDoc] = useState(null); // { id, bookId, query }
 
     // Theme State
     const [currentThemeName, setCurrentThemeName] = useState(() => localStorage.getItem('app_theme') || 'default');
@@ -143,6 +154,8 @@ function App() {
 
         // Global Event Listener for Deep Linking to Docs
         const handleDocOpen = (e) => {
+            const { id, bookId, query } = e.detail;
+            setPendingDoc({ id, bookId, query });
             if (activeTab !== 'docs') {
                 setActiveTab('docs');
             }
@@ -421,7 +434,10 @@ function App() {
                             {/* Docs (Not Gated) */}
                             <div className={`${activeTab === 'docs' ? 'block h-full' : 'hidden'} w-full`}>
                                 <ErrorBoundary>
-                                    <DocsModule />
+                                    <DocsModule
+                                        pendingDoc={pendingDoc}
+                                        onDocHandled={() => setPendingDoc(null)}
+                                    />
                                 </ErrorBoundary>
                             </div>
                         </div>

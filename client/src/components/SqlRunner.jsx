@@ -11,7 +11,7 @@ import CodeMirror from '@uiw/react-codemirror';
 import { sql, PLSQL } from '@codemirror/lang-sql';
 import { autocompletion } from '@codemirror/autocomplete';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
-import { PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen, Share2 } from 'lucide-react';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeList as VirtualList } from 'react-window';
 import ErrorBoundary from './ErrorBoundary';
@@ -1364,6 +1364,14 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                                     </button>
                                                 </div>
                                                 <div className="text-xs text-gray-500 truncate font-mono">{q.sql}</div>
+                                                {q.sharedBy && (
+                                                    <div className="flex items-center mt-1">
+                                                        <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full flex items-center font-medium">
+                                                            <Share2 size={10} className="mr-1" />
+                                                            Compartilhado por {q.sharedBy}
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                     </div>

@@ -7,6 +7,7 @@ class SupabaseAdapter {
         this.client = null;
         this.onMessageCallback = null;
         this.onPresenceCallback = null;
+        this.onMessageUpdateCallback = null;
         this.pollingInterval = null;
         // Backdate 1 minute to account for clock skew between client and Supabase server
         this.lastPollTime = new Date(Date.now() - 60000).toISOString();
@@ -32,8 +33,14 @@ class SupabaseAdapter {
             // Subscribe to real-time changes
             this.subscription = this.client
                 .channel('room_global') // Global room for everyone
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
-                    this.handleIncomingMessage(payload.new);
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
+                    if (payload.eventType === 'INSERT') {
+                        this.handleIncomingMessage(payload.new);
+                    } else if (payload.eventType === 'UPDATE') {
+                        if (this.onMessageUpdateCallback) {
+                            this.onMessageUpdateCallback(payload.new);
+                        }
+                    }
                 })
                 .subscribe((status) => {
                     console.log('[SupabaseAdapter] Subscription status:', status);
@@ -93,9 +100,13 @@ class SupabaseAdapter {
             if (data && data.length > 0) {
                 let newCount = 0;
                 data.forEach(msg => {
-                    // Deduplicate
+                    // 1. New Message Detection
                     if (!this.seenMessageIds.has(msg.id)) {
                         this.seenMessageIds.add(msg.id);
+                        // Store initial read state
+                        if (!this.messageStates) this.messageStates = new Map();
+                        this.messageStates.set(msg.id, msg.read_at);
+
                         this.handleIncomingMessage(msg);
                         newCount++;
 
@@ -104,12 +115,28 @@ class SupabaseAdapter {
                             this.lastPollTime = msg.created_at;
                         }
                     }
+                    // 2. Update Detection (e.g. Read Receipts)
+                    else {
+                        if (!this.messageStates) this.messageStates = new Map();
+                        const lastReadAt = this.messageStates.get(msg.id);
+
+                        // If read_at changed (e.g. from null to timestamp), emit update
+                        if (msg.read_at !== lastReadAt) {
+                            console.log(`[SupabaseAdapter] Detected update for ${msg.id}: read_at ${lastReadAt} -> ${msg.read_at}`);
+                            this.messageStates.set(msg.id, msg.read_at);
+
+                            if (this.onMessageUpdateCallback) {
+                                this.onMessageUpdateCallback(msg);
+                            }
+                        }
+                    }
                 });
                 if (newCount > 0) console.log(`[SupabaseAdapter] Polled ${data.length} items, ${newCount} new.`);
 
-                // Keep Set from growing infinitely
+                // Keep Set/Map from growing infinitely
                 if (this.seenMessageIds.size > 1000) {
-                    this.seenMessageIds.clear(); // Brute force clear, relies on poll query to not fetch super old stuff
+                    this.seenMessageIds.clear();
+                    this.messageStates.clear();
                 }
             }
 
@@ -243,6 +270,10 @@ class SupabaseAdapter {
         this.onMessageCallback = callback;
     }
 
+    setMessageUpdateHandler(callback) {
+        this.onMessageUpdateCallback = callback;
+    }
+
     handleIncomingMessage(msg) {
         // Prevent dupes if polling + WS somehow overlap (unlikely if only one is active, but safe to check?)
         // The UI usually handles dupes by ID.
@@ -253,6 +284,7 @@ class SupabaseAdapter {
             let finalContent = msg.content;
             let finalType = 'TEXT';
             let finalMetadata = null;
+            let finalRecipient = 'ALL';
 
             // Try to parse JSON content (Protocol for Rich Messages on Legacy Schema)
             if (msg.content && msg.content.startsWith('{')) {
@@ -262,6 +294,7 @@ class SupabaseAdapter {
                         finalContent = parsed.content;
                         finalType = parsed.type;
                         finalMetadata = parsed.metadata;
+                        if (parsed.recipient) finalRecipient = parsed.recipient;
                     }
                 } catch (e) {
                     // Not JSON, ignore
@@ -274,7 +307,9 @@ class SupabaseAdapter {
                 content: finalContent,
                 type: finalType,
                 metadata: finalMetadata,
+                recipient: msg.recipient || finalRecipient,
                 timestamp: msg.created_at,
+                read_at: msg.read_at
             };
             this.onMessageCallback(normalized);
         }
@@ -285,8 +320,8 @@ class SupabaseAdapter {
 
         let contentToSave = messageObject.content;
 
-        // Serialize Rich Messages (SHARED_ITEM, CODE, etc) if schema doesn't support columns
-        if (messageObject.type !== 'TEXT' || messageObject.metadata) {
+        // Serialize Rich Messages (SHARED_ITEM, CODE, etc) OR Private Messages if schema doesn't support columns
+        if (messageObject.type !== 'TEXT' || messageObject.metadata || (messageObject.recipient && messageObject.recipient !== 'ALL')) {
             contentToSave = JSON.stringify({
                 _protocol: 'HAP_V1',
                 type: messageObject.type,
@@ -300,7 +335,8 @@ class SupabaseAdapter {
             .from('messages')
             .insert({
                 sender: messageObject.sender,
-                content: contentToSave
+                content: contentToSave,
+                recipient: messageObject.recipient || 'ALL'
             });
 
         if (error) {
@@ -314,24 +350,23 @@ class SupabaseAdapter {
         // ChatService.js line 153 says: "Note: We don't need to manually emit ... because adapter will call handleIncomingMessage"
         // In Polling mode, connection is "slow".
         // Let's manually trigger it for self-echo if we are polling.
-        if (this.pollingInterval) {
-            this.handleIncomingMessage({
-                id: 'temp_' + Date.now(),
-                sender: messageObject.sender,
-                content: messageObject.content,
-                created_at: new Date().toISOString()
-            });
-        }
+        // Manual echo removed to prevent duplication with index.js optimistic update
+        // if (this.pollingInterval) { ... }
         return true;
     }
 
     async getHistory(limit = 50) {
         if (!this.client) return [];
+
+        // 7 Days Retention Logic
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
         const { data, error } = await this.client
             .from('messages')
             .select('*')
+            .gt('created_at', sevenDaysAgo)
             .order('created_at', { ascending: false })
-            .limit(limit);
+            .limit(1000); // Safety limit, but high enough for 7 days of normal chat
 
         if (error) {
             console.error('[SupabaseAdapter] History error:', error);
@@ -340,15 +375,59 @@ class SupabaseAdapter {
 
         // Update lastPollTime to avoid re-fetching these
         if (data && data.length > 0) {
-            // data[0] is newest because order desc
-            // actually Polling uses 'gt' lastPollTime.
-            // We should set lastPollTime to the newest message we just fetched?
-            // Yes, to prevent 'poll' from fetching old history.
             const newest = data[0].created_at;
             if (newest > this.lastPollTime) this.lastPollTime = newest;
         }
 
-        return data.reverse();
+        return data.reverse().map(msg => {
+            if (msg.content === '[HEARTBEAT]') return null;
+
+            let finalContent = msg.content;
+            let finalType = 'TEXT';
+            let finalMetadata = null;
+            let finalRecipient = 'ALL';
+
+            if (msg.content && msg.content.startsWith('{')) {
+                try {
+                    const parsed = JSON.parse(msg.content);
+                    if (parsed._protocol === 'HAP_V1' && parsed.type) {
+                        finalContent = parsed.content;
+                        finalType = parsed.type;
+                        finalMetadata = parsed.metadata;
+                        if (parsed.recipient) finalRecipient = parsed.recipient;
+                    }
+                } catch (e) { }
+            }
+
+            const resolvedRecipient = (msg.recipient && msg.recipient !== 'ALL') ? msg.recipient : finalRecipient;
+
+            return {
+                id: msg.id,
+                sender: msg.sender,
+                content: finalContent,
+                type: finalType,
+                metadata: finalMetadata,
+                recipient: resolvedRecipient,
+                timestamp: msg.created_at,
+                read_at: msg.read_at
+            };
+        }).filter(m => m !== null);
+    }
+
+    async markAsRead(messageIds) {
+        if (!this.client || !messageIds || messageIds.length === 0) return;
+
+        try {
+            const { error } = await this.client
+                .from('messages')
+                .update({ read_at: new Date().toISOString() })
+                .in('id', messageIds)
+                .is('read_at', null);
+
+            if (error) throw error;
+        } catch (e) {
+            console.error('[SupabaseAdapter] MarkRead error:', e);
+        }
     }
 }
 

@@ -1,5 +1,5 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
-console.log('ELECTRON_RUN_AS_NODE:', process.env.ELECTRON_RUN_AS_NODE);
+delete process.env.ELECTRON_RUN_AS_NODE;
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 console.log('App type:', typeof app);
 const path = require('path');
 const net = require('net');
@@ -42,7 +42,7 @@ function createWindow() {
 
     // Load the local server
     // Note: index.js starts listening on port 3001
-    const startUrl = process.env.ELECTRON_START_URL || 'http://localhost:3001';
+    const startUrl = process.env.ELECTRON_START_URL || `http://localhost:${serverPort}`;
     mainWindow.loadURL(startUrl);
 
     // Clear cache to ensure latest version is loaded
@@ -54,6 +54,7 @@ function createWindow() {
         mainWindow = null;
     });
 
+    // Disable Ctrl+Shift+I (DevTools)
     // Disable Ctrl+Shift+I (DevTools)
     mainWindow.webContents.on('before-input-event', (event, input) => {
         if (input.control && input.shift && input.key.toLowerCase() === 'i') {
@@ -73,7 +74,7 @@ ipcMain.on('reset-focus', () => {
     }
 });
 
-const { dialog } = require('electron');
+// const { dialog } = require('electron'); // Moved to top
 const fs = require('fs');
 
 ipcMain.handle('select-file', async () => {
@@ -88,7 +89,7 @@ ipcMain.handle('read-file', async (event, path) => {
     return await fs.promises.readFile(path, 'utf-8');
 });
 
-const { shell } = require('electron');
+// const { shell } = require('electron'); // Moved to top
 ipcMain.handle('show-item-in-folder', async (event, path) => {
     shell.showItemInFolder(path);
 });
@@ -218,11 +219,29 @@ ipcMain.on('restart_app', () => {
 
 app.on('ready', async () => {
     try {
-        serverPort = await findFreePort(3001);
-        console.log(`Starting server on port ${serverPort}...`);
-        await startServer(serverPort);
+        // Check if server is already running on 3001
+        const isPortTaken = await new Promise((resolve) => {
+            const client = new net.Socket();
+            client.once('connect', () => {
+                client.destroy();
+                resolve(true);
+            });
+            client.once('error', (e) => {
+                resolve(false);
+            });
+            client.connect(3001, '127.0.0.1');
+        });
+
+        if (isPortTaken) {
+            console.log('Port 3001 is already in use. Assuming external server is running. Connecting to it...');
+            serverPort = 3001;
+        } else {
+            console.log('Port 3001 is free. Starting internal server...');
+            serverPort = 3001;
+            await startServer(serverPort);
+        }
     } catch (err) {
-        console.error("Failed to start server:", err);
+        console.error("Failed to start/connect server:", err);
     }
 
     createWindow();

@@ -58,6 +58,13 @@ class ChatService {
                     this.broadcastToLocalClients(msg);
                 });
 
+                // Set up listener for message updates (Read Receipts)
+                if (this.adapter.setMessageUpdateHandler) {
+                    this.adapter.setMessageUpdateHandler((msg) => {
+                        if (this.io) this.io.emit('message_update', msg);
+                    });
+                }
+
                 // Set up listener for presence (Online Users)
                 this.adapter.setPresenceHandler((onlineUsers) => {
                     if (this.io) this.io.emit('update_user_list', onlineUsers);
@@ -166,6 +173,12 @@ class ChatService {
             return await this.adapter.getHistory();
         }
         return [];
+    }
+
+    async markAsRead(messageIds) {
+        if (this.adapter && this.adapter.markAsRead) {
+            await this.adapter.markAsRead(messageIds);
+        }
     }
 }
 

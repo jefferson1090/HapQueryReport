@@ -17,6 +17,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useDroppable } from '@dnd-kit/core';
+import { Share2 } from 'lucide-react';
 
 const COLUMNS = {
     PENDING: { id: 'PENDING', title: 'Pendente', color: 'bg-gray-50', headerColor: 'bg-gray-100', borderColor: 'border-gray-200', textColor: 'text-gray-800' },
@@ -62,6 +63,15 @@ function SortableItem({ reminder, onClick, onDelete, onEdit, onMove }) {
                 <h4 className="font-bold text-gray-800 text-sm line-clamp-2">{reminder.title}</h4>
                 {getStatusBadge(reminder.status)}
             </div>
+
+            {reminder.sharedBy && (
+                <div className="flex items-center mb-2">
+                    <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full flex items-center font-medium">
+                        <Share2 size={10} className="mr-1" />
+                        Compartilhado por {reminder.sharedBy}
+                    </span>
+                </div>
+            )}
 
             {reminder.startDate && (
                 <p className="text-xs text-gray-500 mb-2">📅 {new Date(reminder.startDate).toLocaleDateString()}</p>

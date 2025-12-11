@@ -186,7 +186,7 @@ const BookItem = ({ book, pages, expanded, onToggle, onAddPage, activeId, onSele
     );
 };
 
-const DocsModule = () => {
+const DocsModule = ({ pendingDoc, onDocHandled }) => {
     const { theme } = useContext(ThemeContext);
     const [books, setBooks] = useState([]);
     const [pagesMap, setPagesMap] = useState({}); // { [bookId]: [pages...] }
@@ -213,31 +213,40 @@ const DocsModule = () => {
     // Load Books
     useEffect(() => {
         fetchBooks();
+    }, []);
 
-        const handleDocOpen = async (e) => {
-            const { id, bookId, query } = e.detail;
+    // Handle Pending Doc (Deep Link / Share)
+    useEffect(() => {
+        const handlePending = async () => {
+            if (pendingDoc && pendingDoc.id) {
+                const { id, bookId, query } = pendingDoc;
+                console.log("[DocsModule] Handling pending doc:", pendingDoc);
 
-            // 1. Ensure book is loaded
-            if (!pagesMap[bookId]) {
-                await loadBookTree(bookId);
+                // 1. Ensure book is loaded
+                if (!pagesMap[bookId]) {
+                    await loadBookTree(bookId);
+                }
+
+                // 2. Expand book in sidebar
+                if (!expandedBooks.has(bookId)) {
+                    toggleBook(bookId);
+                }
+
+                // 3. Select Node
+                // Ensure ID is string for consistency if needed, but API likely handles it.
+                // We fetch the full node details
+                await handleSelectNode({ ID_NODE: id });
+
+                // 4. Set Highlight
+                if (query) setHighlightQuery(query);
+
+                // Clear pending
+                if (onDocHandled) onDocHandled();
             }
-
-            // 2. Expand book in sidebar
-            if (!expandedBooks.has(bookId)) {
-                toggleBook(bookId);
-            }
-
-            // 3. Select Node
-            // We fetch the full node details
-            await handleSelectNode({ ID_NODE: id });
-
-            // 4. Set Highlight
-            if (query) setHighlightQuery(query);
         };
 
-        window.addEventListener('hap-doc-open', handleDocOpen);
-        return () => window.removeEventListener('hap-doc-open', handleDocOpen);
-    }, [pagesMap, expandedBooks]);
+        handlePending();
+    }, [pendingDoc, pagesMap, expandedBooks]); // Re-run when pendingDoc changes or dependencies are ready
 
     const fetchBooks = async () => {
         try {
