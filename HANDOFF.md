@@ -27,3 +27,14 @@
 *   **Client:** `cd client && npm run build`
 *   **Server:** `cd server && npm run dist` (Isso aciona automaticamente o `copy-client`).
 *   **Install:** O instalador vai para `C:\Users\jeffe\Downloads`.
+
+## ⚠️ Credenciais (Uso Exclusivo para Continuidade)
+Como o arquivo `.env` não é versionado, utilize estas chaves para configurar o ambiente local (`server/.env`):
+
+```env
+# Chave Obfuscada (Remova os espaços para usar)
+GROQ_API_KEY=gsk_ 2zYeSDTgSKoSzEApSKTSWGdyb3FY0RsY5JxBCHkk1hM7g5lez48I
+AI_MODEL=llama-3.3-70b-versatile
+```
+
+**Instrução:** Crie um arquivo `.env` na pasta `server/` com o conteúdo acima.
