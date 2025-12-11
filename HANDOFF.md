@@ -1,24 +1,24 @@
-# Handoff Instructions - v2.0.0 Release
+# Handoff Instructions - v2.1.0 (Dev)
 
 ## Project Status
-**Current Version:** v2.0.0 (Client & Server)
-**Stability:** Stable (Golden Release)
-**Last Action:** Published v2.0.0 to GitHub Releases.
+**Current Version:** v2.1.0-dev
+**Stability:** Beta (Autocomplete in debugging phase)
+**Last Action:** Implemented Tab Renaming, Theme Switcher Fix, and Autocomplete Backend Fixes.
 
-## Key Changes Implemented
-1.  **UI Overhaul (V2.0)**:
-    -   **Glassmorphism**: New Login & Splash screens with transparent/blur effects.
-    -   **Navigation**: Updated tabs to match new Identity (Orange/Blue).
-    -   **Icons**: Migrated to `lucide-react` (Loader2, etc.).
+## Key Changes Implemented (Session 2024-12-16)
+1.  **Tab Renaming**:
+    -   Implemented double-click to rename query tabs in `SqlRunner.jsx`.
 
-2.  **Update System Fixes**:
-    -   **Loop Fix**: Added 15s timeout to `checkForUpdates` in `App.jsx`.
-    -   **IPC Fix**: Changed `manual-check-update` to use `ipcMain.handle` (Server) and `invoke` (Client).
-    -   **Debug Logs**: Enabled `electron-log` in `electron-main.js` (Logs to `%APPDATA%\Hap Assistente de Dados\logs`).
+2.  **Theme Switcher Fix**:
+    -   Corrected `App.jsx` to use dynamic classes from `ThemeContext`, fixing the broken theme selection.
 
-3.  **Build Process**:
-    -   **Clean Build**: `package.json` now has `clean` scripts that run automatically before `build` or `dist`.
-    -   **No Cache Corruption**: `dist` folders are nuked before every build.
+3.  **Updater Fix**:
+    -   Added `artifactName` to `server/package.json` to enforce hyphenated filenames (fixing 404 error).
+
+4.  **Autocomplete SQL (Work in Progress)**:
+    -   **Backend**: Fixed critical bug in `db.js`. Query was not executing, and `currentUser` reference was broken. Now returns dictionary correctly.
+    -   **Frontend**: Updated `SqlRunner.jsx` to fetch schema *after* connection. Implemented case-insensitive alias support (normalizing keys).
+    -   **Status**: Code logic is sound, but user reported issues in final test. Needs verification of `db.js` execution logs.
 
 ## Dependencies & Installation
 If you (the next agent) need to reinstall or move environments:
@@ -40,14 +40,14 @@ This key is stored in `server/chat_config.json`, which is **ignored** by Git for
 
 ```json
 {
-  "groqApiKey": "gsk_fOMZ5XSuBGDwapsKicL1WGdyb3FYVETK5r DrA3wS02sH9AzH8SRQ",
+  "groqApiKey": "PLACE_YOUR_API_KEY_HERE",
   "model": "llama-3.3-70b-versatile",
   "temperature": 0.3,
   "maxTokens": 1024,
   "topP": 1
 }
 ```
-3.  **REMOVE THE SPACE** between `...VETK5r` and `DrA3w...` to form the valid key.
+3.  **Paste your valid Groq API Key** (ensure no spaces).
 
 **Note**: If this file is missing, the AI features (Chat, SQL Generation) will fail.
 
