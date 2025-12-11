@@ -3,7 +3,8 @@ console.log('ELECTRON_RUN_AS_NODE:', process.env.ELECTRON_RUN_AS_NODE);
 console.log('App type:', typeof app);
 const path = require('path');
 const net = require('net');
-const startServer = require('./index'); // This imports the startServer function
+const startServer = require('./index'); // Restored internal require
+// const { spawn } = require('child_process');
 
 let serverPort = 3001; // Default, will be updated
 
@@ -25,6 +26,7 @@ function findFreePort(startPort) {
 }
 
 let mainWindow;
+// let serverProcess;
 
 function createWindow() {
     mainWindow = new BrowserWindow({

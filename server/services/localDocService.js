@@ -129,11 +129,9 @@ class LocalDocService {
                     let content = '';
                     if (fs.existsSync(contentPath)) {
                         // Read only first 4000 chars to satisfy search index (performance optimization)
-                        const fd = fs.openSync(contentPath, 'r');
-                        const buffer = Buffer.alloc(4000);
-                        const bytesRead = fs.readSync(fd, buffer, 0, 4000, 0);
-                        fs.closeSync(fd);
-                        content = buffer.toString('utf-8', 0, bytesRead);
+                        // Use safe high-level API to avoid potential Buffer access violations in Electron
+                        const fullContent = fs.readFileSync(contentPath, 'utf-8');
+                        content = fullContent.substring(0, 4000);
                     }
 
                     allNodes.push({

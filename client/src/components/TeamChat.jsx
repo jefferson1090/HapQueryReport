@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { io } from "socket.io-client";
 import { ThemeContext } from '../context/ThemeContext';
-import { Send, User, Users, Lock, LogIn, Database, Bell, FileText, Check, X, ChevronRight, ChevronDown, Book, Paperclip } from 'lucide-react';
+import { Send, User, Users, Lock, LogIn, Database, Bell, FileText, Check, X, ChevronRight, ChevronDown, Book, Paperclip, Cloud, Server, RefreshCw, Radio, Sparkles, Copy, Share2 } from 'lucide-react';
+import { format } from 'sql-formatter';
+
 import { useApi } from '../context/ApiContext';
 
 // Docs Tree Selector Component
@@ -114,6 +116,7 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
     // Share Modal State
     const [showShareModal, setShowShareModal] = useState(false);
     const [shareType, setShareType] = useState('SQL'); // SQL, REMINDER, DOC
+    const [showShareMenu, setShowShareMenu] = useState(false);
     const { apiUrl } = useApi();
 
     const messagesEndRef = useRef(null);
@@ -124,7 +127,11 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
             // If socket is passed from App, it might be already connected.
 
             // Listeners
-            const handleUsersUpdate = (users) => setUsersOnline(users);
+            const handleUsersUpdate = (users) => {
+                setUsersOnline(users);
+                // If we receive users, it means connection is healthy-ish
+                setConnectionStatus('CONNECTED');
+            };
             const handleMessage = (msg) => {
                 setMessages(prev => [...prev, msg]);
                 scrollToBottom();
@@ -153,7 +160,7 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                 scrollToBottom();
             };
 
-            socket.on('users_update', handleUsersUpdate);
+            socket.on('update_user_list', handleUsersUpdate);
             socket.on('message', handleMessage);
             socket.on('shared_item_received', handleSharedItem);
 
@@ -161,12 +168,69 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
             loadHistory(user.username);
 
             return () => {
-                socket.off('users_update', handleUsersUpdate);
+                socket.off('update_user_list', handleUsersUpdate);
                 socket.off('message', handleMessage);
                 socket.off('shared_item_received', handleSharedItem);
             };
         }
     }, [user, socket]);
+
+    // Backend Switch Logic
+    const [currentBackend, setCurrentBackend] = useState(localStorage.getItem('chat_backend') || 'supabase');
+    const [switching, setSwitching] = useState(false);
+    const [connectionStatus, setConnectionStatus] = useState('IDLE'); // IDLE, LOADING, CONNECTED, ERROR
+    const [statusMsg, setStatusMsg] = useState('');
+
+    const handleSync = () => {
+        if (!socket || switching) return;
+        setConnectionStatus('LOADING');
+
+        // Re-emit join to refresh presence
+        socket.emit('join', { username: user.username, team: user.team || 'Geral' });
+
+        // Force reload history
+        loadHistory(user.username);
+
+        // Slight delay to simulate sync check
+        setTimeout(() => {
+            setConnectionStatus('CONNECTED');
+        }, 1000);
+    };
+
+    const toggleBackend = async () => {
+        if (switching) return;
+
+        const next = currentBackend === 'supabase' ? 'oracle' : 'supabase';
+        setSwitching(true);
+        setConnectionStatus('LOADING');
+        setStatusMsg('Trocando ambiente...');
+
+        try {
+            const res = await fetch(`${apiUrl}/api/chat/switch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ backend: next })
+            });
+            const data = await res.json();
+
+            if (res.ok) {
+                setCurrentBackend(next);
+                localStorage.setItem('chat_backend', next);
+                setConnectionStatus('CONNECTED');
+                setStatusMsg('Conectado!');
+                // Auto-clear success msg
+                setTimeout(() => setStatusMsg(''), 3000);
+            } else {
+                throw new Error(data.error || 'Falha na troca');
+            }
+        } catch (e) {
+            console.error(e);
+            setConnectionStatus('ERROR');
+            setStatusMsg('Erro: ' + e.message);
+        } finally {
+            setSwitching(false);
+        }
+    };
 
     useEffect(() => {
         scrollToBottom();
@@ -194,8 +258,13 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
         let type = 'TEXT';
         let content = inputMessage;
 
-        // Simple heuristic: if it contains SELECT, FROM, WHERE, etc.
-        if (/SELECT\s+.+\s+FROM/i.test(content) || /CREATE\s+TABLE/i.test(content)) {
+        // Robust heuristic for SQL detection (Complex PL/SQL included)
+        // Matches if it starts with a keyword OR contains a clear SQL block structure
+        const sqlPattern = /^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|WITH|GRANT|REVOKE|DECLARE|BEGIN|MERGE|TRUNCATE|CALL|EXPLAIN|LOCK|ROLLBACK|COMMIT|SAVEPOINT|SET|SHOW)\b/i;
+        // Also check for "DECLARE ... BEGIN ... END" or multiline SQL even if it has comments
+        const complexSqlPattern = /(\bSELECT\b.*\bFROM\b|\bINSERT\b.*\bINTO\b|\bUPDATE\b.*\bSET\b|\bDELETE\b.*\bFROM\b|\bCREATE\b.*\bTABLE\b|\bDECLARE\b.*\bBEGIN\b)/is;
+
+        if (sqlPattern.test(content) || complexSqlPattern.test(content)) {
             type = 'CODE';
         }
 
@@ -209,13 +278,110 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
     };
 
     const handleShare = (item, type) => {
-        socket.emit('share_item', {
-            sender: user.username,
-            recipient: selectedUser ? selectedUser.username : 'ALL',
-            itemType: type,
-            itemData: item
-        });
-        setShowShareModal(false);
+        try {
+            if (!socket) {
+                alert("Erro: Não conectado ao chat.");
+                return;
+            }
+
+            socket.emit('share_item', {
+                sender: user.username,
+                recipient: selectedUser ? selectedUser.username : 'ALL',
+                itemType: type,
+                itemData: item
+            });
+
+            // Optimistic UI Update (Show to sender immediately)
+            const msg = {
+                sender: user.username,
+                content: `Compartilhou um ${type}`,
+                type: 'SHARED_ITEM',
+                metadata: { itemType: type, itemData: item },
+                timestamp: new Date()
+            };
+            setMessages(prev => [...prev, msg]);
+            setShowShareModal(false);
+            setTimeout(scrollToBottom, 100);
+        } catch (e) {
+            console.error("HandleShare Error:", e);
+            alert("Erro ao compartilhar item: " + e.message);
+        }
+    };
+
+    // --- File Upload & Drag/Drop Logic ---
+    const [isDragging, setIsDragging] = useState(false);
+    const fileInputRef = useRef(null);
+
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = (e) => {
+        e.preventDefault();
+        setIsDragging(false);
+    };
+
+    const processFile = async (file) => {
+        if (!file) return;
+
+        // Image Upload
+        if (file.type.startsWith('image/')) {
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                // Reuse existing endpoint or create similar if needed
+                // Assuming /api/upload/attachment exists and returns { url, ... }
+                const res = await fetch(`${apiUrl}/api/upload/attachment`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.url) {
+                    socket.emit('message', {
+                        sender: user.username,
+                        content: data.url, // URL as content
+                        type: 'IMAGE',
+                        recipient: selectedUser ? selectedUser.username : 'ALL'
+                    });
+                }
+            } catch (err) {
+                console.error("Upload failed", err);
+                alert("Falha ao enviar imagem.");
+            }
+        }
+        // SQL File Read
+        else if (file.name.toLowerCase().endsWith('.sql')) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const content = e.target.result;
+                socket.emit('message', {
+                    sender: user.username,
+                    content: content,
+                    type: 'CODE', // Treated as code block
+                    recipient: selectedUser ? selectedUser.username : 'ALL'
+                });
+            };
+            reader.readAsText(file);
+        } else {
+            alert("Apenas imagens e arquivos .sql são permitidos.");
+        }
+    };
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        setIsDragging(false);
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            processFile(files[0]);
+        }
+    };
+
+    const handleFileSelect = (e) => {
+        const files = e.target.files;
+        if (files.length > 0) {
+            processFile(files[0]);
+        }
     };
 
     const handleAcceptSharedItem = (msg) => {
@@ -229,9 +395,9 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                 alert('Já existe uma consulta salva com este nome.');
                 return;
             }
-            const newQuery = { ...itemData, id: Date.now() };
+            const newQuery = { ...itemData, id: Date.now(), title: `${itemData.title} (de ${msg.sender})` };
             setSavedQueries(prev => [...prev, newQuery]);
-            alert(`Consulta "${itemData.title}" salva com sucesso!`);
+            alert(`Consulta "${newQuery.title}" salva com sucesso!`);
         } else if (itemType === 'REMINDER') {
             // itemData: { title, description, date, ... }
             const exists = reminders.some(r => r.title === itemData.title);
@@ -240,9 +406,9 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                     return;
                 }
             }
-            const newReminder = { ...itemData, id: Date.now(), status: 'PENDING', createdAt: new Date().toISOString() };
+            const newReminder = { ...itemData, id: Date.now(), title: `${itemData.title} (de ${msg.sender})`, status: 'PENDING', createdAt: new Date().toISOString() };
             setReminders([...reminders, newReminder]);
-            alert(`Lembrete "${itemData.title}" adicionado com sucesso!`);
+            alert(`Lembrete "${newReminder.title}" adicionado com sucesso!`);
         } else if (itemType === 'DOC') {
             // itemData: { id, title, bookId }
             // Dispatch event to open doc
@@ -256,17 +422,74 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
     if (!isVisible) return null;
 
     return (
-        <div className={`flex h-full ${theme.bg} overflow-hidden`}>
+        <div
+            className={`flex h-full ${theme.bg} overflow-hidden relative`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+        >
+            {/* Drag & Drop Visual Overlay ("Succção") */}
+            {isDragging && (
+                <div className="absolute inset-0 z-50 bg-blue-500/10 backdrop-blur-[2px] border-4 border-blue-400 border-dashed rounded-lg animate-pulse flex items-center justify-center pointer-events-none">
+                    <div className="transform scale-125 transition-transform duration-300">
+                        <Cloud size={100} className="text-blue-500 animate-bounce" />
+                        <p className="text-blue-600 font-bold text-xl mt-4 text-center">Solte para enviar</p>
+                    </div>
+                </div>
+            )}
+            {/* Hidden Input */}
+            <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept="image/*,.sql"
+                onChange={handleFileSelect}
+            />
             {/* Sidebar - Online Users */}
             <div className={`w-64 border-r border-gray-200 flex flex-col hidden md:flex bg-white`}>
                 <div className="p-4 border-b border-gray-100 flex items-center justify-between">
                     <h3 className="font-bold text-gray-700 flex items-center">
                         <Users className="w-5 h-5 mr-2" /> Online ({usersOnline.length})
                     </h3>
+                    <div className="flex flex-col items-end gap-1">
+                        <div className="flex gap-1">
+                            {/* Sync Button (NEW) */}
+                            <button
+                                onClick={handleSync}
+                                className="p-2 rounded-lg transition-colors bg-gray-50 border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-blue-600"
+                                title="Sincronizar (Recarregar Usuários e Mensagens)"
+                            >
+                                <RefreshCw size={16} />
+                            </button>
+
+                            {/* Backend Toggle */}
+                            <button
+                                onClick={toggleBackend}
+                                disabled={switching}
+                                className={`p-2 rounded-lg transition-colors border ${currentBackend === 'supabase' ? 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100' : 'bg-orange-50 border-orange-200 text-orange-600 hover:bg-orange-100'
+                                    }`}
+                                title={`Ambiente Atual: ${currentBackend === 'supabase' ? 'Nuvem' : 'Corporativo'}. Clique para trocar.`}
+                            >
+                                {switching ? <RefreshCw size={16} className="animate-spin" /> : currentBackend === 'supabase' ? <Cloud size={16} /> : <Database size={16} />}
+                            </button>
+                        </div>
+
+                        {/* Status Label */}
+                        <div className="h-4 flex items-center justify-end mt-1">
+                            {switching ? (
+                                <span className="text-[10px] text-gray-500 animate-pulse">...</span>
+                            ) : connectionStatus === 'CONNECTED' ? (
+                                <div className="w-2 h-2 bg-green-500 rounded-full" title="Conectado"></div>
+                            ) : connectionStatus === 'ERROR' ? (
+                                <div className="w-2 h-2 bg-red-500 rounded-full" title={statusMsg || 'Erro'}></div>
+                            ) : (
+                                <div className="w-2 h-2 bg-gray-300 rounded-full" title="Offline"></div>
+                            )}
+                        </div>
+                    </div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-2 space-y-2">
                     <div
-                        onClick={() => setSelectedUser(null)}
                         className={`flex items-center p-2 rounded-lg cursor-pointer transition-colors ${!selectedUser ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50'}`}
                     >
                         <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center mr-2">
@@ -300,8 +523,12 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                 </div>
                 <div className="p-4 border-t border-gray-100 bg-gray-50/50">
                     <div className="flex items-center">
-                        <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
-                            {user && user.username ? user.username[0].toUpperCase() : '?'}
+                        <div className="relative">
+                            <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
+                                {user && user.username ? user.username[0].toUpperCase() : '?'}
+                            </div>
+                            {/* Online Indicator */}
+                            <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white ${usersOnline.find(u => u.username === user.username) ? 'bg-green-500' : 'bg-gray-400'}`} title={usersOnline.find(u => u.username === user.username) ? 'Online' : 'Desconectado'}></div>
                         </div>
                         <div className="ml-2">
                             <p className={`text-sm font-bold text-gray-800`}>{user.username}</p>
@@ -345,34 +572,99 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                     {messages.filter(msg => {
                         if (selectedUser) {
                             // Private Chat: Show if (Sender is Me AND Recipient is Selected) OR (Sender is Selected AND Recipient is Me)
-                            return (msg.sender === user.username && msg.recipient === selectedUser.username) ||
-                                (msg.sender === selectedUser.username && msg.recipient === user.username);
+                            // Case-Insensitive Comparison for robustness
+                            const sSender = String(msg.sender).toLowerCase().trim();
+                            const sRecipient = String(msg.recipient).toLowerCase().trim();
+                            const uUsername = String(user.username).toLowerCase().trim();
+                            const selUsername = String(selectedUser.username).toLowerCase().trim();
+
+                            return (sSender === uUsername && sRecipient === selUsername) ||
+                                (sSender === selUsername && sRecipient === uUsername);
                         } else {
                             // Global Chat: Show if Recipient is ALL
-                            return msg.recipient === 'ALL';
+                            return String(msg.recipient).toUpperCase() === 'ALL';
                         }
                     }).map((msg, idx) => {
                         const isMe = msg.sender === user.username;
                         return (
                             <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm ${isMe
-                                    ? 'bg-blue-600 text-white rounded-br-none'
+                                <div className={`max-w-[85%] rounded-2xl text-sm shadow-sm ${msg.type === 'CODE' ? 'p-0 overflow-hidden border border-gray-200 shadow-md' : 'px-4 py-3'} ${isMe
+                                    ? (msg.type === 'CODE' ? 'bg-white' : 'bg-blue-600 text-white rounded-br-none')
                                     : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none'
                                     }`}>
                                     {!isMe && <p className="text-xs font-bold mb-1 opacity-70">{msg.sender}</p>}
 
                                     {/* Message Content */}
                                     {msg.type === 'CODE' ? (
-                                        <pre className="bg-black/20 p-2 rounded text-xs font-mono overflow-x-auto mt-1">
-                                            <code>{msg.content}</code>
-                                        </pre>
+                                        <div className="mt-1">
+                                            <div className="bg-[#1e1e1e] border border-[#333] text-[#d4d4d4] rounded-lg overflow-hidden shadow-sm group-code relative">
+                                                <div className="flex justify-between items-center px-3 py-1 bg-[#252526] border-b border-[#333]">
+                                                    <span className="text-[10px] font-mono text-blue-400 font-bold uppercase tracking-wider">SQL</span>
+                                                    <div className="flex gap-2">
+                                                        {/* AUTO-DETECT SQL RUN BUTTON: Always show for CODE type */}
+                                                        {true && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    try {
+                                                                        const formatted = format(msg.content, { language: 'plsql', keywordCase: 'upper' });
+                                                                        window.dispatchEvent(new CustomEvent('hap-run-sql', { detail: { query: formatted } }));
+                                                                    } catch (e) {
+                                                                        // Fallback if format fails
+                                                                        window.dispatchEvent(new CustomEvent('hap-run-sql', { detail: { query: msg.content } }));
+                                                                    }
+                                                                }}
+                                                                className="flex items-center gap-1 bg-green-700 hover:bg-green-600 text-white px-2 py-0.5 rounded text-[10px] font-bold shadow transition-colors"
+                                                                title="Executar no Editor SQL (Formatado)"
+                                                            >
+                                                                <Sparkles size={10} /> RUN
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            onClick={() => {
+                                                                navigator.clipboard.writeText(msg.content);
+                                                                // Optional: show toast, but for now simple copy
+                                                            }}
+                                                            className="text-gray-400 hover:text-white"
+                                                            title="Copiar"
+                                                        >
+                                                            <Copy size={12} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <pre className="p-3 overflow-x-auto text-xs font-mono leading-relaxed custom-scrollbar">
+                                                    <code>
+                                                        {(() => {
+                                                            try {
+                                                                // Attempt to format for display
+                                                                return format(msg.content, { language: 'plsql', keywordCase: 'upper', linesBetweenQueries: 2 });
+                                                            } catch (e) {
+                                                                return msg.content;
+                                                            }
+                                                        })()}
+                                                    </code>
+                                                </pre>
+                                            </div>
+                                        </div>
+                                    ) : msg.type === 'IMAGE' ? (
+                                        <div className="mt-1">
+                                            <img
+                                                src={msg.content}
+                                                alt="Upload"
+                                                className="max-w-[300px] max-h-[300px] rounded-lg shadow-sm border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity"
+                                                onClick={() => window.open(msg.content, '_blank')}
+                                            />
+                                        </div>
                                     ) : msg.type === 'SHARED_ITEM' ? (
                                         <div className="mt-1">
                                             <div className="flex items-center space-x-2 mb-2">
                                                 {msg.metadata.itemType === 'SQL' && <Database size={16} />}
                                                 {msg.metadata.itemType === 'REMINDER' && <Bell size={16} />}
                                                 {msg.metadata.itemType === 'DOC' && <FileText size={16} />}
+                                                {msg.metadata.itemType === 'DOC' && <FileText size={16} />}
                                                 <span className="font-semibold">{msg.metadata.itemType} Compartilhado</span>
+                                                <span className="ml-auto text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full">
+                                                    por {msg.sender}
+                                                </span>
                                             </div>
                                             <div className="bg-white/10 p-2 rounded mb-2 text-sm">
                                                 {msg.metadata.itemType === 'SQL' && (
@@ -397,7 +689,7 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                                                     {msg.metadata.itemType === 'DOC' ? (
                                                         <><FileText size={12} className="mr-1" /> Abrir</>
                                                     ) : (
-                                                        <><Check size={12} className="mr-1" /> Aceitar</>
+                                                        <><Check size={12} className="mr-1" /> Adicionar</>
                                                     )}
                                                 </button>
                                             )}
@@ -421,11 +713,53 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
 
                 {/* Input Area */}
                 <form onSubmit={sendMessage} className={`p-3 border-t ${theme.border} bg-white flex items-end gap-2`}>
+                    {/* Speed Dial Menu for Sharing */}
+                    <div className="relative">
+                        {showShareMenu && (
+                            <div className="absolute bottom-12 left-0 mb-2 flex flex-col gap-2 animate-fade-in-up origin-bottom-left z-20">
+                                <button
+                                    type="button"
+                                    onClick={() => { setShowShareMenu(false); setShareType('DOC'); setShowShareModal(true); }}
+                                    className="flex items-center gap-2 bg-white text-gray-700 px-4 py-2 rounded-full shadow-lg border border-gray-100 hover:bg-blue-50 hover:text-blue-600 transition-all whitespace-nowrap"
+                                >
+                                    <Book size={18} className="text-orange-500" />
+                                    <span className="text-xs font-bold">Docs</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setShowShareMenu(false); setShareType('REMINDER'); setShowShareModal(true); }}
+                                    className="flex items-center gap-2 bg-white text-gray-700 px-4 py-2 rounded-full shadow-lg border border-gray-100 hover:bg-blue-50 hover:text-blue-600 transition-all whitespace-nowrap"
+                                >
+                                    <Bell size={18} className="text-yellow-500" />
+                                    <span className="text-xs font-bold">Lembrete</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setShowShareMenu(false); setShareType('SQL'); setShowShareModal(true); }}
+                                    className="flex items-center gap-2 bg-white text-gray-700 px-4 py-2 rounded-full shadow-lg border border-gray-100 hover:bg-blue-50 hover:text-blue-600 transition-all whitespace-nowrap"
+                                >
+                                    <Database size={18} className="text-blue-500" />
+                                    <span className="text-xs font-bold">SQL Salvo</span>
+                                </button>
+                            </div>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => setShowShareMenu(!showShareMenu)}
+                            className={`p-3 transition-colors mb-0.5 rounded-full ${showShareMenu ? 'bg-blue-100 text-blue-600 rotate-90 transform' : 'text-gray-500 hover:text-blue-600'}`}
+                            title="Compartilhar..."
+                        >
+                            <Share2 size={24} />
+                        </button>
+                    </div>
+
+                    <div className="h-6 w-[1px] bg-gray-200 mx-1"></div>
+
                     <button
                         type="button"
-                        onClick={() => setShowShareModal(true)}
+                        onClick={() => fileInputRef.current?.click()}
                         className="p-3 text-gray-500 hover:text-blue-600 transition-colors mb-0.5"
-                        title="Compartilhar..."
+                        title="Anexar Imagem ou SQL"
                     >
                         <Paperclip size={24} />
                     </button>
@@ -491,8 +825,8 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                                     savedQueries.map((q, idx) => (
                                         <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl hover:bg-gray-100 border border-transparent hover:border-gray-200 transition-all">
                                             <div className="overflow-hidden">
-                                                <p className="font-bold text-sm truncate text-gray-800">{q.title}</p>
-                                                <p className="text-xs text-gray-500 truncate">{q.sql}</p>
+                                                <p className="font-bold text-sm truncate text-gray-800">{q.title || 'Sem Título'}</p>
+                                                {/* <p className="text-xs text-gray-500 truncate">{q.sql}</p> */}
                                             </div>
                                             <button
                                                 onClick={() => handleShare(q, 'SQL')}
@@ -508,7 +842,7 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                                     reminders.map((r, idx) => (
                                         <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl hover:bg-gray-100 border border-transparent hover:border-gray-200 transition-all">
                                             <div className="overflow-hidden">
-                                                <p className="font-bold text-sm truncate text-gray-800">{r.text}</p>
+                                                <p className="font-bold text-sm truncate text-gray-800">{r.title}</p>
                                                 <p className="text-xs text-gray-500">
                                                     {r.date && !isNaN(new Date(r.date)) ? new Date(r.date).toLocaleDateString() : 'Sem data'}
                                                 </p>

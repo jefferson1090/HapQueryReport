@@ -1,7 +1,7 @@
-$version = "1.15.20"
-$sourceExe = "C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\Hap Query Report Setup $version.exe"
-$destDir = "C:\Users\jeffe\Downloads\Projeto Desktop Qiuery"
-$sourceCodeDir = "C:\Users\jeffe\Downloads\Projeto Desktop Qiuery\Codigo Fonte"
+$version = "1.15.66"
+$sourceExe = "C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\Hap Assistente de Dados Setup $version.exe"
+$destDir = "C:\Users\jeffe\Downloads"
+$sourceCodeDir = "C:\Users\jeffe\Downloads\Codigo Fonte Hap"
 $projectRoot = "C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode"
 
 Write-Host "Starting Deployment for version $version..."

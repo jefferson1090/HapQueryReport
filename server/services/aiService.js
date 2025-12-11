@@ -139,17 +139,19 @@ class AiService {
         { "action": "NOME_DA_ACAO", "params": { ... } }
 
         Ações:
-        1. list_tables { search_term: string } -> Listar tabelas.
+        1. list_tables { search_term: string } -> Listar tabelas (Use quando user pedir "ver tabelas", "buscar", "listar").
         2. describe_table { tableName: string } -> Ver colunas/estrutura.
         3. run_sql { sql: string } -> Executar SELECT (Apenas SELECT!).
         4. draft_table { tableName: string, columns: array, ... } -> Criar rascunho de tabela.
         5. list_triggers { table_name: string } -> Listar triggers.
+        6. find_record { table_name: string, value: string, column_name?: string, show_columns?: string[] } -> Localizar registro. REGRA MÚLTIPLOS: Se houver vários códigos/valores, envie TODOS no campo 'value' separados por espaço. REGRA COLUNAS: Use 'show_columns' para listar campos que o usuário pediu para ver (Ex: ["NOME", "CPF"]).
 
-        # REGRAS DE RESPOSTA
-        1. Se for apenas conversa, responda em texto normal (Markdown).
-        2. Se for uma ação, responda APENAS o JSON.
-        3. Se o usuário pedir para criar uma tabela, use a ação 'draft_table' ou sugira o SQL.
-        4. Sempre seja cordial e profissional.
+        # REGRAS DE RESPOSTA (CRÍTICO)
+        1. PRIORIZE A AÇÃO. Se o usuário pedir dados, execute a query (run_sql) em vez de apenas mostrar o SQL.
+        2. Se for apenas conversa, responda em texto normal (Markdown).
+        3. Se for uma ação, responda APENAS o JSON.
+        4. Se o usuário pedir para criar uma tabela, use a ação 'draft_table' ou sugira o SQL.
+        5. Sempre seja cordial e profissional.
         `;
 
         const messages = [
@@ -280,6 +282,15 @@ class AiService {
             text = data.text || data.message || data.response || data.answer || data.content;
         }
 
+        // Silent Bubble Fix: If we still don't have text, generate a generic waiting message
+        if (!text) {
+            if (action === 'list_tables') text = "Buscando tabelas...";
+            else if (action === 'describe_table') text = "Analisando estrutura...";
+            else if (action === 'run_sql') text = "Gerando SQL...";
+            else if (action === 'draft_table') text = "Criando rascunho...";
+            else text = "Processando...";
+        }
+
         try {
             if (action === 'list_tables') {
                 const term = data.search_term ? data.search_term.trim() : '';
@@ -345,7 +356,20 @@ class AiService {
             }
 
             if (action === 'run_sql') {
-                return { text: `SQL sugerido:\n\`\`\`sql\n${data.sql}\n\`\`\``, action: 'chat' };
+                const sql = data.sql || "";
+                if (sql.trim().toUpperCase().startsWith('SELECT')) {
+                    try {
+                        const result = await db.executeQuery(sql, {}, 50); // Limit 50 rows
+                        return {
+                            text: text || "Executei a consulta para você:",
+                            action: 'show_data',
+                            data: { metaData: result.metaData, rows: result.rows }
+                        };
+                    } catch (e) {
+                        return { text: `Tentei executar, mas houve um erro:\n\`${e.message}\`\n\nSQL:\n\`\`\`sql\n${sql}\n\`\`\``, action: 'chat' };
+                    }
+                }
+                return { text: `SQL sugerido (Não executado automaticamente):\n\`\`\`sql\n${sql}\n\`\`\``, action: 'chat' };
             }
 
             if (action === 'text_response') {
@@ -418,74 +442,223 @@ class AiService {
         }
     }
 
+    // Helper to resolve column names (Fuzzy, Abbrev, Exact)
+    resolveColumn(name, columns) {
+        if (!name) return null;
+        const n = name.toUpperCase();
+
+        // 1. Exact Match
+        let match = columns.find(c => c.COLUMN_NAME === n);
+        if (match) return match;
+
+        // 2. Common Abbreviations (Add more as needed)
+        const commonMap = {
+            'NOME': ['NM', 'NO', 'NAME', 'DESC'],
+            'DATA': ['DT', 'DATE'],
+            'NUMERO': ['NR', 'NU', 'NUM'],
+            'CODIGO': ['CD', 'COD', 'CODE'],
+            'VALOR': ['VL', 'VAL'],
+            'OBS': ['TX', 'DS', 'OBSERVACAO']
+        };
+
+        // Check keys first (e.g. if user said "NM")
+        // ... handled by exact match or fuzzy below
+
+        // Check replacements
+        for (const [key, prefixes] of Object.entries(commonMap)) {
+            if (n.includes(key)) {
+                // User said "NOME FANTASIA". Try replacing NOME with NM -> "NM FANTASIA"
+                // Check each prefix
+                for (const p of prefixes) {
+                    const testName = n.replace(key, p).replace(/\s+/g, '_'); // "NM_FANTASIA"
+                    // Try exact after search
+                    match = columns.find(c => c.COLUMN_NAME === testName);
+                    if (match) return match;
+
+                    // Try contains
+                    match = columns.find(c => c.COLUMN_NAME.includes(testName));
+                    if (match) return match;
+                }
+            }
+        }
+
+        // 3. Simple Fuzzy (Contains) - e.g. "FANTASIA" -> "NM_FANTASIA"
+        // Prioritize if it ends with the name (e.g. "_NAME")
+        match = columns.find(c => c.COLUMN_NAME.endsWith('_' + n) || c.COLUMN_NAME.startsWith(n + '_'));
+        if (match) return match;
+
+        match = columns.find(c => c.COLUMN_NAME.includes(n));
+        return match;
+    }
+
     async performFindRecord(data) {
-        const tableName = data.table_name.toUpperCase();
-        const value = data.value;
+        let tableName = (data.table_name || "").toUpperCase();
+        const valueRaw = data.value;
         const columnName = data.column_name ? data.column_name.toUpperCase() : null;
 
+        if (!tableName) return { text: "Por favor, informe o nome da tabela." };
+
         try {
-            const columns = await db.getColumns(tableName);
-            if (!columns.length) return { text: `Tabela ${tableName} não encontrada.` };
+            // 1. SMART TABLE CHECK
+            let columns = await db.getColumns(tableName);
+            if (!columns.length) {
+                // Table Ambiguity logic ...
+                const searchName = tableName.split('.').pop();
+                const similar = await db.executeQuery(
+                    `SELECT OWNER || '.' || OBJECT_NAME as FULL_NAME FROM ALL_OBJECTS 
+                     WHERE OBJECT_TYPE IN ('TABLE','VIEW') 
+                     AND (OBJECT_NAME = :name OR OBJECT_NAME LIKE '%' || :name || '%')
+                     AND OWNER NOT IN ('SYS','SYSTEM') 
+                     FETCH NEXT 5 ROWS ONLY`,
+                    { name: searchName }
+                );
+                if (similar.rows.length > 0) {
+                    return {
+                        text: `Não encontrei a tabela **${tableName}**. Você quis dizer alguma dessas?`,
+                        action: 'table_selection',
+                        data: similar.rows.map(r => r[0])
+                    };
+                }
+                return { text: `Não encontrei a tabela **${tableName}** e nenhuma similar.` };
+            }
 
-            const isNumeric = !isNaN(parseFloat(value)) && isFinite(value);
-            let targetCols = [];
+            // 2. VALUE PARSING
+            const values = valueRaw.split(/[\s,;\n]+/).filter(v => v.trim() !== '');
+            const isMultiValue = values.length > 1;
 
+            // 3. COLUMN RESOLUTION
+            let targetCol = null;
             if (columnName) {
-                const col = columns.find(c => c.COLUMN_NAME === columnName);
-                if (col) {
-                    targetCols = [col];
-                } else {
-                    const sortedColumns = columns.sort((a, b) => a.COLUMN_NAME.localeCompare(b.COLUMN_NAME));
+                // Try to resolve user provided column (e.g. "cpf")
+                targetCol = this.resolveColumn(columnName, columns);
+
+                if (!targetCol) {
                     return {
                         text: `Coluna **${columnName}** não encontrada em **${tableName}**. Selecione abaixo:`,
                         action: 'column_selection',
                         data: {
-                            tableName: tableName,
-                            value: value,
-                            columns: sortedColumns.map(c => ({ name: c.COLUMN_NAME, type: c.DATA_TYPE }))
+                            tableName,
+                            value: valueRaw,
+                            columns: columns.map(c => ({ name: c.COLUMN_NAME, type: c.DATA_TYPE })),
+                            mode: 'filter', // Explicit mode
+                            originalShowColumns: data.show_columns // Persist projection context
                         }
                     };
                 }
             } else {
-                targetCols = columns.filter(c => {
-                    if (c.DATA_TYPE === 'NUMBER' && !isNumeric) return false;
-                    return ['NUMBER', 'VARCHAR2', 'CHAR'].includes(c.DATA_TYPE) &&
-                        (c.COLUMN_NAME === 'ID' || c.COLUMN_NAME.includes('_ID') || c.COLUMN_NAME.startsWith('COD') ||
-                            c.COLUMN_NAME.includes('CPF') || c.COLUMN_NAME.includes('CNPJ') || c.COLUMN_NAME.startsWith('NR_'));
-                });
-            }
+                // Heuristic Auto-Resolution
+                const isFirstNum = !isNaN(parseFloat(values[0])) && isFinite(values[0]);
 
-            if (!targetCols.length && !columnName) {
-                const available = columns.map(c => `**${c.COLUMN_NAME}**`).join(', ');
-                return { text: `Colunas incompatíveis com "${value}".\nDisponíveis: ${available}.` };
-            }
+                // 1. Semantic Priority (CPF, ID, COD)
+                // Expanded list and logic
+                const semanticCols = columns.filter(c =>
+                    ['CPF', 'NR_CPF', 'CNPJ', 'NR_CNPJ', 'ID', 'CODIGO', 'COD'].includes(c.COLUMN_NAME) ||
+                    (c.COLUMN_NAME.includes('CPF') && !c.COLUMN_NAME.includes('DATA')) ||
+                    (c.COLUMN_NAME.includes('CNPJ') && !c.COLUMN_NAME.includes('DATA')) ||
+                    c.COLUMN_NAME.endsWith('_ID') || c.COLUMN_NAME.startsWith('ID_') || c.COLUMN_NAME.startsWith('COD_')
+                );
 
-            const conditions = targetCols.map(c => `${c.COLUMN_NAME} = :val`).join(' OR ');
-            const sql = `SELECT * FROM ${tableName} WHERE ${conditions} FETCH NEXT 5 ROWS ONLY`;
-
-            const result = await db.executeQuery(sql, { val: value }, 10, { outFormat: db.oracledb.OUT_FORMAT_OBJECT });
-
-            if (!result.rows.length) {
-                const searchedCols = targetCols.map(c => `\`${c.COLUMN_NAME}\``).join(', ');
-                const sortedColumns = columns.sort((a, b) => a.COLUMN_NAME.localeCompare(b.COLUMN_NAME));
-                return {
-                    text: `Registro **${value}** não encontrado em: ${searchedCols}. Selecione outra coluna:`,
-                    action: 'column_selection',
-                    data: {
-                        tableName: tableName,
-                        value: value,
-                        columns: sortedColumns.map(c => ({ name: c.COLUMN_NAME, type: c.DATA_TYPE }))
+                if (semanticCols.length > 0) {
+                    // Prioritize CPF/CNPJ if user provides numbers (often formatted without dots in args, or with dots)
+                    const cpfCol = semanticCols.find(c => c.COLUMN_NAME.includes('CPF') || c.COLUMN_NAME.includes('CNPJ'));
+                    if (cpfCol && (isFirstNum || isMultiValue || values[0].length > 5)) { // Check length too for CPF
+                        targetCol = cpfCol;
+                    } else if (semanticCols.length === 1) {
+                        targetCol = semanticCols[0];
+                    } else {
+                        // Multiple IDs? Try typical "ID" or "CODIGO"
+                        targetCol = semanticCols.find(c => c.COLUMN_NAME === 'ID' || c.COLUMN_NAME === 'CODIGO') || semanticCols[0];
                     }
-                };
+                }
+
+                // 2. Data Type Priority
+                if (!targetCol && (isFirstNum || isMultiValue)) {
+                    const numberCols = columns.filter(c => c.DATA_TYPE === 'NUMBER' || c.DATA_TYPE.includes('INT'));
+                    if (numberCols.length === 1) targetCol = numberCols[0];
+                }
+
+                // If STILL null -> Interactive Filter Selection
+                if (!targetCol) {
+                    return {
+                        text: `Não sei em qual campo buscar o valor **"${valueRaw}"** na tabela **${tableName}**. Por favor, selecione:`,
+                        action: 'column_selection',
+                        data: {
+                            tableName,
+                            value: valueRaw,
+                            columns: columns.map(c => ({ name: c.COLUMN_NAME, type: c.DATA_TYPE })),
+                            mode: 'filter',
+                            originalShowColumns: data.show_columns // Persist projection context
+                        }
+                    };
+                }
+            }
+
+            // 4. PROJECTION HANDLING
+            let selectClause = "*";
+            let projectionMode = false;
+
+            if (data.show_columns && Array.isArray(data.show_columns) && data.show_columns.length > 0) {
+                const matchedCols = [];
+                const missingCols = [];
+
+                for (const reqCol of data.show_columns) {
+                    // Use helper (includes fuzzy + abbreviations)
+                    const found = this.resolveColumn(reqCol, columns);
+                    if (found) matchedCols.push(found.COLUMN_NAME);
+                    else missingCols.push(reqCol);
+                }
+
+                if (missingCols.length > 0) {
+                    return {
+                        text: `Encontrei a coluna de busca (${targetCol.COLUMN_NAME}), mas não achei os campos para exibir: **${missingCols.join(', ')}**. Por favor, selecione o que deseja ver:`,
+                        action: 'column_selection',
+                        data: {
+                            tableName,
+                            value: valueRaw,
+                            columns: columns.map(c => ({ name: c.COLUMN_NAME, type: c.DATA_TYPE })),
+                            filterColumn: targetCol.COLUMN_NAME,
+                            mode: 'projection'
+                        }
+                    };
+                }
+
+                selectClause = matchedCols.join(', ');
+                projectionMode = true;
+            }
+
+            // 5. QUERY BUILD & EXECUTE
+            // ... (rest is mostly same, just updating type check slightly)
+            if (targetCol.DATA_TYPE === 'NUMBER' && isNaN(parseFloat(values[0]))) {
+                return { text: `A coluna **${targetCol.COLUMN_NAME}** é numérica, mas o valor **"${values[0]}"** parece texto.` };
+            }
+
+            let sql = `SELECT ${selectClause} FROM ${tableName} WHERE ${targetCol.COLUMN_NAME} `;
+            const params = {};
+
+            if (isMultiValue) {
+                const binds = values.map((_, i) => `:${i}`).join(', ');
+                sql += `IN (${binds})`;
+                values.forEach((v, i) => params[i.toString()] = v);
+            } else {
+                sql += `= :val`;
+                params.val = values[0];
+            }
+
+            const result = await db.executeQuery(sql, params, 100);
+
+            if (result.rows.length === 0) {
+                return { text: `Nenhum registro encontrado com **"${valueRaw}"** na coluna **${targetCol.COLUMN_NAME}** de **${tableName}**.` };
             }
 
             return {
-                text: `Encontrei:`,
+                text: `Encontrei **${result.rows.length}** registro(s)${projectionMode ? ' (Colunas Filtradas)' : ''}:`,
                 action: 'show_data',
                 data: { metaData: result.metaData, rows: result.rows }
             };
-        } catch (e) {
-            return { text: `Erro na busca: ${e.message}` };
+
+        } catch (err) {
+            console.error(err);
+            return { text: `Erro ao buscar dados: ${err.message}` };
         }
     }
 
@@ -530,9 +703,9 @@ class AiService {
         Sua tarefa é CORRIGIR a query SQL abaixo baseada no erro.
         
         REGRAS:
-        1. Retorne APENAS o código SQL corrigido dentro de um bloco markdown (\`\`\`sql ... \`\`\`).
-        2. A primeira linha do SQL DEVE ser um comentário (\`--\`) explicando o que foi corrigido.
-        3. Formate o código para leitura.`;
+        1. Responda APENAS com o SQL corrigido dentro de um bloco markdown (\`\`\`sql ... \`\`\`).
+        2. A primeira linha do SQL DEVE ser um comentário (\`--\`) explicando brevemente o que foi corrigido.
+        3. NÃO use texto conversacional fora do bloco de código.`;
 
         const userPrompt = `SQL Incorreto:\n\`\`\`sql\n${sql}\n\`\`\`\n\nErro:\n${error}`;
 
@@ -606,9 +779,11 @@ class AiService {
         ${contextStr}
         
         REGRAS:
-        1. Retorne APENAS o SQL dentro de bloco markdown.
-        2. Inclua comentário explicativo curto acima do SQL se necessário.
-        3. Use aliases curtos (t1, p) e formate bem o código.`;
+        1. Responda APENAS com o SQL solicitado dentro de um bloco markdown (\`\`\`sql ... \`\`\`).
+        2. NÃO adicione texto introdutório como "Aqui está a query" ou "Segue o SQL".
+        3. Se necessário, adicione um comentário curto dentro do próprio código SQL (-- Comentário).
+        4. Use aliases curtos (t1, p) e formate bem o código.
+        5. Se não souber a resposta, retorne apenas um comentário SQL: -- Não consegui gerar a query para isso.`;
 
         try {
             const completion = await this.groq.chat.completions.create({

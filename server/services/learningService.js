@@ -40,10 +40,10 @@ class LearningService {
     ensureDefaults() {
         // HEADLINES
         const defaultHeadlines = [
-            { id: 'start_1', title: '🔍 Buscar Tabelas', prompt: 'Localizar tabelas que contenham: [NOME_OU_PARTE]', type: 'template' },
+            { id: 'start_1', title: '🔍 Buscar Tabelas', prompt: 'Localizar tabelas sobre: [ASSUNTO ou NOME]', type: 'template' },
             { id: 'start_2', title: '📋 Ver Estrutura', prompt: 'Mostrar colunas e tipos da tabela: [NOME_EXATO_TABELA]', type: 'template' },
-            { id: 'start_3', title: '✨ Criar Tabela', prompt: 'Quero criar uma tabela temporária chamada: [NOME_DA_TABELA]\nCampos: [CAMPO1], [CAMPO2]...', type: 'template' },
-            { id: 'start_4', title: '📊 Consultar Dados', prompt: 'Mostrar 50 linhas de exemplo da tabela: [NOME_DA_TABELA]', type: 'template' },
+            { id: 'start_3', title: '✨ Criar Tabela', prompt: 'Quero criar uma tabela chamada: [NOME_DA_TABELA]\nCampos: [CAMPO1], [CAMPO2]...', type: 'template' },
+            { id: 'start_4', title: '🔎 Localizar Registro', prompt: 'Localize o código [VALOR] na tabela [TABELA]', type: 'template' },
             { id: 'start_5', title: '📝 Criar Relatório', prompt: 'Crie uma query para listar [ASSUNTO] da tabela [TABELA]', type: 'template' },
             { id: 'start_6', title: '⚡ Ver Triggers', prompt: 'Listar triggers (gatilhos) da tabela: [NOME_DA_TABELA]', type: 'template' }
         ];

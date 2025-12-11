@@ -1,141 +1,173 @@
-const Database = require('better-sqlite3');
-const path = require('path');
 const fs = require('fs');
+const path = require('path');
+const SupabaseAdapter = require('./adapters/SupabaseAdapter');
 
 class ChatService {
     constructor() {
         this.io = null;
+        this.adapter = null;
         this.users = new Map(); // socketId -> { username, team }
 
-        // Initialize SQLite Database
-        // Fix: Use AppData to avoid permission issues in Program Files
+        // Load Configuration
+        this.configPath = path.join(__dirname, '../chat_config.json');
+        this.loadConfig();
+
+        // Initialize Local Storage for Users (Auth)
+        // Note: storage options for Auth are separate from Chat Backend for now
         const appData = process.env.APPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share");
         const dbDir = path.join(appData, 'HapAssistenteDeDados');
+        if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+        this.usersFile = path.join(dbDir, 'users.json');
+        if (!fs.existsSync(this.usersFile)) fs.writeFileSync(this.usersFile, '[]', 'utf-8');
 
-        if (!fs.existsSync(dbDir)) {
-            try {
-                fs.mkdirSync(dbDir, { recursive: true });
-            } catch (e) {
-                console.error("Failed to create DB directory:", e);
+        // Initialize Adapter
+        this.initAdapter();
+    }
+
+    loadConfig() {
+        try {
+            if (fs.existsSync(this.configPath)) {
+                this.config = JSON.parse(fs.readFileSync(this.configPath, 'utf-8'));
+            } else {
+                console.warn("Chat config not found, defaulting to local.");
+                this.config = { activeBackend: 'local' };
             }
+        } catch (e) {
+            console.error("Failed to load chat config:", e);
+            this.config = { activeBackend: 'local' };
+        }
+    }
+
+    async initAdapter() {
+        // Disconnect existing if any
+        if (this.adapter && this.adapter.pool) { // crude check for Oracle
+            try { await this.adapter.pool.close(); } catch (e) { }
+        }
+        if (this.adapter && this.adapter.client) { // crude check for Supabase
+            // Supabase cleanup if needed
         }
 
-        const dbPath = path.join(dbDir, 'chat.db');
-        console.log("Database Path:", dbPath);
+        if (this.config.activeBackend === 'supabase') {
+            this.adapter = new SupabaseAdapter(this.config.supabase);
+            const connected = await this.adapter.connect();
+            if (connected) {
+                console.log("ChatService: Connected to Supabase.");
 
-        this.db = new Database(dbPath); // verbose: console.log
+                // Set up listener for incoming messages
+                this.adapter.setMessageHandler((msg) => {
+                    this.broadcastToLocalClients(msg);
+                });
 
-        this.initializeSchema();
+                // Set up listener for presence (Online Users)
+                this.adapter.setPresenceHandler((onlineUsers) => {
+                    if (this.io) this.io.emit('update_user_list', onlineUsers);
+                });
+            } else {
+                console.error("ChatService: FAILED to connect to Supabase. Check Adapter logs.");
+            }
+        } else if (this.config.activeBackend === 'oracle') {
+            this.adapter = new OracleAdapter(this.config.oracle);
+            const connected = await this.adapter.connect();
+            if (connected) {
+                console.log("ChatService: Connected to Oracle.");
+
+                this.adapter.setMessageHandler((msg) => {
+                    this.broadcastToLocalClients(msg);
+                });
+
+                this.adapter.setPresenceHandler((onlineUsers) => {
+                    if (this.io) this.io.emit('update_user_list', onlineUsers);
+                });
+            }
+        } else {
+            console.log("ChatService: Using Local File Backend (Legacy).");
+        }
+    }
+
+    async switchBackend(newBackend) {
+        console.log(`ChatService: Switching backend to ${newBackend}`);
+        this.config.activeBackend = newBackend;
+
+        // Persist change
+        try {
+            fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
+        } catch (e) { console.error("Failed to save config switch", e); }
+
+        await this.initAdapter();
+        return true;
     }
 
     setSocketIo(io) {
         this.io = io;
     }
 
-    initializeSchema() {
-        try {
-            console.log("Initializing SQLite Chat Schema...");
-
-            // HAP_CHAT_USERS
-            this.db.prepare(`
-                CREATE TABLE IF NOT EXISTS HAP_CHAT_USERS (
-                    USERNAME TEXT PRIMARY KEY,
-                    PASSWORD TEXT,
-                    TEAM TEXT,
-                    LAST_SEEN DATETIME
-                )
-            `).run();
-
-            // HAP_CHAT_MESSAGES
-            this.db.prepare(`
-                CREATE TABLE IF NOT EXISTS HAP_CHAT_MESSAGES (
-                    ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                    SENDER TEXT,
-                    CONTENT TEXT,
-                    MSG_TYPE TEXT DEFAULT 'TEXT',
-                    METADATA TEXT,
-                    RECIPIENT TEXT DEFAULT 'ALL',
-                    TIMESTAMP DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            `).run();
-
-            console.log("SQLite Chat Schema initialized.");
-        } catch (err) {
-            console.error("Failed to initialize chat schema:", err);
+    broadcastToLocalClients(msg) {
+        if (this.io) {
+            this.io.emit('message', msg);
         }
     }
 
-    async registerUser(username, password, team) {
+    // Helper: Read JSON (for users)
+    readJSON(filePath) {
         try {
-            const stmt = this.db.prepare(`INSERT INTO HAP_CHAT_USERS (USERNAME, PASSWORD, TEAM, LAST_SEEN) VALUES (?, ?, ?, datetime('now'))`);
-            stmt.run(username, password, team || 'Geral');
-            return { success: true };
-        } catch (err) {
-            if (err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
-                throw new Error("Usuário já existe.");
-            }
-            throw err;
-        }
+            if (!fs.existsSync(filePath)) return [];
+            return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        } catch (e) { return []; }
+    }
+
+    // Helper: Write JSON (for users)
+    writeJSON(filePath, data) {
+        try { fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8'); } catch (e) { }
+    }
+
+    // Auth Methods (Kept Local for Simplicity/Stability)
+    async registerUser(username, password, team) {
+        const users = this.readJSON(this.usersFile);
+        if (users.find(u => u.username === username)) throw new Error("Usuário já existe.");
+        users.push({ username, password, team: team || 'Geral', last_seen: new Date().toISOString() });
+        this.writeJSON(this.usersFile, users);
+        return { success: true };
     }
 
     async loginUser(username, password) {
-        try {
-            const stmt = this.db.prepare(`SELECT USERNAME, TEAM FROM HAP_CHAT_USERS WHERE USERNAME = ? AND PASSWORD = ?`);
-            const user = stmt.get(username, password);
+        const users = this.readJSON(this.usersFile);
+        const user = users.find(u => u.username === username && u.password === password);
+        if (user) {
+            user.last_seen = new Date().toISOString();
+            this.writeJSON(this.usersFile, users);
 
-            if (user) {
-                // Update Last Seen
-                this.db.prepare(`UPDATE HAP_CHAT_USERS SET LAST_SEEN = datetime('now') WHERE USERNAME = ?`).run(username);
-                return { success: true, username: user.USERNAME, team: user.TEAM || 'Geral' };
+            // Notify Global Network that I am online
+            if (this.adapter && this.adapter.trackPresence) {
+                this.adapter.trackPresence(user.username, user.team);
             }
-            return { success: false, message: "Credenciais inválidas." };
-        } catch (err) {
-            throw err;
+
+            return { success: true, username: user.username, team: user.team || 'Geral' };
         }
+        return { success: false, message: "Credenciais inválidas." };
     }
 
+    // Messaging Methods (Delegated to Adapter)
     async saveMessage(sender, content, type = 'TEXT', metadata = null, recipient = 'ALL') {
-        try {
-            const stmt = this.db.prepare(`INSERT INTO HAP_CHAT_MESSAGES (SENDER, CONTENT, MSG_TYPE, METADATA, RECIPIENT) VALUES (?, ?, ?, ?, ?)`);
-            stmt.run(
-                sender,
-                content,
-                type,
-                metadata ? JSON.stringify(metadata) : null,
-                recipient
-            );
-        } catch (err) {
-            console.error("Error saving message:", err);
+        if (this.adapter) {
+            // Global Mode
+            await this.adapter.sendMessage({ sender, content, type, metadata, recipient });
+            // Note: We don't need to manually emit to socket here if we are subscribed to the changes,
+            // because the adapter will receive the 'INSERT' event and call handleIncomingMessage -> broadcastToLocalClients.
+            // This ensures we see what actually reached the server.
+        } else {
+            // Local fallback (Legacy)
+            // ... (Simple implementation just to prevent crash if no adapter)
+            console.warn("No adapter active, message drop.");
         }
     }
 
     async getHistory(username) {
-        try {
-            // Get messages where recipient is ALL, or user is sender, or user is recipient
-            const sql = `
-                SELECT SENDER, CONTENT, MSG_TYPE, METADATA, TIMESTAMP, RECIPIENT 
-                FROM HAP_CHAT_MESSAGES 
-                WHERE RECIPIENT = 'ALL' 
-                   OR SENDER = ? 
-                   OR RECIPIENT = ?
-                ORDER BY ID DESC LIMIT 50
-            `;
-            const rows = this.db.prepare(sql).all(username, username);
-
-            // Reverse to show oldest first in chat window
-            return rows.map(row => ({
-                sender: row.SENDER,
-                content: row.CONTENT,
-                type: row.MSG_TYPE,
-                metadata: row.METADATA ? JSON.parse(row.METADATA) : null,
-                timestamp: row.TIMESTAMP,
-                recipient: row.RECIPIENT
-            })).reverse();
-        } catch (err) {
-            console.error("Error fetching history:", err);
-            return [];
+        if (this.adapter) {
+            return await this.adapter.getHistory();
         }
+        return [];
     }
 }
 
 module.exports = new ChatService();
+

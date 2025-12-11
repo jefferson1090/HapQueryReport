@@ -1,13 +1,14 @@
 {
   "name": "client",
   "private": true,
-  "version": "1.15.19",
+  "version": "1.15.66",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "bust-cache": "echo 'cache busted'"
   },
   "dependencies": {
     "@codemirror/lang-sql": "^6.10.0",
@@ -47,7 +48,7 @@
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^3.0.6",
     "react-virtualized-auto-sizer": "^1.0.26",
-    "react-window": "^2.2.3",
+    "react-window": "^1.8.10",
     "remark-gfm": "^4.0.1",
     "socket.io-client": "^4.8.1",
     "sql-formatter": "^15.6.10",

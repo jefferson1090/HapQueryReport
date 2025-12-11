@@ -1,0 +1,12 @@
+{
+  "activeBackend": "supabase",
+  "supabase": {
+    "url": "https://sdqykyhfzfobtycvvitm.supabase.co",
+    "key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkcXlreWhmemZvYnR5Y3Z2aXRtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUzNDEyMDEsImV4cCI6MjA4MDkxNzIwMX0.x8pxEvoXFesjpFGGHoOVLdGkArannbHqdajhEPeDXL4"
+  },
+  "oracle": {
+    "user": "c_stenio",
+    "password": "ste001",
+    "connectString": "sigodbdev.hapvida.com.br:1521/hapdev"
+  }
+}

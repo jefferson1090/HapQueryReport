@@ -43,7 +43,7 @@ const AiBuilder = ({ isVisible }) => {
 
     const fetchHeadlines = async () => {
         try {
-            const res = await fetch('${apiUrl}/api/ai/suggestions');
+            const res = await fetch(`${apiUrl}/api/ai/suggestions`);
             const data = await res.json();
             if (Array.isArray(data)) setHeadlines(data);
         } catch (e) {
@@ -53,7 +53,7 @@ const AiBuilder = ({ isVisible }) => {
 
     const fetchSkills = async () => {
         try {
-            const res = await fetch('${apiUrl}/api/ai/skills');
+            const res = await fetch(`${apiUrl}/api/ai/skills`);
             const data = await res.json();
             if (Array.isArray(data)) setSkills(data);
         } catch (e) {
@@ -88,7 +88,7 @@ const AiBuilder = ({ isVisible }) => {
     const handleConfirmDraft = async () => {
         setLoading(true);
         try {
-            const res = await fetch('${apiUrl}/api/ai/create-table-confirm', {
+            const res = await fetch(`${apiUrl}/api/ai/create-table-confirm`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(draftData)
@@ -142,12 +142,14 @@ const AiBuilder = ({ isVisible }) => {
         setLoading(true);
 
         try {
-            const res = await fetch('${apiUrl}/api/ai/chat', {
+            const res = await fetch(`${apiUrl}/api/ai/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: textToSend, mode: mode })
             });
             const data = await res.json();
+            console.log("[DEBUG] AiBuilder Response:", JSON.stringify(data));
+            console.log(`[DEBUG] Action: ${data.action}, View Data Present? ${!!data.data}`);
 
             setLoading(false);
 
@@ -186,13 +188,16 @@ const AiBuilder = ({ isVisible }) => {
                     setViewData(data.data);
                 } else if (data.action === 'show_data') {
                     setActiveView('data_view');
-                    // data.data might be { metaData, rows } or just rows
-                    setViewData(data.data.rows || data.data);
+                    // Store COMPLETE data object (metaData + rows) to allow correct header rendering
+                    setViewData(data.data);
                 } else if (data.action === 'draft_table') {
                     setDraftData(data.data);
                     setActiveView('draft_view');
                 } else if (data.action === 'column_selection') {
                     setActiveView('column_selection');
+                    setViewData(data.data);
+                } else if (data.action === 'table_selection') {
+                    setActiveView('table_selection');
                     setViewData(data.data);
                 }
             }
@@ -506,7 +511,23 @@ const AiBuilder = ({ isVisible }) => {
     };
 
     const renderDataView = () => {
-        if (!viewData || !viewData.length) return <div className="p-4 text-gray-500">Nenhum dado para exibir.</div>;
+        if (!viewData && !Array.isArray(viewData)) return <div className="p-4 text-gray-500">Nenhum dado para exibir.</div>;
+
+        // Handle { metaData, rows } structure or fallback array
+        let rows = [];
+        let columns = [];
+
+        if (viewData.metaData && viewData.rows) {
+            // Structure from Server: { metaData: [{name: 'COL'}, ...], rows: [[val1...], ...] }
+            columns = viewData.metaData.map(m => m.name);
+            rows = viewData.rows;
+        } else if (Array.isArray(viewData) && viewData.length > 0) {
+            // Legacy/Direct array of objects
+            rows = viewData;
+            columns = Object.keys(rows[0]);
+        } else {
+            return <div className="p-4 text-gray-500">Nenhum dado encontrado.</div>;
+        }
 
         const formatCell = (val) => {
             if (val === null || val === undefined) return '';
@@ -526,7 +547,6 @@ const AiBuilder = ({ isVisible }) => {
             return val;
         };
 
-        const columns = Object.keys(viewData[0]);
         return (
             <div className="w-full h-full overflow-auto custom-scroll">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -538,11 +558,15 @@ const AiBuilder = ({ isVisible }) => {
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                        {viewData.map((row, i) => (
+                        {rows.map((row, i) => (
                             <tr key={i} className="hover:bg-blue-50">
-                                {columns.map(col => (
-                                    <td key={col} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCell(row[col])}</td>
-                                ))}
+                                {columns.map((col, colIdx) => {
+                                    // Row data access: Array (Oracle default) or Object (Legacy)
+                                    const cellVal = Array.isArray(row) ? row[colIdx] : row[col];
+                                    return (
+                                        <td key={colIdx} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCell(cellVal)}</td>
+                                    );
+                                })}
                             </tr>
                         ))}
                     </tbody>
@@ -598,7 +622,7 @@ const AiBuilder = ({ isVisible }) => {
 
             <PanelGroup direction="horizontal" className="h-full">
                 {/* LEFT: Chat Interface */}
-                <Panel defaultSize={25} minSize={20} maxSize={40} className={`flex flex-col border-r ${theme.border} ${theme.sidebar} shadow-sm z-10 custom-scroll`}>
+                <Panel defaultSize={25} minSize={20} maxSize={90} className={`flex flex-col border-r ${theme.border} ${theme.sidebar} shadow-sm z-10 custom-scroll`}>
                     {/* Header */}
                     <div className={`p-4 border-b ${theme.border} flex items-center justify-between bg-white/50 backdrop-blur-sm`}>
                         <div className="flex items-center space-x-2">
@@ -706,6 +730,8 @@ const AiBuilder = ({ isVisible }) => {
                             {activeView === 'schema_view' && 'Estrutura da Tabela'}
                             {activeView === 'data_view' && 'Dados'}
                             {activeView === 'draft_view' && 'Rascunho'}
+                            {activeView === 'column_selection' && 'Seleção de Colunas'}
+                            {activeView === 'table_selection' && 'Seleção de Tabela'}
                         </h3>
                         <div className="flex space-x-2">
                             {activeView !== 'welcome' && (
@@ -769,12 +795,31 @@ const AiBuilder = ({ isVisible }) => {
                         {activeView === 'draft_view' && renderDraftView()}
                         {activeView === 'table_results' && viewData && renderTableList()}
                         {activeView === 'schema_view' && viewData && renderSchemaView()}
+
+                        {activeView === 'table_selection' && viewData && (
+                            <div className="p-6 bg-white h-full overflow-y-auto">
+                                <h3 className="text-lg font-bold text-gray-800 mb-4">Selecione a Tabela Correta</h3>
+                                <p className="text-sm text-gray-500 mb-6">Não encontrei exatamente o que você pediu. Talvez seja uma destas?</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    {viewData.map((t, i) => (
+                                        <button
+                                            key={i}
+                                            onClick={() => handleSend(`Buscar na tabela ${t}`)}
+                                            className="p-4 rounded-xl border border-gray-200 hover:border-blue-500 hover:bg-blue-50 text-left transition-all"
+                                        >
+                                            <div className="font-bold text-gray-700">{t}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                                <button onClick={() => setActiveView('welcome')} className="mt-8 text-gray-400 text-sm hover:underline">Nenhuma das anteriores</button>
+                            </div>
+                        )}
+
+
                         {activeView === 'column_selection' && viewData && (
                             <ColumnSelection
-                                initialColumns={viewData.map(c => c.COLUMN_NAME)}
-                                onConfirm={(selected) => {
-                                    handleSend(`Mostrar colunas: ${selected.join(', ')}`);
-                                }}
+                                viewData={Array.isArray(viewData) ? { columns: viewData.map(c => ({ name: c.COLUMN_NAME, type: 'VARCHAR2' })), tableName: 'TABELA', value: '' } : viewData}
+                                onSearch={(query) => handleSend(query)}
                                 onCancel={() => setActiveView('welcome')}
                             />
                         )}

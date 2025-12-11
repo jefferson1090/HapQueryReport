@@ -3,7 +3,8 @@ import { io } from "socket.io-client";
 import ConnectionForm from './components/ConnectionForm';
 import QueryBuilder from './components/QueryBuilder'; // Legacy
 import AiBuilder from './components/AiBuilder';
-import SqlRunner from './components/SqlRunner';
+// import SqlRunner from './components/SqlRunner';
+const SqlRunner = React.lazy(() => import('./components/SqlRunner'));
 import CsvImporter from './components/CsvImporter';
 import DocsModule from './components/DocsModule';
 import Reminders from './components/Reminders';
@@ -18,7 +19,7 @@ import { getApiUrl } from './config';
 import { ThemeContext, THEMES } from './context/ThemeContext';
 import { useApi } from './context/ApiContext';
 
-const VERSION = "v1.15.19";
+const VERSION = "v1.15.66";
 
 function App() {
     // Chat User State (Main Entry)
@@ -364,20 +365,24 @@ function App() {
 
                             {/* SQL Runner (Gated by Oracle Connection) */}
                             <div className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} w-full`}>
-                                {!connection ? (
-                                    <ConnectionForm onConnect={handleConnect} />
-                                ) : (
-                                    <SqlRunner
-                                        isVisible={activeTab === 'sql-runner'}
-                                        tabs={sqlTabs}
-                                        setTabs={setSqlTabs}
-                                        activeTabId={activeSqlTabId}
-                                        setActiveTabId={setActiveSqlTabId}
-                                        savedQueries={savedSqlQueries}
-                                        setSavedQueries={setSavedSqlQueries}
-                                        onDisconnect={handleDisconnect}
-                                    />
-                                )}
+                                <ErrorBoundary>
+                                    {!connection ? (
+                                        <ConnectionForm onConnect={handleConnect} />
+                                    ) : (
+                                        <React.Suspense fallback={<div className="p-4 flex items-center justify-center">Carregando Editor SQL...</div>}>
+                                            <SqlRunner
+                                                isVisible={activeTab === 'sql-runner'}
+                                                tabs={sqlTabs}
+                                                setTabs={setSqlTabs}
+                                                activeTabId={activeSqlTabId}
+                                                setActiveTabId={setActiveSqlTabId}
+                                                savedQueries={savedSqlQueries}
+                                                setSavedQueries={setSavedSqlQueries}
+                                                onDisconnect={handleDisconnect}
+                                            />
+                                        </React.Suspense>
+                                    )}
+                                </ErrorBoundary>
                             </div>
 
                             {/* AI Builder (Gated by Oracle Connection) */}
@@ -393,25 +398,31 @@ function App() {
 
                             {/* CSV Importer (Gated by Oracle Connection) */}
                             <div className={`${activeTab === 'csv-importer' ? 'block h-full' : 'hidden'} w-full`}>
-                                {!connection ? (
-                                    <ConnectionForm onConnect={handleConnect} />
-                                ) : (
-                                    <CsvImporter isVisible={activeTab === 'csv-importer'} />
-                                )}
+                                <ErrorBoundary>
+                                    {!connection ? (
+                                        <ConnectionForm onConnect={handleConnect} />
+                                    ) : (
+                                        <CsvImporter isVisible={activeTab === 'csv-importer'} />
+                                    )}
+                                </ErrorBoundary>
                             </div>
 
                             {/* Reminders (Not Gated) */}
                             <div className={`${activeTab === 'reminders' ? 'block h-full' : 'hidden'} w-full`}>
-                                <Reminders
-                                    isVisible={activeTab === 'reminders'}
-                                    reminders={reminders}
-                                    setReminders={saveReminders}
-                                />
+                                <ErrorBoundary>
+                                    <Reminders
+                                        isVisible={activeTab === 'reminders'}
+                                        reminders={reminders}
+                                        setReminders={saveReminders}
+                                    />
+                                </ErrorBoundary>
                             </div>
 
                             {/* Docs (Not Gated) */}
                             <div className={`${activeTab === 'docs' ? 'block h-full' : 'hidden'} w-full`}>
-                                <DocsModule />
+                                <ErrorBoundary>
+                                    <DocsModule />
+                                </ErrorBoundary>
                             </div>
                         </div>
                     </div>

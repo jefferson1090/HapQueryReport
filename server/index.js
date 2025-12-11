@@ -244,6 +244,11 @@ io.on('connection', (socket) => {
 
     chatService.users.set(socket.id, { username, team });
 
+    // Ensure Adapter knows about this user (Critical for Presence in Polling Mode)
+    if (chatService.adapter && chatService.adapter.trackPresence) {
+      chatService.adapter.trackPresence(username, team);
+    }
+
     // Emit list of users with teams
     const userList = Array.from(chatService.users.values());
 
@@ -258,7 +263,12 @@ io.on('connection', (socket) => {
 
   socket.on('message', async (data) => {
     // data: { sender, content, type, metadata, recipient }
-    await chatService.saveMessage(data.sender, data.content, data.type, data.metadata, data.recipient);
+    try {
+      await chatService.saveMessage(data.sender, data.content, data.type, data.metadata, data.recipient);
+    } catch (e) {
+      console.error("SaveMessage Error:", e);
+      // Continue to echo so the chat doesn't feel broken, even if persistence failed
+    }
 
     const msgPayload = { ...data, timestamp: new Date() };
 
@@ -282,28 +292,27 @@ io.on('connection', (socket) => {
 
   socket.on('share_item', async (data) => {
     // data: { sender, recipient, itemType, itemData }
-    // If recipient is specific, we could target them, but for MVP we broadcast or use rooms.
-    // Let's broadcast to all for now, or filter if we had user->socket mapping.
-    // We have chatService.users map (socketId -> username).
+    console.log(`[Share] ${data.sender} -> ${data.recipient} type: ${data.itemType}`);
 
-    // Find recipient socket
-    let recipientSocketId = null;
-    for (const [id, user] of chatService.users.entries()) {
-      if (user.username === data.recipient) {
-        recipientSocketId = id;
-        break;
-      }
-    }
+    try {
+      // Use ChatService to handle persistence and broadcasing (via Adapter if active)
+      const type = 'SHARED_ITEM';
+      const metadata = { itemType: data.itemType, itemData: data.itemData };
 
-    if (recipientSocketId) {
-      io.to(recipientSocketId).emit('shared_item_received', data);
-    } else {
-      // Fallback: Broadcast or notify sender user not found
-      // For MVP, if user not found, maybe just emit to all? No, privacy.
-      // Let's just log.
-      console.log(`Recipient ${data.recipient} not found for shared item.`);
+      // This will trigger SupabaseAdapter.sendMessage, which now handles serialization correctly
+      await chatService.saveMessage(data.sender, `Compartilhou um ${data.itemType}`, type, metadata, data.recipient);
+
+      // Optimistic/Local broadcast is handled by the Adapter's event listener or the client's optimistic UI.
+      // But if we want to ensure specific local sockets get it immediately (if not using adapter for local echo):
+      // if (data.recipient === 'ALL') io.emit('message', { ... }); 
+      // But chatService.saveMessage in Supabase mode relies on Supabase event to come back.
+      // In Local mode, it relies on fallback.
+      // Client already has optimistic UI.
+    } catch (e) {
+      console.error("Share error:", e);
     }
   });
+
 
   socket.on('disconnect', () => {
     const user = chatService.users.get(socket.id);
@@ -401,10 +410,21 @@ app.post('/api/ai/create-table-confirm', async (req, res) => {
 
 app.post('/api/ai/chat', async (req, res) => {
   try {
+    console.log('[DEBUG] POST /api/ai/chat received');
     const { message, mode, history } = req.body;
+    console.log(`[DEBUG] Processing message in mode: ${mode}, content: ${message?.substring(0, 50)}...`);
+
     const result = await aiService.processMessage(message, mode, history);
+    console.log('[DEBUG] processMessage result:', JSON.stringify(result));
+
+    if (result === undefined) {
+      console.error('[ERROR] processMessage returned undefined!');
+      return res.status(500).json({ error: 'Internal AI Error: Result is undefined' });
+    }
+
     res.json(result);
   } catch (err) {
+    console.error('[ERROR] /api/ai/chat handler failed:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -846,7 +866,22 @@ app.post('/api/create-table', async (req, res) => {
   }
 });
 
-// 8.1 Import Status Endpoint
+// 8.1 Import// Chat Switch Endpoint
+app.post('/api/chat/switch', async (req, res) => {
+  try {
+    const { backend } = req.body; // 'supabase' or 'oracle'
+    if (backend !== 'supabase' && backend !== 'oracle') {
+      return res.status(400).json({ error: "Invalid backend" });
+    }
+    await chatService.switchBackend(backend);
+    res.json({ success: true, backend });
+  } catch (e) {
+    console.error("Switch failed:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Chat History Endpoint
 app.get('/api/import-status/:jobId', (req, res) => {
   const { jobId } = req.params;
   if (activeJobs[jobId]) {
@@ -958,6 +993,15 @@ function suggestTableName(filename) {
 }
 
 // 9. AI Learning Endpoints
+app.get('/api/ai/suggestions', (req, res) => {
+  try {
+    const suggestions = learningService.getSuggestions();
+    res.json(suggestions);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/ai/suggestions', (req, res) => {
   try {
     const suggestions = learningService.getSuggestions();
