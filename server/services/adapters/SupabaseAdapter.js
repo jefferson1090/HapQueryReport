@@ -33,12 +33,46 @@ class SupabaseAdapter {
             // Subscribe to real-time changes
             this.subscription = this.client
                 .channel('room_global') // Global room for everyone
+
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
                     if (payload.eventType === 'INSERT') {
                         this.handleIncomingMessage(payload.new);
                     } else if (payload.eventType === 'UPDATE') {
                         if (this.onMessageUpdateCallback) {
-                            this.onMessageUpdateCallback(payload.new);
+                            // Normalize Update Payload (snake_case -> camelCase if needed, or just pass raw if client handles it)
+                            // Client expects 'reactions', which IS in payload.new
+                            // Client expects 'read_at', which IS in payload.new
+                            // BUT client usually uses 'timestamp' not 'created_at'.
+                            // Let's reuse handleIncomingMessage logic but strictly for update callback?
+                            // Actually, handleIncomingMessage calls onMessageCallback. We want onMessageUpdateCallback.
+                            // Let's copy the normalization logic.
+                            const msg = payload.new;
+                            const normalized = {
+                                id: msg.id,
+                                sender: msg.sender,
+                                content: msg.content, // Should parse JSON if it was rich content? Updates usually don't change content type often but reactions do.
+                                type: 'TEXT', // Default, but if content indicates otherwise...
+                                metadata: null,
+                                recipient: msg.recipient,
+                                timestamp: msg.created_at,
+                                read_at: msg.read_at,
+                                reactions: msg.reactions || []
+                            };
+
+                            // Parse JSON if needed (same as handleIncomingMessage)
+                            if (msg.content && msg.content.startsWith('{')) {
+                                try {
+                                    const parsed = JSON.parse(msg.content);
+                                    if (parsed._protocol === 'HAP_V1') {
+                                        normalized.content = parsed.content;
+                                        normalized.type = parsed.type;
+                                        normalized.metadata = parsed.metadata;
+                                        if (parsed.recipient) normalized.recipient = parsed.recipient;
+                                    }
+                                } catch (e) { }
+                            }
+
+                            this.onMessageUpdateCallback(normalized);
                         }
                     }
                 })
@@ -105,7 +139,10 @@ class SupabaseAdapter {
                         this.seenMessageIds.add(msg.id);
                         // Store initial read state
                         if (!this.messageStates) this.messageStates = new Map();
-                        this.messageStates.set(msg.id, msg.read_at);
+                        this.messageStates.set(msg.id, {
+                            read_at: msg.read_at,
+                            reactionsStr: JSON.stringify(msg.reactions || [])
+                        });
 
                         this.handleIncomingMessage(msg);
                         newCount++;
@@ -115,18 +152,51 @@ class SupabaseAdapter {
                             this.lastPollTime = msg.created_at;
                         }
                     }
-                    // 2. Update Detection (e.g. Read Receipts)
+                    // 2. Update Detection (e.g. Read Receipts OR Reactions)
                     else {
                         if (!this.messageStates) this.messageStates = new Map();
-                        const lastReadAt = this.messageStates.get(msg.id);
+                        // Track state structure: { read_at: timestamp, reactionsStr: JSON.stringify(reactions) }
+                        const lastState = this.messageStates.get(msg.id) || { read_at: null, reactionsStr: '[]' };
 
-                        // If read_at changed (e.g. from null to timestamp), emit update
-                        if (msg.read_at !== lastReadAt) {
-                            console.log(`[SupabaseAdapter] Detected update for ${msg.id}: read_at ${lastReadAt} -> ${msg.read_at}`);
-                            this.messageStates.set(msg.id, msg.read_at);
+                        const currentReactionsStr = JSON.stringify(msg.reactions || []);
+                        const hasReadChanged = msg.read_at !== lastState.read_at;
+                        const hasReactionsChanged = currentReactionsStr !== lastState.reactionsStr;
+
+                        if (hasReadChanged || hasReactionsChanged) {
+                            console.log(`[SupabaseAdapter] Detected update for ${msg.id}: Read=${hasReadChanged}, React=${hasReactionsChanged}`);
+
+                            this.messageStates.set(msg.id, {
+                                read_at: msg.read_at,
+                                reactionsStr: currentReactionsStr
+                            });
 
                             if (this.onMessageUpdateCallback) {
-                                this.onMessageUpdateCallback(msg);
+                                // Normalize for Polling too
+                                const normalized = {
+                                    id: msg.id,
+                                    sender: msg.sender,
+                                    content: msg.content,
+                                    type: 'TEXT',
+                                    metadata: null,
+                                    recipient: msg.recipient,
+                                    timestamp: msg.created_at,
+                                    read_at: msg.read_at,
+                                    reactions: msg.reactions || []
+                                };
+
+                                if (msg.content && msg.content.startsWith('{')) {
+                                    try {
+                                        const parsed = JSON.parse(msg.content);
+                                        if (parsed._protocol === 'HAP_V1') {
+                                            normalized.content = parsed.content;
+                                            normalized.type = parsed.type;
+                                            normalized.metadata = parsed.metadata;
+                                            if (parsed.recipient) normalized.recipient = parsed.recipient;
+                                        }
+                                    } catch (e) { }
+                                }
+
+                                this.onMessageUpdateCallback(normalized);
                             }
                         }
                     }
@@ -152,11 +222,12 @@ class SupabaseAdapter {
         // Fabricate "Online Users" list based on who has sent messages recently
         // Since we can't see the real "Presence" state without WS.
         try {
-            const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+            // FIX: Tighten window to 3 minutes to remove inactive "ghosts" quicker
+            const lookback = new Date(Date.now() - 3 * 60 * 1000).toISOString();
             const { data } = await this.client
                 .from('messages')
                 .select('sender, created_at')
-                .gt('created_at', tenMinutesAgo)
+                .gt('created_at', lookback)
                 .order('created_at', { ascending: false });
 
             if (data) {
@@ -216,16 +287,42 @@ class SupabaseAdapter {
         this.currentUsername = username || this.userId;
         console.log(`[SupabaseAdapter] Tracking presence for: ${this.currentUsername} (${team})`);
 
-        // Try WS Track
         const channel = this.client.channel('room_global');
-        // Check if subscribed before tracking?
-        // Just attempt it.
-        channel.track({
-            online_at: new Date().toISOString(),
-            user: this.currentUsername,
-            team: team || 'Geral',
-            user_id: this.userId
-        }).catch(e => console.warn("WS Track failed (expected in polling mode)", e));
+
+        // FORCE UPSERT via REST to ensure persistence beyond WS memory
+        // This is critical for "Online" status to stick even if WS reconnects
+        try {
+            // First, remove any old entry for this user to avoid dupes or stale states
+            // Actually, let's just Upsert into a 'presence' table if we had one?
+            // Since we are relying on Supabase Realtime 'track', it is ephemeral. 
+            // The issue is that the server might restart and lose the state?
+            // Realtime Presence *is* ephemeral. 
+            // The "Ghost" issue usually happens because the previous session didn't untrack.
+            // We can try to explicitly UNTRACK everyone with this ID first?
+
+            await channel.track({
+                online_at: new Date().toISOString(),
+                user: this.currentUsername,
+                team: team || 'Geral',
+                user_id: this.userId
+            });
+
+        } catch (e) {
+            console.warn("Track failed", e);
+        }
+    }
+
+    // NEW: Clear Presence (Call on Server Start)
+    async clearAllPresence() {
+        // Since Presence is memory-based in Supabase Realtime, we can't "delete" rows from a table unless we are using a real table.
+        // If the user says "Ghost Users", it implies we are using a Persistent Table or the WS state is stuck.
+        // Looking at pollPresence (line 151), it looks at *Recent Messages*.
+        // AHH! pollPresence uses "messages > 10 mins ago".
+        // IF we rely on Polling, ghosts are people who sent messages recently.
+        // IF we rely on WS, ghosts are stuck sockets.
+
+        // Let's fix pollPresence to be tighter (5 mins)?
+        // And for WS, let's ensure we subscribe with a unique ID every time.
     }
 
     async disconnect() {
@@ -366,7 +463,7 @@ class SupabaseAdapter {
             .select('*')
             .gt('created_at', sevenDaysAgo)
             .order('created_at', { ascending: false })
-            .limit(1000); // Safety limit, but high enough for 7 days of normal chat
+            .limit(limit); // Changed to limit argument (default 50)
 
         if (error) {
             console.error('[SupabaseAdapter] History error:', error);
@@ -409,7 +506,8 @@ class SupabaseAdapter {
                 metadata: finalMetadata,
                 recipient: resolvedRecipient,
                 timestamp: msg.created_at,
-                read_at: msg.read_at
+                read_at: msg.read_at,
+                reactions: msg.reactions || []
             };
         }).filter(m => m !== null);
     }
@@ -427,6 +525,115 @@ class SupabaseAdapter {
             if (error) throw error;
         } catch (e) {
             console.error('[SupabaseAdapter] MarkRead error:', e);
+        }
+    }
+    async addReaction(messageId, emoji, username) {
+        if (!this.client) return;
+        try {
+            // 1. Get current reactions
+            const { data, error } = await this.client
+                .from('messages')
+                .select('reactions')
+                .eq('id', messageId)
+                .single();
+
+            if (error) throw error;
+
+            let current = data.reactions || [];
+            if (!Array.isArray(current)) current = [];
+
+            // 2. Dedup: Check if user already reacted with this emoji
+            if (current.some(r => r.user === username && r.emoji === emoji)) return;
+
+            // 3. Append new reaction
+            const updated = [...current, { emoji, user: username }];
+
+            // 4. Update the record
+            const { error: updateError } = await this.client
+                .from('messages')
+                .update({ reactions: updated })
+                .eq('id', messageId);
+
+            if (updateError) throw updateError;
+            console.log(`[SupabaseAdapter] Reaction added to ${messageId}`);
+        } catch (e) {
+            console.error('[SupabaseAdapter] addReaction failed:', e);
+            throw e;
+        }
+    }
+
+    async cleanupOldMessages(daysToKeep = 90) {
+        if (!this.client) return;
+
+        try {
+            console.log(`[SupabaseAdapter] Starting cleanup of messages older than ${daysToKeep} days...`);
+
+            // Calculate cutoff date
+            const date = new Date();
+            date.setDate(date.getDate() - daysToKeep);
+            const cutoff = date.toISOString();
+
+            const { error, count } = await this.client
+                .from('messages')
+                .delete({ count: 'exact' })
+                .lt('created_at', cutoff);
+
+            if (error) {
+                console.error('[SupabaseAdapter] Cleanup failed:', error);
+            } else {
+                console.log(`[SupabaseAdapter] Cleanup complete. Removed ${count !== null ? count : 'unknown'} messages.`);
+            }
+        } catch (e) {
+            console.error('[SupabaseAdapter] Error during cleanup:', e);
+        }
+    }
+
+    // --- Version Control ---
+
+    async getLatestVersion() {
+        if (!this.client) return null;
+        try {
+            const { data, error } = await this.client
+                .from('app_versions')
+                .select('*')
+                .order('id', { ascending: false })
+                .limit(1)
+                .single();
+
+            if (error) {
+                if (error.code !== 'PGRST116') console.error('[SupabaseAdapter] getLatestVersion error:', error);
+                return null;
+            }
+            return {
+                version: data.version,
+                date: data.release_date, // Mapping fields
+                notes: data.notes,
+                downloadUrl: data.download_url
+            };
+        } catch (e) {
+            console.error('[SupabaseAdapter] getLatestVersion exception:', e);
+            return null;
+        }
+    }
+
+    async publishVersion(version, notes, downloadUrl) {
+        if (!this.client) return false;
+        try {
+            const { error } = await this.client
+                .from('app_versions')
+                .insert([
+                    { version, notes, download_url: downloadUrl, release_date: new Date().toISOString() }
+                ]);
+
+            if (error) {
+                console.error('[SupabaseAdapter] publishVersion error:', error);
+                return false;
+            }
+            console.log(`[SupabaseAdapter] Version ${version} published successfully.`);
+            return true;
+        } catch (e) {
+            console.error('[SupabaseAdapter] publishVersion exception:', e);
+            return false;
         }
     }
 }

@@ -1,9 +1,11 @@
 {
   "name": "client",
   "private": true,
-  "version": "1.15.72",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
+    "clean": "node -e \"const fs = require('fs'); fs.rmSync('dist', { recursive: true, force: true });\"",
+    "prebuild": "npm run clean",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
@@ -36,7 +38,9 @@
     "@uiw/react-codemirror": "^4.25.3",
     "buffer": "^6.0.3",
     "crypto-js": "^4.2.0",
+    "emoji-picker-react": "^4.16.1",
     "file-saver": "^2.0.5",
+    "framer-motion": "^12.23.26",
     "html-to-docx": "^1.8.0",
     "lowlight": "^3.3.0",
     "lucide-react": "^0.556.0",

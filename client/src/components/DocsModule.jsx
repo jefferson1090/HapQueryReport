@@ -96,13 +96,20 @@ const SortableNode = ({ node, isActive, onSelect, onToggleExpand, onAddPage, onR
                 <div className="flex items-center opacity-60">
                     <button
                         onClick={(e) => { e.stopPropagation(); onRename(node); }}
+                        onPointerDown={(e) => e.stopPropagation()}
                         className="p-1 hover:bg-black/10 rounded"
                         title="Renomear"
                     >
                         <Edit2 size={12} />
                     </button>
                     <button
-                        onClick={(e) => { e.stopPropagation(); onDelete(node); }}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log("Delete clicked for", node.ID_NODE);
+                            onDelete(node);
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
                         className="p-1 hover:bg-red-100 text-red-500 rounded"
                         title="Excluir"
                     >
@@ -110,6 +117,7 @@ const SortableNode = ({ node, isActive, onSelect, onToggleExpand, onAddPage, onR
                     </button>
                     <button
                         onClick={(e) => { e.stopPropagation(); onAddPage(node.ID_BOOK, node.ID_NODE); }}
+                        onPointerDown={(e) => e.stopPropagation()}
                         className="p-1 hover:bg-black/10 rounded"
                         title="Adicionar Sub-página"
                     >
@@ -138,6 +146,18 @@ const BookItem = ({ book, pages, expanded, onToggle, onAddPage, activeId, onSele
                     title="Nova Página"
                 >
                     <Plus size={14} />
+                </button>
+                <button
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (confirm('Excluir este livro?')) onDeleteBook(book);
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 text-red-500 rounded"
+                    title="Excluir Livro"
+                >
+                    <Trash2 size={14} />
                 </button>
             </div>
 
@@ -259,7 +279,7 @@ const DocsModule = ({ pendingDoc, onDocHandled }) => {
     const loadBookTree = async (bookId) => {
         try {
             console.log(`[DocsModule] Loading tree for book ${bookId}...`);
-            const res = await fetch(`http://localhost:3001/api/docs/books/${bookId}/tree`);
+            const res = await fetch(`http://localhost:3001/api/docs/books/${bookId}/tree?t=${Date.now()}`);
             const data = await res.json();
             console.log(`[DocsModule] Tree data for ${bookId}:`, data);
 
@@ -312,9 +332,12 @@ const DocsModule = ({ pendingDoc, onDocHandled }) => {
     };
 
     const handleSelectNode = async (node) => {
+        console.log(`[DocsModule] Selecting Node: ${node.ID_NODE} (${node.NM_TITLE})`);
+
         // Auto-save current if different
         if (activeNode && activeNode.ID_NODE !== node.ID_NODE && editorRef.current) {
             const currentContent = editorRef.current.getHTML();
+            console.log(`[DocsModule] Auto-saving previous node ${activeNode.ID_NODE} before switch. Content Len: ${currentContent?.length}`);
             handleSavePage(activeNode.ID_NODE, currentContent);
         }
 
@@ -398,10 +421,31 @@ const DocsModule = ({ pendingDoc, onDocHandled }) => {
     const handleDelete = async (node) => {
         if (!confirm(`Excluir página "${node.NM_TITLE}"?`)) return;
         try {
-            await fetch(`http://localhost:3001/api/docs/nodes/${node.ID_NODE}`, {
+            const res = await fetch(`http://localhost:3001/api/docs/nodes/${node.ID_NODE}`, {
                 method: 'DELETE'
             });
-            loadBookTree(node.ID_BOOK);
+            if (res.ok) {
+                console.log("Delete success, reloading tree for", node.ID_BOOK);
+                await loadBookTree(node.ID_BOOK);
+            } else {
+                const err = await res.json();
+                alert(`Erro ao excluir: ${err.error || res.statusText}`);
+            }
+        } catch (e) { alert(e.message); }
+    };
+
+    const handleDeleteBook = async (book) => {
+        try {
+            const res = await fetch(`http://localhost:3001/api/docs/books/${book.ID_BOOK}`, {
+                method: 'DELETE'
+            });
+            if (res.ok) {
+                fetchBooks(); // Reload book list
+            } else {
+                const err = await res.json();
+                console.error("Delete book failed:", err);
+                alert(`Erro ao excluir livro: ${err.error || res.statusText}`);
+            }
         } catch (e) { alert(e.message); }
     };
 
@@ -589,6 +633,7 @@ const DocsModule = ({ pendingDoc, onDocHandled }) => {
                                 onSelectPage={handleSelectNode}
                                 onRenamePage={handleRename}
                                 onDeletePage={handleDelete}
+                                onDeleteBook={handleDeleteBook}
                                 theme={theme}
                             />
                         ))}
@@ -625,7 +670,7 @@ const DocsModule = ({ pendingDoc, onDocHandled }) => {
                 </button>
 
                 {
-                    activeNode ? (
+                    activeNode && activeNode.CL_CONTENT !== undefined ? (
                         <DocEditor
                             key={activeNode.ID_NODE}
                             ref={editorRef}
@@ -635,6 +680,12 @@ const DocsModule = ({ pendingDoc, onDocHandled }) => {
                             onNavigate={handleWikiNavigate}
                             highlight={highlightQuery}
                         />
+                    ) : activeNode ? (
+                        <div className="flex-1 flex flex-col items-center justify-center opacity-40">
+                            {/* Loading state for individual page */}
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mb-4"></div>
+                            <p>Carregando...</p>
+                        </div>
                     ) : (
                         <div className="flex-1 flex flex-col items-center justify-center opacity-40">
                             <Book size={48} className="mb-4" />

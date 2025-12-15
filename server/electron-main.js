@@ -4,9 +4,64 @@ console.log('App type:', typeof app);
 const path = require('path');
 const net = require('net');
 const startServer = require('./index'); // Restored internal require
-// const { spawn } = require('child_process');
+const chatService = require('./services/chatService');
 
-let serverPort = 3001; // Default, will be updated
+// ... (existing code)
+
+// --- Custom Update Check (Supabase Cloud) ---
+ipcMain.handle('check-updates', async () => {
+    try {
+        const info = await chatService.getLatestVersion();
+        if (info) {
+            return info;
+        }
+    } catch (e) {
+        console.error("Failed to check for updates:", e);
+    }
+    return null;
+});
+
+ipcMain.handle('open-update-folder', async () => {
+    // We open the URL from the cloud record if possible, but the UI might just call this for the folder.
+    // Wait, the UI calls this button "Baixar".
+    // If we want to support the URL from the database, the UI should probably receive the URL in the updateInfo and just openExternal(url).
+    // But to keep backward compatibility or use the folder, we can try to look up the DB again OR just use the fallback logic if not provided?
+    // Actually, better: The UI received 'downloadUrl' in updateInfo.
+    // I should probably change the UI to use 'shell.openExternal(info.downloadUrl)' directly if available?
+    // BUT, to keep it simple and consistent:
+    // I will make open-update-folder open the OneDrive text path if env var exists, OR rely on the DB url?
+    // Let's stick to the existing logic for open-update-folder but prefer the One Drive path if local, 
+    // However, the user said "The download link can be the OneDrive web address".
+    // So, checking for updates returns { downloadUrl: 'https://...' }.
+    // The UI currently calls `open-update-folder` IPC without args.
+    // Check UpdateBanner.jsx: `onDownload={() => window.electronAPI?.invoke('open-update-folder')}`.
+    // Use shell.openExternal(updateInfo.downloadUrl) would be better.
+
+    // Let's modify this handler to try to read the Cloud URL if we can, or just keep the folder logic?
+    // User said "Link de download... pode ser o endereço Web".
+    // So I should probably change the handler to open the Web URL.
+    // But I don't have the URL here unless I query again. 
+
+    // FIX: I'll make the UI pass the URL? No, UI calls 'open-update-folder'.
+    // I will query the version again or just fallback.
+    // Actually, the simplest for now is:
+    // 1. Get latest version (cached or fresh).
+    // 2. Open its URL.
+
+    const latest = await chatService.getLatestVersion();
+    if (latest && latest.downloadUrl && latest.downloadUrl.startsWith('http')) {
+        await shell.openExternal(latest.downloadUrl);
+    } else {
+        // Fallback to local folder opening if URL is missing or file path
+        const oneDriveRoot = process.env.OneDrive || process.env.ONEDRIVE;
+        if (oneDriveRoot) {
+            const updateFolder = path.join(oneDriveRoot, "JEFFERSON", "versoes_app", "Version_HapAssistente");
+            await shell.openPath(updateFolder);
+        } else {
+            shell.openFolder("Z:\\Jefferson\\Projeto Desktop Quere");
+        }
+    }
+});
 
 function findFreePort(startPort) {
     return new Promise((resolve, reject) => {
@@ -64,11 +119,13 @@ function createWindow() {
             event.preventDefault();
         }
     });
+    // mainWindow.webContents.openDevTools();
 }
 
 // IPC Handler for Radical Focus Fix
 ipcMain.on('reset-focus', () => {
     if (mainWindow) {
+        // mainWindow.maximize();
         mainWindow.blur();
         mainWindow.focus();
     }
@@ -203,19 +260,57 @@ ipcMain.handle('export-pdf', async (event, htmlContent) => {
 });
 
 const { autoUpdater } = require('electron-updater');
+const log = require('electron-log');
+
+// Configure logging
+autoUpdater.logger = log;
+autoUpdater.logger.transports.file.level = 'info';
+log.info('App starting...');
 
 // Auto-updater events
-autoUpdater.on('update-available', () => {
-    if (mainWindow) mainWindow.webContents.send('update_available');
+autoUpdater.on('checking-for-update', () => {
+    log.info('Checking for update...');
 });
 
-autoUpdater.on('update-downloaded', () => {
-    if (mainWindow) mainWindow.webContents.send('update_downloaded');
+autoUpdater.on('update-available', (info) => {
+    log.info('Update available:', info);
+    if (mainWindow) mainWindow.webContents.send('update_available', info);
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+    log.info('Update downloaded:', info);
+    if (mainWindow) mainWindow.webContents.send('update_downloaded', info);
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+    // log.info('Download progress:', progressObj); // Too verbose
+    if (mainWindow) mainWindow.webContents.send('download_progress', progressObj);
+});
+
+autoUpdater.on('update-not-available', (info) => {
+    log.info('Update not available:', info);
+    if (mainWindow) mainWindow.webContents.send('update_not_available', info);
+});
+
+autoUpdater.on('error', (err) => {
+    log.error('Error in auto-updater:', err);
+    if (mainWindow) mainWindow.webContents.send('update_error', err.message);
+});
+
+ipcMain.handle('manual-check-update', async () => {
+    try {
+        return await autoUpdater.checkForUpdates();
+    } catch (error) {
+        log.error("Error checking for updates:", error);
+        throw error;
+    }
 });
 
 ipcMain.on('restart_app', () => {
     autoUpdater.quitAndInstall();
 });
+
+// --- Legacy Update Handlers Removed (Now using Supabase above) ---
 
 app.on('ready', async () => {
     try {
@@ -245,6 +340,15 @@ app.on('ready', async () => {
     }
 
     createWindow();
+
+    // Configure Auto Updater
+    autoUpdater.logger = require("electron-log");
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+
+    // Note: Feed URL is now configured via package.json (GitHub Provider)
+    // We still query DB to show "New Version Available" banner in UI via chatService
+
     autoUpdater.checkForUpdatesAndNotify();
 });
 

@@ -180,6 +180,39 @@ class ChatService {
             await this.adapter.markAsRead(messageIds);
         }
     }
+
+    async addReaction(messageId, emoji, username) {
+        if (this.adapter && this.adapter.addReaction) {
+            try {
+                await this.adapter.addReaction(messageId, emoji, username);
+            } catch (e) {
+                console.error("Adapter addReaction failed:", e);
+                // Don't throw, allow broadcast to continue
+            }
+        } else {
+            // console.warn("Adapter does not support reactions (Persistence disabled).");
+        }
+    }
+
+    async cleanup(days = 90) {
+        if (this.adapter && this.adapter.cleanupOldMessages) {
+            await this.adapter.cleanupOldMessages(days);
+        }
+    }
+
+    async getLatestVersion() {
+        if (this.adapter && this.adapter.getLatestVersion) {
+            return await this.adapter.getLatestVersion();
+        }
+        return null;
+    }
+
+    async publishVersion(version, notes, url) {
+        if (this.adapter && this.adapter.publishVersion) {
+            return await this.adapter.publishVersion(version, notes, url);
+        }
+        return false;
+    }
 }
 
 module.exports = new ChatService();

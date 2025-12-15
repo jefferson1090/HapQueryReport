@@ -5,3 +5,13 @@ build
 .DS_Store
 coverage
 *.db
+
+# Server
+server/node_modules
+server/dist
+server/releases
+server/server_log.txt
+server/debug_*.js
+server/.env
+server/public/assets
+server/public/index.html

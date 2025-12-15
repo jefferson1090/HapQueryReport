@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import hapLogo from '../assets/hap_full_logo.jpg';
+import hapLogo from '../assets/hap_logo_sql.png';
 import CryptoJS from 'crypto-js';
 
 const SECRET_KEY = 'hap-query-report-secret-key';
@@ -153,10 +153,6 @@ function ConnectionForm({ onConnect }) {
     };
 
     const handleLoad = (conn) => {
-        // If default, we load it but maybe prevent editing sensitive fields in UI?
-        // Actually, for defaults, we just want to connect.
-        // But if user clicks, we populate the form.
-
         setFormData({
             user: conn.user,
             password: decryptPassword(conn.password),
@@ -238,192 +234,205 @@ function ConnectionForm({ onConnect }) {
     };
 
     return (
-        <div className="flex h-screen bg-gray-100 font-sans">
-            {/* Left Side - Saved Connections */}
-            <div className="w-1/3 bg-white border-r border-gray-200 p-6 flex flex-col shadow-lg z-10">
-                <div className="flex flex-col items-center justify-center mb-4">
-                    {/* Logo removed from here */}
-                </div>
-                <h2 className="text-lg font-bold text-gray-700 mb-4 px-2 border-l-4 border-[#f37021]">Conexões Salvas</h2>
-                <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
-                    {savedConnections.length === 0 && (
-                        <div className="text-center py-10 bg-gray-50 rounded-lg border border-dashed border-gray-300">
-                            <p className="text-gray-400 italic">Nenhuma conexão salva.</p>
-                            <p className="text-xs text-gray-400 mt-1">Preencha o formulário para criar uma.</p>
-                        </div>
-                    )}
-                    {savedConnections.map((conn, index) => (
-                        <div
-                            key={conn.id || index}
-                            onClick={() => handleLoad(conn)}
-                            className={`p-4 rounded-lg border cursor-pointer transition-all hover:shadow-md group relative ${editingId === conn.id ? 'border-[#f37021] bg-orange-50' : 'border-gray-200 hover:border-blue-300 bg-white'
-                                }`}
-                        >
-                            <div className="font-bold text-gray-800 flex items-center">
-                                {conn.connectionName || `Connection ${index + 1}`}
-                                {conn.isDefault && <span className="ml-2 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">PADRÃO</span>}
-                            </div>
-                            <div className="text-sm text-gray-500">
-                                {conn.user}@
-                                {conn.isDefault ? '*****' : conn.connectString}
-                            </div>
+        <div className="flex h-full bg-gradient-to-br from-gray-50 to-blue-50 relative overflow-hidden font-sans">
+            {/* Background Decor */}
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 to-blue-600 z-10"></div>
+            <div className="absolute -top-24 -right-24 w-96 h-96 bg-blue-400/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-orange-400/10 rounded-full blur-3xl pointer-events-none"></div>
 
-                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
-                                {!conn.isDefault && (
-                                    <button
-                                        onClick={(e) => handleEdit(conn, e)}
-                                        className="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors"
-                                        title="Editar"
-                                    >
-                                        ✏️
-                                    </button>
-                                )}
-                                <button
-                                    onClick={(e) => handleDelete(conn.id, e, conn.isDefault)}
-                                    className="p-1.5 text-red-600 hover:bg-red-100 rounded transition-colors"
-                                    title="Excluir"
-                                >
-                                    🗑️
-                                </button>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-                <button
-                    onClick={() => {
-                        setIsEditing(false);
-                        setEditingId(null);
-                        setIsViewOnly(false);
-                        setFormData({ user: '', password: '', connectString: 'localhost:1521/XEPDB1', connectionName: '' });
-                        setStatus({ type: '', message: '' });
-                    }}
-                    className="mt-6 w-full py-3 border-2 border-dashed border-gray-300 text-gray-500 rounded-lg hover:border-[#0054a6] hover:text-[#0054a6] transition-all font-medium flex items-center justify-center gap-2"
-                >
-                    <span className="text-xl">+</span> Nova Conexão
-                </button>
-            </div>
+            <div className="flex w-full h-full p-8 z-20 gap-8">
 
-            {/* Right Side - Form */}
-            <div className="w-2/3 p-10 flex flex-col justify-center bg-gradient-to-br from-gray-50 to-blue-50">
-                <div className="max-w-lg mx-auto w-full bg-white p-10 rounded-2xl shadow-xl border border-gray-100">
-                    <div className="flex justify-center mb-6">
-                        <img src={hapLogo} alt="Hap Logo" className="h-16 object-contain" />
+                {/* Left Side - Saved Connections (V2 Glass Card) */}
+                <div className="w-1/3 flex flex-col v2-card overflow-hidden transition-all duration-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] bg-white/60">
+                    <div className="p-4 border-b border-white/50 bg-white/40 backdrop-blur-md sticky top-0 z-10 flex items-center gap-3">
+                        <div className="h-6 w-1 bg-orange-500 rounded-full"></div>
+                        <h2 className="text-lg font-bold text-gray-700">Conexões Salvas</h2>
                     </div>
-                    <h2 className="text-3xl font-bold text-gray-800 mb-8 text-center">
-                        {isEditing ? 'Editar Conexão' : 'Nova Conexão'}
-                    </h2>
 
-                    <div className="space-y-5">
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-1">Nome da Conexão (Ex: DEV, PROD)</label>
-                            <input
-                                type="text"
-                                name="connectionName"
-                                value={formData.connectionName}
-                                onChange={handleChange}
-                                disabled={isViewOnly}
-                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0054a6] focus:border-transparent outline-none transition-all disabled:bg-gray-100 disabled:text-gray-500"
-                                placeholder="Minha Conexão"
-                            />
+                    <div className="flex-1 overflow-y-auto space-y-3 p-4 custom-scrollbar">
+                        {savedConnections.length === 0 && (
+                            <div className="text-center py-10 bg-white/50 rounded-xl border border-dashed border-gray-300">
+                                <p className="text-gray-400 italic">Nenhuma conexão salva.</p>
+                                <p className="text-xs text-gray-400 mt-1">Preencha o formulário para criar uma.</p>
+                            </div>
+                        )}
+                        {savedConnections.map((conn, index) => (
+                            <div
+                                key={conn.id || index}
+                                onClick={() => handleLoad(conn)}
+                                className={`p-4 rounded-xl border cursor-pointer transition-all duration-300 group relative
+                                    ${editingId === conn.id
+                                        ? 'border-orange-400 bg-orange-50 shadow-md ring-1 ring-orange-200'
+                                        : 'border-white/60 bg-white/40 hover:bg-white hover:border-blue-300 hover:shadow-md'
+                                    }
+                                `}
+                            >
+                                <div className="font-bold text-gray-800 flex items-center justify-between">
+                                    <span className="truncate">{conn.connectionName || `Connection ${index + 1}`}</span>
+                                    {conn.isDefault && <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold tracking-wider">PADRÃO</span>}
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1 truncate">
+                                    <span className="font-medium">{conn.user}@</span>
+                                    {conn.isDefault ? '*****' : conn.connectString}
+                                </div>
+
+                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
+                                    {!conn.isDefault && (
+                                        <button
+                                            onClick={(e) => handleEdit(conn, e)}
+                                            className="p-1.5 text-blue-600 hover:bg-blue-100/80 rounded-lg transition-colors"
+                                            title="Editar"
+                                        >
+                                            ✏️
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={(e) => handleDelete(conn.id, e, conn.isDefault)}
+                                        className="p-1.5 text-red-600 hover:bg-red-100/80 rounded-lg transition-colors"
+                                        title="Excluir"
+                                    >
+                                        🗑️
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="p-4 border-t border-white/50 bg-white/40">
+                        <button
+                            onClick={() => {
+                                setIsEditing(false);
+                                setEditingId(null);
+                                setIsViewOnly(false);
+                                setFormData({ user: '', password: '', connectString: 'localhost:1521/XEPDB1', connectionName: '' });
+                                setStatus({ type: '', message: '' });
+                            }}
+                            className="w-full py-2.5 border-2 border-dashed border-gray-300 text-gray-500 rounded-xl hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-all font-bold flex items-center justify-center gap-2 group"
+                        >
+                            <span className="text-xl group-hover:scale-110 transition-transform">+</span> Nova Conexão
+                        </button>
+                    </div>
+                </div>
+
+                {/* Right Side - Form (V2 Glass Card) */}
+                <div className="w-2/3 flex flex-col justify-center items-center">
+                    <div className="v2-card w-full max-w-lg p-10 relative bg-white/80">
+                        <div className="text-center mb-8">
+                            <img src={hapLogo} alt="Hap Logo" className="h-28 mx-auto mb-6 drop-shadow-sm transition-transform hover:scale-105 duration-500" />
+                            <h2 className="text-2xl font-bold text-gray-700">
+                                {isEditing ? 'Editar Conexão' : 'Nova Conexão'}
+                            </h2>
+                            <p className="text-sm text-gray-400 mt-2">
+                                {isEditing ? 'Atualize os dados da conexão.' : 'Insira as credenciais do banco Oracle.'}
+                            </p>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-1">Usuário</label>
-                            <input
-                                type="text"
-                                name="user"
-                                value={formData.user}
-                                onChange={handleChange}
-                                disabled={isViewOnly}
-                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0054a6] focus:border-transparent outline-none transition-all disabled:bg-gray-100 disabled:text-gray-500"
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-1">Senha</label>
-                            <div className="relative">
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5 ml-1">Nome da Conexão</label>
                                 <input
-                                    type={showPassword ? "text" : "password"}
-                                    name="password"
-                                    value={formData.password}
+                                    type="text"
+                                    name="connectionName"
+                                    value={formData.connectionName}
                                     onChange={handleChange}
                                     disabled={isViewOnly}
-                                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0054a6] focus:border-transparent outline-none transition-all disabled:bg-gray-100 disabled:text-gray-500 pr-10"
+                                    className="v2-input w-full"
+                                    placeholder="Ex: Produção, Homolog..."
                                 />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5 ml-1">Usuário</label>
+                                    <input
+                                        type="text"
+                                        name="user"
+                                        value={formData.user}
+                                        onChange={handleChange}
+                                        disabled={isViewOnly}
+                                        className="v2-input w-full"
+                                        placeholder="system"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5 ml-1">Senha</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showPassword ? "text" : "password"}
+                                            name="password"
+                                            value={formData.password}
+                                            onChange={handleChange}
+                                            disabled={isViewOnly}
+                                            className="v2-input w-full pr-10"
+                                            placeholder="••••••"
+                                        />
+                                        {!isViewOnly && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPassword(!showPassword)}
+                                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                                            >
+                                                {showPassword ? "🙈" : "👁️"}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5 ml-1">Host (Connect String)</label>
+                                <input
+                                    type={isViewOnly ? "password" : "text"}
+                                    name="connectString"
+                                    value={formData.connectString}
+                                    onChange={handleChange}
+                                    disabled={isViewOnly}
+                                    className="v2-input w-full"
+                                    placeholder="localhost:1521/XEPDB1"
+                                />
+                            </div>
+
+                            {status.message && (
+                                <div className={`p-3 rounded-xl text-sm font-medium flex items-center animate-fade-in-up ${status.type === 'error' ? 'bg-red-50 text-red-600 border border-red-100' :
+                                        status.type === 'success' ? 'bg-green-50 text-green-600 border border-green-100' :
+                                            'bg-blue-50 text-blue-600 border border-blue-100'
+                                    }`}>
+                                    {status.type === 'error' ? '⚠️' : status.type === 'success' ? '✅' : 'ℹ️'}
+                                    <span className="ml-2">{status.message}</span>
+                                </div>
+                            )}
+
+                            <div className="flex gap-3 pt-4">
+                                <button
+                                    onClick={handleTest}
+                                    className="flex-1 py-3 bg-gray-100/80 hover:bg-white text-gray-600 hover:text-gray-800 rounded-xl font-bold border border-gray-200 transition-all hover:shadow-md"
+                                >
+                                    Testar
+                                </button>
                                 {!isViewOnly && (
                                     <button
-                                        type="button"
-                                        onClick={() => setShowPassword(!showPassword)}
-                                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
-                                        title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                                        onClick={handleSave}
+                                        className="flex-1 py-3 bg-white text-orange-600 hover:bg-orange-50 rounded-xl font-bold border border-orange-200 transition-all hover:shadow-md hover:border-orange-300"
                                     >
-                                        {showPassword ? (
-                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                                            </svg>
-                                        ) : (
-                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                            </svg>
-                                        )}
+                                        {isEditing ? 'Atualizar' : 'Salvar'}
                                     </button>
                                 )}
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-1">Host (Connect String)</label>
-                            <input
-                                type={isViewOnly ? "password" : "text"}
-                                name="connectString"
-                                value={formData.connectString}
-                                onChange={handleChange}
-                                disabled={isViewOnly}
-                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0054a6] focus:border-transparent outline-none transition-all disabled:bg-gray-100 disabled:text-gray-500"
-                                placeholder="localhost:1521/XEPDB1"
-                            />
-                        </div>
-
-                        {status.message && (
-                            <div className={`p-4 rounded-lg text-sm font-medium ${status.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' :
-                                status.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' :
-                                    'bg-blue-50 text-blue-700 border border-blue-200'
-                                }`}>
-                                {status.message}
-                            </div>
-                        )}
-
-                        <div className="flex space-x-3 pt-6">
-                            <button
-                                onClick={handleTest}
-                                className="flex-1 py-3 px-4 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-bold border border-gray-300"
-                            >
-                                Testar
-                            </button>
-                            {!isViewOnly && (
                                 <button
-                                    onClick={handleSave}
-                                    className="flex-1 py-3 px-4 bg-[#f37021] text-white rounded-lg hover:bg-orange-600 transition-colors font-bold shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                                    onClick={handleConnect}
+                                    className="flex-1 py-3 v2-btn-primary rounded-xl font-bold shadow-lg hover:shadow-orange-500/30 text-white"
                                 >
-                                    {isEditing ? 'Atualizar' : 'Salvar'}
+                                    Conectar
+                                </button>
+                            </div>
+
+                            {isEditing && (
+                                <button
+                                    onClick={handleCancelEdit}
+                                    className="w-full py-2 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                                >
+                                    Cancelar Edição
                                 </button>
                             )}
-                            <button
-                                onClick={handleConnect}
-                                className="flex-1 py-3 px-4 bg-[#0054a6] text-white rounded-lg hover:bg-blue-800 transition-colors font-bold shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-                            >
-                                Conectar
-                            </button>
                         </div>
-                        {isEditing && (
-                            <button
-                                onClick={handleCancelEdit}
-                                className="w-full mt-2 text-sm text-gray-500 hover:text-gray-700 underline text-center block"
-                            >
-                                Cancelar Edição
-                            </button>
-                        )}
                     </div>
                 </div>
             </div>

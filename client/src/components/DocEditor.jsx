@@ -7,6 +7,10 @@ import Image from '@tiptap/extension-image';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import BubbleMenuExtension from '@tiptap/extension-bubble-menu';
 import Placeholder from '@tiptap/extension-placeholder';
+import { Page } from './extensions/Page';
+import { Pagination } from './extensions/Pagination';
+import Document from '@tiptap/extension-document';
+import { History } from '@tiptap/extension-history'; // Explicit History
 import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
@@ -24,7 +28,7 @@ import {
     Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code, Heading1, Heading2, Heading3,
     List, ListOrdered, Quote, Image as ImageIcon, Table as TableIcon,
     AlignLeft, AlignCenter, AlignRight, AlignJustify, CheckSquare, Save, Sparkles, Highlighter,
-    Type, Palette, Minus, Plus, Maximize2, Copy, Check, ChevronDown, Download, Printer, FileText as FileIcon
+    Type, Palette, Minus, Plus, Maximize2, Copy, Check, ChevronDown, Download, Printer, FileText as FileIcon, Scissors, PenLine
 } from 'lucide-react';
 import { saveAs } from 'file-saver';
 import HTMLtoDOCX from 'html-to-docx';
@@ -494,6 +498,7 @@ const MenuBar = ({ editor, onSave, isSaving, theme, onAiRequest }) => {
                 />
                 <button onClick={onImageClick} className="p-1.5 rounded hover:bg-gray-500/10 opacity-70" title="Inserir Imagem"><ImageIcon size={16} /></button>
                 <button onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} className="p-1.5 rounded hover:bg-gray-500/10 opacity-70" title="Inserir Tabela"><TableIcon size={16} /></button>
+                <button onClick={() => editor.chain().focus().setPageBreak().run()} className="p-1.5 rounded hover:bg-gray-500/10 opacity-70" title="Quebra de Página"><Scissors size={16} /></button>
             </div>
 
             {/* Export (New) */}
@@ -642,6 +647,8 @@ const DocEditor = React.forwardRef(({ initialContent, onSave, theme, readOnly = 
 
     // Effect to check if empty on load
     useEffect(() => {
+        console.log(`[DocEditor] Mount/Update. ReadOnly: ${readOnly}, InitialContent Len: ${initialContent?.length}`);
+
         // Only show if editable and truly empty (initialContent is null/empty string)
         if (!readOnly && (!initialContent || initialContent === '<p></p>')) {
             setShowTemplates(true);
@@ -670,6 +677,9 @@ const DocEditor = React.forwardRef(({ initialContent, onSave, theme, readOnly = 
         setShowTemplates(false);
     };
 
+    // State for AI Expansion Configuration
+    const [expandConfig, setExpandConfig] = useState({ type: 'Continuar escrita', length: 'Médio', isOpen: false });
+
     const handleAiRequest = async (instruction) => {
         // Support both strings (preset) and selection (custom)
         let customInstruction = instruction;
@@ -686,18 +696,107 @@ const DocEditor = React.forwardRef(({ initialContent, onSave, theme, readOnly = 
         }
 
         const selectedText = editor.state.doc.textBetween(from, to, ' ');
-        setIsSaving(true); // Reuse saving spinner
+        const isTable = editor.isActive('table');
+        let contentToSend = selectedText;
+
+        // Append context to instruction if in table
+        let finalInstruction = customInstruction;
+        let tableRange = null;
+
+        if (isTable) {
+            // FIND THE PARENT TABLE NODE to provide full context (Headers, Columns)
+            let $pos = editor.state.selection.$from;
+            let depth = $pos.depth;
+            let tableNode = null;
+            let tableStart = -1;
+
+            for (let d = depth; d > 0; d--) {
+                const node = $pos.node(d);
+                if (node.type.name === 'table') {
+                    tableNode = node;
+                    tableStart = $pos.start(d) - 1; // -1 to get the pos BEFORE the table starts
+                    break;
+                }
+            }
+
+            if (tableNode) {
+                // Send FULL TABLE JSON
+                contentToSend = JSON.stringify(tableNode.toJSON());
+                tableRange = { from: tableStart, to: tableStart + tableNode.nodeSize };
+
+                if (customInstruction.startsWith("Complementar:")) {
+                    finalInstruction += " [CONTEXT: TABLE JSON - Return FULL UPDATED JSON Structure (Whole Table)]";
+                }
+            } else {
+                // Fallback to selection if lookup fails (unlikely if isTable is true)
+                const json = editor.state.selection.content().toJSON();
+                contentToSend = JSON.stringify(json);
+                if (customInstruction.startsWith("Complementar:")) {
+                    finalInstruction += " [CONTEXT: TABLE JSON - Return FULL UPDATED JSON Structure]";
+                }
+            }
+        }
+
+        setIsSaving(true);
 
         try {
             const res = await fetch('http://localhost:3001/api/ai/text', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: selectedText, instruction: customInstruction })
+                body: JSON.stringify({ text: contentToSend, instruction: finalInstruction })
             });
             const data = await res.json();
 
             if (data.result) {
-                editor.chain().focus().insertContentAt({ from, to }, data.result).run();
+                // INTELLIGENT INSERTION LOGIC
+                if (customInstruction.startsWith("Complementar:")) {
+                    if (isTable) {
+                        try {
+                            // Table Mode: Expect JSON content for the table/rows
+                            // We treat the result as content to replace/insert
+                            // If user selected the whole table, result should be the updated table.
+                            // Tiptap insertContent handles JSON objects/arrays.
+                            let jsonContent = typeof data.result === 'string' ? JSON.parse(data.result) : data.result;
+
+                            // If we have a full table range, REPLACE the whole table
+                            if (tableRange) {
+                                // Validate if jsonContent feels like a table
+                                if (jsonContent.type === 'table' || (Array.isArray(jsonContent) && jsonContent[0]?.type === 'table')) {
+                                    editor.chain().focus().deleteRange(tableRange).insertContentAt(tableRange.from, jsonContent).run();
+                                } else if (Array.isArray(jsonContent) && jsonContent[0]?.type === 'tableRow') {
+                                    // If AI returned just rows, this is tricky if we deleted the whole table.
+                                    // Ideally AI returns full table.
+                                    // Fallback: This path shouldn't be hit with current Prompt logic, but safe-guard?
+                                    // If we requested full table, we expect full table.
+                                    // Actually, if we deleteRange, we have no table wrapper.
+                                    // Re-wrapping manual might be needed.
+                                    // Let's assume prompt works.
+                                    editor.chain().focus().deleteRange(tableRange).insertContentAt(tableRange.from, {
+                                        type: 'table',
+                                        content: jsonContent
+                                    }).run();
+                                } else {
+                                    // Just insert whatever we got?
+                                    editor.chain().focus().insertContent(jsonContent).run();
+                                }
+                            } else {
+                                // Fallback for partial selection
+                                editor.chain().focus().insertContent(jsonContent).run();
+                            }
+                        } catch (err) {
+                            console.error("Failed to parse AI Table JSON", err);
+                            alert("Erro ao formatar tabela da IA.");
+                        }
+                    } else {
+                        // APPEND MODE (Text)
+                        const needsSpace = !selectedText.endsWith(' ') && !data.result.startsWith(' ');
+                        const contentToInsert = (needsSpace ? ' ' : '') + data.result;
+                        editor.chain().focus().insertContentAt(to, contentToInsert).run();
+                    }
+                } else {
+                    // REPLACE MODE
+                    editor.chain().focus().insertContentAt({ from, to }, data.result).run();
+                }
             } else {
                 alert("Erro ao processar com IA.");
             }
@@ -706,8 +805,29 @@ const DocEditor = React.forwardRef(({ initialContent, onSave, theme, readOnly = 
             alert("Falha de conexão com IA.");
         } finally {
             setIsSaving(false);
+            setExpandConfig(prev => ({ ...prev, isOpen: false })); // Close menu after run
         }
     };
+
+    // Helper to generate the instruction string from state
+    const runExpansion = () => {
+        const typeMap = {
+            'Continuar escrita': 'Continuar o fluxo do texto',
+            'Adicionar Exemplo': 'Adicionar um exemplo prático',
+            'Inserir Dados': 'Explicar com dados fictícios/reais'
+        };
+        const lenMap = {
+            'Curto': 'Curto (1 parágrafo)',
+            'Médio': 'Médio (2-3 parágrafos)',
+            'Longo': 'Longo (detalhado)'
+        };
+
+        const instruction = `Complementar: ${typeMap[expandConfig.type]} - Tamanho: ${lenMap[expandConfig.length]}`;
+        handleAiRequest(instruction);
+    };
+
+    // ... (rest of component)
+
 
     const handleDrop = (view, event, slice, moved) => {
         // STRICTER DUPLICATION CHECK
@@ -746,8 +866,20 @@ const DocEditor = React.forwardRef(({ initialContent, onSave, theme, readOnly = 
 
     const editor = useEditor({
         extensions: [
+            // Custom Document Structure: doc -> page
+            Document.extend({
+                content: 'page+',
+            }),
+            Page,
+            Pagination,
             StarterKit.configure({
-                codeBlock: false, // We use Lowlight
+                document: false, // Disable default Document
+                codeBlock: false,
+                history: false, // Usage explicit History extension below
+            }),
+            History.configure({
+                depth: 100,
+                newGroupDelay: 500,
             }),
             // Use our Custom Resizable Image
             ResizableImage,
@@ -788,14 +920,14 @@ const DocEditor = React.forwardRef(({ initialContent, onSave, theme, readOnly = 
                 }
             }),
         ],
-        content: initialContent || '',
+        content: initialContent || '<page><p></p></page>', // Default to a page if empty
         editable: !readOnly,
         editorProps: {
             attributes: {
-                // A4 Dimensions: 210mm x 297mm
-                // We use min-h-[297mm] to simulate the page height
-                class: `prose max-w-none focus:outline-none min-h-[297mm] w-[210mm] px-[2.5cm] py-[2.5cm] shadow-xl drop-shadow-md bg-white text-black mx-auto my-8 rounded-sm outline-none print:shadow-none print:m-0 print:w-full`,
-                style: `background-image: repeating-linear-gradient(to bottom, transparent 0px, transparent calc(297mm - 2px), #e5e7eb calc(297mm - 2px), #d1d5db 297mm); background-size: 100% 297mm;`
+                // The Editor Container is now the "Desk"
+                // Gray Background, Centered Flex column for pages
+                class: `prose max-w-none focus:outline-none w-full bg-[#F3F4F6] flex flex-col items-center py-8 outline-none print:bg-white print:block`,
+                style: `min-height: 100vh;`
             },
             handleDrop: handleDrop,
             handleDOMEvents: {
@@ -836,7 +968,14 @@ const DocEditor = React.forwardRef(({ initialContent, onSave, theme, readOnly = 
                 }
             }
         },
-    }, [initialContent, readOnly]);
+    }, []); // FIXED: Empty dependency array to prevent re-initialization on auto-save (preserves Undo History)
+
+    // Dynamic ReadOnly Update
+    useEffect(() => {
+        if (editor) {
+            editor.setEditable(!readOnly);
+        }
+    }, [editor, readOnly]);
 
     // Expose methods to parent via ref
     React.useImperativeHandle(ref, () => ({
@@ -892,6 +1031,26 @@ const DocEditor = React.forwardRef(({ initialContent, onSave, theme, readOnly = 
         }
     }, [highlight, editor]);
 
+    // Custom Keyboard Shortcuts (Undo/Redo Fix)
+    useEffect(() => {
+        if (!editor) return;
+
+        // Force Refocus to ensure key events are captured if lost
+        // editor.commands.focus(); 
+
+        // We can't easily add global window listeners for Tiptap commands without 'editor' context issues
+        // BUT Tiptap's History extension should catch these if we don't preventDefault elsewhere.
+        // The previous crash was due to 'editor' being undefined in the closure.
+        // Let's verify if we need to manually add them.
+        // If the user says they stopped working, it's likely my previous broken code.
+        // Removing the broken code might be enough. 
+        // But to be SAFE, let's explicitly add them to the editor instance.
+
+        // No, Tiptap extensions are declarative. 
+        // We can use Mousetrap or standard listeners if needed, but let's trust removing the broken code first.
+
+    }, [editor]);
+
     return (
         <div className={`flex flex-col h-full ${theme ? theme.bg : 'bg-gray-50'}`}>
             <MenuBar
@@ -902,7 +1061,7 @@ const DocEditor = React.forwardRef(({ initialContent, onSave, theme, readOnly = 
                 onAiRequest={handleAiRequest}
             />
             {editor && (
-                <BubbleMenu editor={editor} tippyOptions={{ duration: 100 }} className="flex overflow-hidden bg-white border border-gray-200 rounded-lg shadow-xl dark:bg-gray-800 dark:border-gray-700">
+                <BubbleMenu editor={editor} tippyOptions={{ duration: 100, zIndex: 99, maxWidth: 'none' }} className="flex bg-white border border-gray-200 rounded-lg shadow-xl dark:bg-gray-800 dark:border-gray-700">
                     <button
                         onClick={() => handleAiRequest("Melhorar escrita")}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700 transition-colors"
@@ -929,9 +1088,74 @@ const DocEditor = React.forwardRef(({ initialContent, onSave, theme, readOnly = 
                     >
                         Traduzir
                     </button>
+
+                    <div className="w-px bg-gray-200 dark:bg-gray-700 mx-1 my-1" />
+
+                    {/* Expand Button Group */}
+                    <div className="relative flex items-center group">
+                        <button
+                            onClick={() => setExpandConfig(prev => ({ ...prev, isOpen: !prev.isOpen }))}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors ${expandConfig.isOpen ? 'bg-blue-50 text-blue-800' : 'text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/30'}`}
+                        >
+                            <PenLine size={14} className="text-blue-500" />
+                            Expandir
+                            <ChevronDown size={10} className={`opacity-50 transition-transform ${expandConfig.isOpen ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {/* Expand Popup Configuration */}
+                        {expandConfig.isOpen && (
+                            <div className="absolute top-full right-0 mt-2 z-50 min-w-[280px]">
+                                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-3 flex flex-col gap-3">
+                                    {/* Type Selection */}
+                                    <div>
+                                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 block">Tipo de Complemento</label>
+                                        <div className="flex flex-col gap-1">
+                                            {['Continuar escrita', 'Adicionar Exemplo', 'Inserir Dados'].map(type => (
+                                                <button
+                                                    key={type}
+                                                    onClick={() => setExpandConfig(prev => ({ ...prev, type }))}
+                                                    className={`text-left px-2 py-1 text-sm rounded transition-colors ${expandConfig.type === type ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                                                >
+                                                    {type === 'Continuar escrita' && '✍️ '}
+                                                    {type === 'Adicionar Exemplo' && '💡 '}
+                                                    {type === 'Inserir Dados' && '📊 '}
+                                                    {type}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Length Selection */}
+                                    <div>
+                                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 block">Tamanho</label>
+                                        <div className="flex gap-2 text-xs">
+                                            {['Curto', 'Médio', 'Longo'].map(len => (
+                                                <button
+                                                    key={len}
+                                                    onClick={() => setExpandConfig(prev => ({ ...prev, length: len }))}
+                                                    className={`flex-1 py-1 border rounded transition-colors ${expandConfig.length === len ? 'bg-blue-50 border-blue-500 text-blue-600' : 'hover:border-blue-400'}`}
+                                                >
+                                                    {len}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Action Button */}
+                                    <button
+                                        onClick={runExpansion}
+                                        className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        <Sparkles size={14} />
+                                        Gerar Complemento
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </BubbleMenu>
             )}
-            <div className="flex-1 overflow-y-auto custom-scrollbar bg-gray-200/70 dark:bg-black/40 relative">
+            <div className="flex-1 overflow-y-scroll custom-scrollbar bg-gray-200/70 dark:bg-black/40 relative" style={{ scrollbarGutter: 'stable' }}>
                 {showTemplates && editor && editor.isEmpty && (
                     <TemplateSelector onSelect={applyTemplate} theme={theme} />
                 )}

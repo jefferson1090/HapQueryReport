@@ -1,40 +1,84 @@
-# Handoff - Projeto Hap Assistente de Dados (v1.15.66)
+# Handoff Instructions - v2.0.0 Release
 
-## Estado Atual
-*   **Versão:** v1.15.66
-*   **Backend Ativo:** Supabase (configurado em `server/chat_config.json` e `server/services/adapters/SupabaseAdapter.js`).
-*   **Installer:** Gerado em `C:\Users\jeffe\Downloads`.
+## Project Status
+**Current Version:** v2.0.0 (Client & Server)
+**Stability:** Stable (Golden Release)
+**Last Action:** Published v2.0.0 to GitHub Releases.
 
-## O Problema Crítico (BUG)
-**"Mensagens Fantasma" no Chat**
-1.  **Sintoma:** O usuário recebe uma mensagem (o contador "badge" vermelho incrementa corretamente na lista de usuários).
-2.  **Falha:** Ao clicar no usuário para abrir a conversa, a área de chat aparece vazia ou apenas com as mensagens enviadas por mim. As mensagens *recebidas* não renderizam.
-3.  **Tentativas de Solução:**
-    *   Correção de evento `receive_message` -> `message` no servidor (v1.15.65).
-    *   Relaxamento do filtro de renderização no `TeamChat.jsx` (v1.15.66) para ignorar Case Sensitive e Trim.
-4.  **Suspeita:** Pode haver uma divergência fundamental nos objetos. Por exemplo:
-    *   `selectedUser.username` pode estar desatualizado/incompatível.
-    *   O array `messages` pode estar sendo mutado incorretamente.
-    *   Timestamp ou ordenação impedindo a visualização.
-    *   O "TestBot" (usuário antigo) ainda aparece na lista, sugerindo "sujeira" no `users.json` ou cache do Supabase.
+## Key Changes Implemented
+1.  **UI Overhaul (V2.0)**:
+    -   **Glassmorphism**: New Login & Splash screens with transparent/blur effects.
+    -   **Navigation**: Updated tabs to match new Identity (Orange/Blue).
+    -   **Icons**: Migrated to `lucide-react` (Loader2, etc.).
 
-## Ações Recomendadas para o Próximo Agente
-1.  **Debuggar `TeamChat.jsx` Render:** Adicione `console.log` DENTRO do `.map()` das mensagens para ver *por que* elas estão sendo filtradas.
-2.  **Limpeza de Usuários:** Investigar de onde o "TestBot" está vindo (provavelmente `server/users.json` persistido) e criar um script para limpar esse arquivo no boot.
-3.  **Chave API:** A chave da IA está no `.env` do servidor (`GROQ_API_KEY`). Verifique se ela está sendo carregada corretamente.
+2.  **Update System Fixes**:
+    -   **Loop Fix**: Added 15s timeout to `checkForUpdates` in `App.jsx`.
+    -   **IPC Fix**: Changed `manual-check-update` to use `ipcMain.handle` (Server) and `invoke` (Client).
+    -   **Debug Logs**: Enabled `electron-log` in `electron-main.js` (Logs to `%APPDATA%\Hap Assistente de Dados\logs`).
 
-## Procedimentos de Build
-*   **Client:** `cd client && npm run build`
-*   **Server:** `cd server && npm run dist` (Isso aciona automaticamente o `copy-client`).
-*   **Install:** O instalador vai para `C:\Users\jeffe\Downloads`.
+3.  **Build Process**:
+    -   **Clean Build**: `package.json` now has `clean` scripts that run automatically before `build` or `dist`.
+    -   **No Cache Corruption**: `dist` folders are nuked before every build.
 
-## ⚠️ Credenciais (Uso Exclusivo para Continuidade)
-Como o arquivo `.env` não é versionado, utilize estas chaves para configurar o ambiente local (`server/.env`):
+## Dependencies & Installation
+If you (the next agent) need to reinstall or move environments:
+1.  **Node Version**: v20+ recommended.
+2.  **Key Packages**:
+    -   `electron-updater`: Handles auto-updates.
+    -   `electron-log`: Handles file logging.
+    -   `lucide-react`: UI Icons.
+    -   `framer-motion`: Animations (TechReveal).
+    -   `vite-plugin-node-polyfills`: Critical for Client build.
 
-```env
-# Chave Obfuscada (Remova os espaços para usar)
-GROQ_API_KEY=gsk_ 2zYeSDTgSKoSzEApSKTSWGdyb3FY0RsY5JxBCHkk1hM7g5lez48I
-AI_MODEL=llama-3.3-70b-versatile
+**Command to Install:**
+```bash
+cd client && npm install
+cd ../server && npm install
 ```
 
-**Instrução:** Crie um arquivo `.env` na pasta `server/` com o conteúdo acima.
+## How to Build (Do NOT skip steps)
+**Client:**
+```bash
+cd client
+npm run build  # Automatically runs 'npm run clean' first
+```
+
+**Server/Installer:**
+```bash
+cd server
+npm run dist   # Automatically runs 'npm run clean' and copies client assets
+```
+
+## Last Test Performed
+-   **Test Case**: Built v2.0.0 installer. Corrected IPC handler mismatch (`invoke` vs `on`) found in v1.15.95 debug session. Verified `latest.yml` on GitHub.
+-   **Next Test Required**:
+    1.  Install v2.0.0 (download from GitHub).
+    2.  Open App -> Click "Actualizar" (Upgrade Badge).
+    3.  **Expected Result**: Should show "Procurando..." with spinner, then "Você já tem a versão mais recente" (or Update Available if newer exists). **NO Error Toast.**
+
+## Known Quirks
+-   **DevTools**: Disabled in v2.0.0 (by design). To debug, un-comment `mainWindow.webContents.openDevTools()` in `server/electron-main.js`.
+-   **White Screen**: If it returns, check `preload.js` bridge exposure (we fixed it in v1.15.92).
+
+## CRITICAL BUG REPORT (from v1.15.96 test)
+**Symptom**: Updater fails with `Cannot download "...Hap-Assistente-de-Dados-Setup-2.0.0.exe", status 404`.
+**Diagnosis**: URL Mismatch.
+-   The Updater is looking for a hyphenated filename (`Hap-Assistente...`).
+-   The Uploaded Asset likely has spaces (`Hap Assistente...`).
+-   **Action Reqd**:
+    1.  Check GitHub Release v2.0.0 assets.
+    2.  Rename the `.exe` on GitHub to match `latest.yml` (or vice-versa).
+    3.  Ensure future builds enforce a safe filename (no spaces) to prevent this recurrence.
+
+## BUG REPORT: Theme Switcher Broken
+**Symptom**: "Change Theme" option is not functioning.
+**Diagnosis**: Likely a regression from the V2.0 UI Overhaul.
+-   The new `App.jsx` layout or `ThemeContext` usage might have been disconnected or overridden by the new "Glassmorphism" constant styles.
+-   **Action Reqd**:
+    1.  Investigate `ThemeContext.js`.
+    2.  Check `App.jsx` class injection (are we forcing a specific class?).
+    3.  Restore theme switching capability.
+
+---
+**Maintainer:** Antigravity (Agent Session ID: 29)
+**Date:** 2025-12-15

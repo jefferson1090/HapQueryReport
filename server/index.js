@@ -255,10 +255,10 @@ io.on('connection', (socket) => {
     const userList = Array.from(chatService.users.values());
 
     // Send to everyone (including sender)
-    io.emit('users_update', userList);
+    io.emit('update_user_list', userList);
 
     // Also explicitly send to the joining socket to be sure
-    socket.emit('users_update', userList);
+    socket.emit('update_user_list', userList);
 
     console.log(`${username} (${team}) joined chat. Total users: ${userList.length}`);
   });
@@ -311,6 +311,7 @@ io.on('connection', (socket) => {
     }
   });
 
+
   socket.on('share_item', async (data) => {
     // data: { sender, recipient, itemType, itemData }
     console.log(`[Share] ${data.sender} -> ${data.recipient} type: ${data.itemType}`);
@@ -323,14 +324,41 @@ io.on('connection', (socket) => {
       // This will trigger SupabaseAdapter.sendMessage, which now handles serialization correctly
       await chatService.saveMessage(data.sender, `Compartilhou um ${data.itemType}`, type, metadata, data.recipient);
 
-      // Optimistic/Local broadcast is handled by the Adapter's event listener or the client's optimistic UI.
-      // But if we want to ensure specific local sockets get it immediately (if not using adapter for local echo):
-      // if (data.recipient === 'ALL') io.emit('message', { ... }); 
-      // But chatService.saveMessage in Supabase mode relies on Supabase event to come back.
-      // In Local mode, it relies on fallback.
-      // Client already has optimistic UI.
     } catch (e) {
       console.error("Share error:", e);
+    }
+  });
+
+  // --- NEW HANDLERS FOR REAL-TIME SYNC ---
+
+  socket.on('reminder_update', (data) => {
+    // data: { reminder, sender }
+    // Broadcast to all connected clients so they can update their board if they have it open
+    // In a more complex app, we might join 'rooms' based on boards, but for now broadcast is fine.
+    io.emit('reminder_update', data);
+  });
+
+  socket.on('message_reaction', async (data) => {
+    // data: { messageId, emoji, username }
+    console.log(`[Socket] Received reaction from ${data.username}: ${data.emoji} on msg ${data.messageId}`);
+    try {
+      await chatService.addReaction(data.messageId, data.emoji, data.username);
+      // Broadcast reaction to update UI
+      io.emit('message_reaction', data);
+      console.log(`[Socket] Broadcasted reaction for ${data.messageId}`);
+    } catch (e) {
+      console.error("Reaction error:", e);
+    }
+  });
+
+  socket.on('mark_read', async (data) => {
+    // data: { messageIds, username }
+    if (!data.messageIds || data.messageIds.length === 0) return;
+    try {
+      await chatService.markAsRead(data.messageIds); // This triggers adapter update -> listener -> emit
+      console.log(`[Socket] Marked ${data.messageIds.length} msgs as read by ${data.username}`);
+    } catch (e) {
+      console.error("MarkRead error:", e);
     }
   });
 
@@ -339,7 +367,7 @@ io.on('connection', (socket) => {
     const user = chatService.users.get(socket.id);
     chatService.users.delete(socket.id);
     if (user) {
-      io.emit('users_update', Array.from(chatService.users.values()));
+      io.emit('update_user_list', Array.from(chatService.users.values()));
       console.log(`${user.username} disconnected.`);
     }
   });
@@ -927,7 +955,12 @@ app.post('/api/cancel-import/:jobId', (req, res) => {
 app.post('/api/ai/text', async (req, res) => {
   try {
     const { text, instruction } = req.body;
-    if (!text || !instruction) return res.status(400).json({ error: 'Missing text or instruction' });
+    console.log(`[AI Endpoint] Received request. Text length: ${text?.length}, Instruction: ${instruction?.substring(0, 50)}...`);
+
+    if (!text || !instruction) {
+      console.warn("[AI Endpoint] Missing text or instruction");
+      return res.status(400).json({ error: 'Missing text or instruction' });
+    }
 
     // Ensure aiService has the method
     if (!aiService.processText) {
@@ -1099,6 +1132,13 @@ app.post('/api/docs/books', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.delete('/api/docs/books/:id', async (req, res) => {
+  try {
+    await docService.deleteBook(req.params.id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/docs/books/:id/tree', async (req, res) => {
   try {
     const tree = await docService.getBookTree(req.params.id);
@@ -1245,11 +1285,23 @@ app.get(/.*/, (req, res) => {
 });
 
 // Start Server Function
-function startServer(port) {
+const startServer = (port) => {
   return new Promise((resolve, reject) => {
     server.listen(port, () => {
       console.log(`Server running on port ${port}`);
-      resolve(server);
+      debugLog(`Server running on port ${port}`);
+
+      // Run Database Cleanup on Startup (Keep last 90 days)
+      try {
+        setTimeout(() => {
+          console.log("Running scheduled cleanup...");
+          chatService.cleanup(30);
+        }, 10000); // Delay 10s to not slow down startup
+      } catch (e) {
+        console.error("Cleanup error:", e);
+      }
+
+      resolve();
     });
 
     server.on('error', (e) => {

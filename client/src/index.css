@@ -81,6 +81,83 @@ body {
   border-radius: 0.4rem;
 }
 
+/* Tip@tailwind base; */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* V1 Legacy Colors (Keep for backward compat until full migration) */
+  --bg-primary: #f3f4f6;
+  --text-primary: #1f2937;
+
+  /* V2.0 Brand Identity (Hapvida NDI) */
+  --brand-orange: #FF6600;
+  /* Hapvida Orange */
+  --brand-blue: #004685;
+  /* NDI Blue */
+  --brand-bg: #f8fafc;
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+}
+
+@layer components {
+
+  /* V2 Glassmorphism Card */
+  .v2-card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    border-radius: 16px;
+  }
+
+  /* V2 Button */
+  .v2-btn-primary {
+    background: linear-gradient(135deg, var(--brand-orange) 0%, #ff8533 100%);
+    color: white;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 14px 0 rgba(255, 102, 0, 0.39);
+  }
+
+  .v2-btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(255, 102, 0, 0.23);
+  }
+
+  /* V2 Inputs */
+  .v2-input {
+    @apply bg-white/50 border border-gray-200 rounded-xl px-4 py-3 outline-none transition-all duration-300;
+  }
+
+  .v2-input:focus {
+    @apply bg-white border-orange-500 ring-2 ring-orange-100;
+  }
+}
+
+/* Animations */
+/* Animations */
+@keyframes techReveal {
+  0% {
+    opacity: 0;
+    transform: scale(0.98) translateY(10px);
+    filter: blur(4px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+}
+
+.animate-tech-reveal {
+  animation: techReveal 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
 /* Tiptap / ProseMirror Specifics */
 .ProseMirror {
   outline: none;
@@ -343,4 +420,74 @@ ul[data-type="taskList"] li>div>p {
 
 .animate-fade-in {
   animation: fadeIn 0.5s ease-out;
+}
+
+/* Custom Scrollbar for Comments */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  /* gray-300 */
+  border-radius: 4px;
+}
+
+
+/* TABLE STYLES FOR PROSEMIRROR */
+.ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+.ProseMirror td,
+.ProseMirror th {
+  min-width: 1em;
+  border: 1px solid #ced4da;
+  /* gray-400 */
+  padding: 6px 8px;
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.ProseMirror th {
+  font-weight: bold;
+  text-align: left;
+  background-color: #f3f4f6;
+  /* gray-100 */
+}
+
+.ProseMirror .selectedCell:after {
+  z-index: 2;
+  position: absolute;
+  content: "";
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(200, 200, 255, 0.4);
+  pointer-events: none;
+}
+
+.ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background-color: #adf;
+  pointer-events: none;
 }

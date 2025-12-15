@@ -1,12 +1,13 @@
 {
   "name": "server",
-  "version": "1.15.72",
+  "version": "2.0.0",
   "main": "electron-main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "clean": "node -e \"const fs = require('fs'); fs.rmSync('dist', { recursive: true, force: true });\"",
     "start": "electron .",
     "copy-client": "powershell -ExecutionPolicy Bypass -File \"./scripts/copy_assets.ps1\"",
-    "predist": "npm run copy-client",
+    "predist": "npm run clean && npm run copy-client",
     "dist": "electron-builder"
   },
   "build": {
@@ -28,6 +29,11 @@
       "!deploy.ps1",
       "!start_app.bat"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "jefferson1090",
+      "repo": "HapQueryReport"
+    },
     "win": {
       "target": "nsis",
       "icon": "icon.png"
@@ -36,8 +42,13 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": true,
-      "runAfterFinish": false
+      "runAfterFinish": false,
+      "include": "installer.nsh"
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jefferson1090/HapQueryReport.git"
   },
   "keywords": [],
   "author": "",
@@ -49,14 +60,17 @@
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^17.2.3",
+    "electron-log": "^5.4.3",
     "electron-updater": "^6.6.2",
     "express": "^5.1.0",
+    "fs-extra": "^11.3.2",
     "groq-sdk": "^0.37.0",
     "json2csv": "^6.0.0-alpha.2",
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
     "oracledb": "^6.10.0",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "ws": "^8.18.3"
   },
   "bin": "index.js",
   "devDependencies": {

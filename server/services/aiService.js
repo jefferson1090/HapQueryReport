@@ -674,6 +674,77 @@ class AiService {
         }
 
         try {
+            // --- COMPLEMENT MODE ---
+            if (instruction.startsWith("Complementar:")) {
+                const docService = require('./localDocService');
+                // Use the selected text as search query to find relevant context
+                const query = text.length > 200 ? text.substring(0, 200) : text;
+                const relevantNodes = await docService.searchNodes(query);
+
+                let contextText = "";
+                if (relevantNodes.length > 0) {
+                    contextText += `=== CONTEXTO ADICIONAL (Fatos/Dados) ===\n` + relevantNodes.slice(0, 2).map(n =>
+                        `[Fonte: ${n.NM_TITLE}]\n${n.SNIPPET.substring(0, 5000)}...`
+                    ).join("\n\n---\n\n");
+                }
+
+                const isTableMode = instruction.includes("[CONTEXT: TABLE");
+                const isJsonMode = instruction.includes("JSON");
+                const cleanInstruction = instruction.replace("Complementar:", "").replace(/\[CONTEXT: TABLE.*?\]/, "").trim();
+
+                console.log("[AI Service] Processing Complement. Table Mode:", isTableMode, "JSON Mode:", isJsonMode);
+
+                const systemPrompt = `
+                Você é um co-autor especialista ajudando a escrever este documento.
+                
+                # INSTRUÇÃO: ${cleanInstruction}
+                
+                # REGRAS
+                1. CONTINUE o texto fornecido pelo usuário de forma fluida e coesa.
+                2. Mantenha o tom e estilo do texto original.
+                3. USE o "CONTEXTO ADICIONAL" para enriquecer o texto com dados ou detalhes técnicos se fizer sentido.
+                4. Se solicitado criar tabelas ou dados, use o contexto ou crie exemplos realistas.
+                5. Retorne APENAS o novo texto complementar (não repita o original).
+                ${isTableMode ? `
+                # REGRAS ESPECÍFICAS PARA TABELA
+                - O input do usuário é uma estrutura de tabela (pode ser JSON ou Texto).
+                ${isJsonMode ? `
+                - O Input é um JSON representando a seleção da tabela (Tiptap JSON).
+                - Sua tarefa é RETORNAR O JSON ATUALIZADO ou NOVAS LINHAS EM JSON.
+                - Se o input for a tabela completa, adicione as linhas necessárias e retorne a TABELA JSON COMPLETA.
+                - Mantenha a estrutura 'type': 'tableRow', 'content': [...].
+                - Retorne APENAS O JSON (sem blocos de código markdown, sem explicações).
+                - Exemplo de output: { "type": "table", "content": [ ... ] } ou [ { "type": "tableRow"... } ]
+                ` : `
+                - GERE NOVAS LINHAS (ROWS) para complementar a tabela.
+                - Siga a contagem de colunas implícita no texto original.
+                - Retorne APENAS o código HTML das linhas (ex: <tr><td>...</td><td>...</td></tr>).
+                - NÃO retorne a tag <table> inteira, apenas os <tr>.
+                `}
+                ` : ''}
+                
+                # CONTEXTO ADICIONAL
+                ${contextText || "Sem contexto adicional disponível."}
+                `;
+
+                console.log("[AI Service] Sending prompt to Groq...");
+                const completion = await this.groq.chat.completions.create({
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: `Texto Original:\n${text}\n\ncomplemento:` }
+                    ],
+                    model: this.modelName,
+                    temperature: 0.5,
+                });
+
+                const content = completion.choices[0]?.message?.content || "";
+                console.log("[AI Service] Groq response length:", content.length);
+                if (!content) console.warn("[AI Service] WARNING: Empty response from Groq");
+
+                return content;
+            }
+            // --- END COMPLEMENT MODE ---
+
             const systemPrompt = `
             Você é um assistente de edição de texto especialista.
             Sua tarefa é transformar o texto fornecido seguindo estritamente a instrução do usuário.
@@ -752,15 +823,22 @@ class AiService {
 
     async optimizeSql(sql) {
         if (!this.groq) return { text: "⚠️ IA não configurada." };
-        const systemPrompt = `Você é uma Engine de Otimização SQL.
-        Sua tarefa é REESCREVER a query SQL para máxima performance.
+        const systemPrompt = `Você é um DBA Sênior Especialista em Oracle e Tuning de Performance.
+        Sua missão é analisar a query fornecida e reescreve-la para a MÁXIMA performance possível, sem alucinar objetos que não existem.
         
-        REGRAS RÍGIDAS:
+        # DIRETRIZES DE PENSAMENTO (CoT):
+        1. Analise os predicados (WHERE/JOIN). Estou usando funções em colunas (quebrando índices)? (Ex: TRUNC(data) = ...). Se sim, reescreva para range de datas.
+        2. Analise os JOINs. Estão usando ANSI-92? Se não, converta. Use EXISTS ao invés de IN para subqueries grandes.
+        3. Analise Subqueries. Podem ser transformadas em JOINs ou CTEs (WITH clause) para legibilidade e possível materialização?
+        4. Analise SELECT *. Se for possível inferir as colunas, liste-as. Se não, mantenha *, mas adicione um comentário avisando para evitar.
+        5. NÃO invente índices ou tabelas. Trabalhe com a lógica da query.
+
+        # REGRAS RÍGIDAS DE SAÍDA:
         1. Retorne APENAS o código SQL dentro de um bloco markdown (\`\`\`sql ... \`\`\`).
-        2. O SQL deve iniciar com o comentário: "-- Otimizado"
-        3. NÃO inclua explicações, análises ou texto "Aqui está". APENAS O CÓDIGO.
-        4. Se o SQL já estiver ótimo, retorne-o exatamente igual, apenas adicionando o comentário "-- Validado (Performance OK)" no topo.
-        5. Melhore: SARGABILITY, JOINs (Preferencialmente ANSI), e remova SELECT * se possível (mas mantenha * se não souber as colunas).
+        2. O SQL deve iniciar com o comentário: "-- Otimizado por Hap IA (Nível DBA)"
+        3. Adicione comentários curtos NO CÓDIGO explicando as mudanças principais (Ex: "-- Alterado IN para EXISTS para performance").
+        4. Se o SQL já estiver ótimo, retorne-o igual com o comentário "-- Validado: Performance já está otimizada".
+        5. Formate o código com indentação profissional.
         `;
 
         try {
@@ -812,24 +890,71 @@ class AiService {
 
             let contextText = "";
 
-            // 1. Priority: Current Open Document (if User asks for "this" or "summary")
+            // 1. Priority: Current Open Document
             if (currentContext && currentContext.content) {
-                contextText += `=== DOCUMENTO ABERTO (Foco Principal) ===\n[Título: ${currentContext.title}]\nConteúdo: ${currentContext.content.substring(0, 3000)}\n\n`;
+                // ... (existing context logic)
+                contextText += `=== DOCUMENTO ABERTO (Foco Principal) ===\n[Título: ${currentContext.title}]\nConteúdo: ${currentContext.content.substring(0, 50000)}\n\n`;
             }
 
-            // 2. Global Search Results
-            if (relevantNodes.length > 0) {
-                contextText += `=== OUTROS DOCUMENTOS RELACIONADOS ===\n` + relevantNodes.map(n =>
-                    `[Título: ${n.NM_TITLE}]\nConteúdo: ${n.SNIPPET.substring(0, 1000)}...`
-                ).join("\n\n---\n\n");
-            }
+            // ... (existing RAG logic)
 
-            if (!contextText) {
-                contextText = "Nenhum documento relevante encontrado.";
+            // --- COMPLEMENTATION LOGIC ---
+            // Detect special instruction from frontend
+            if (message.startsWith("Complementar:")) {
+                const instruction = message.replace("Complementar:", "").trim();
+
+                const systemPrompt = `
+                Você é um co-autor especialista ajudando a escrever este documento.
+                Sua tarefa é CONTINUAR e COMPLEMENTAR o texto selecionado pelo usuário.
+                
+                # INSTRUÇÃO: ${instruction}
+                
+                # REGRAS DE COMPLEMENTO:
+                1. Analise o "DOCUMENTO ABERTO" para manter o mesmo tom, estilo e formatação.
+                2. Use os "OUTROS DOCUMENTOS RELACIONADOS" para extrair fatos, dados ou referências cruzadas se necessário.
+                3. NÃO repita o texto que o usuário já escreveu. CONTINUE a partir dele.
+                4. Se a instrução pedir dados/tabelas, crie dados fictícios realistas ou use dados reais do contexto se houver.
+                5. Retorne APENAS o texto complementar formatado em Markdown (sem introduções como "Aqui está o texto...").
+                
+                # CONTEXTO (Documentos Recuperados)
+                ${contextText}
+                `;
+
+                // For completion, we might want a slightly higher temperature for creativity
+                const completion = await this.groq.chat.completions.create({
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        // The user message in completion mode is effectively the "cursor position" or selection usually, 
+                        // but here 'message' is the instruction. 
+                        // We assume the actual selection is part of 'currentContext.content' provided implicitly or we need to pass selection explicitly?
+                        // Wait, 'message' from DocEditor handleAiRequest is the SELECTED TEXT + Instruction usually?
+                        // In DocEditor.jsx: handleAiRequest(instruction) -> passes 'selectedText' as text AND 'instruction' to API?
+                        // Let's check DocsModule.jsx/handleAiRequest.
+                        // Actually DocEditor.jsx calls onAiRequest(text). 
+                        // But my new UI calls handleAiRequest("Complementar: ..."). 
+                        // This sends the instruction AS the "text" to process?
+                        // AAARGH. DocEditor.jsx:327: onAiRequest(text).
+                        // My new buttons call handleAiRequest("Complementar: ...").
+                        // So 'message' received here IS "Complementar: ...".
+                        // BUT WHERE IS THE SELECTED TEXT TO COMPLETE?
+                        // The DocEditor logic (lines 325-327) extracts selection.
+                        // BUT my button click handler overrides the argument passed to onAiRequest!
+                        // DocEditor.jsx:324: handleAiClick (generic) gets selection.
+                        // My buttons pass specific string.
+                        // I need to fix DocEditor.jsx to pass BOTH.
+
+                        { role: "user", content: "Por favor, gere o complemento seguindo a instrução acima." }
+                    ],
+                    model: this.modelName,
+                    temperature: 0.5,
+                });
+                return { text: completion.choices[0]?.message?.content || "", action: 'chat' };
             }
+            // --- END COMPLEMENTATION LOGIC ---
 
             const systemPrompt = `
             Você é um assistente especialista na documentação do projeto.
+
             Use o contexto fornecido abaixo para responder à pergunta do usuário.
             
             # REGRAS

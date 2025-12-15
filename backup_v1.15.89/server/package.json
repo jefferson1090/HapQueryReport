@@ -1,0 +1,82 @@
+{
+  "name": "server",
+  "version": "1.15.89",
+  "main": "electron-main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "electron .",
+    "copy-client": "powershell -ExecutionPolicy Bypass -File \"./scripts/copy_assets.ps1\"",
+    "predist": "npm run copy-client",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.hap.queryreport",
+    "productName": "Hap Assistente de Dados",
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist"
+    },
+    "extraResources": [
+      "instantclient/**/*"
+    ],
+    "files": [
+      "**/*",
+      "!dist/**/*",
+      "!uploads/**/*",
+      "!server_log.txt",
+      "!oracle-builder.exe",
+      "!deploy.ps1",
+      "!start_app.bat"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "jefferson1090",
+      "repo": "HapQueryReport"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": true,
+      "runAfterFinish": false,
+      "include": "installer.nsh"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jefferson1090/HapQueryReport.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.87.1",
+    "cors": "^2.8.5",
+    "csv-parser": "^3.2.0",
+    "dotenv": "^17.2.3",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.6.2",
+    "express": "^5.1.0",
+    "fs-extra": "^11.3.2",
+    "groq-sdk": "^0.37.0",
+    "json2csv": "^6.0.0-alpha.2",
+    "multer": "^2.0.2",
+    "node-fetch": "^3.3.2",
+    "oracledb": "^6.10.0",
+    "socket.io": "^4.8.1",
+    "ws": "^8.18.3"
+  },
+  "bin": "index.js",
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.2",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3",
+    "nodemon": "^3.1.11",
+    "wait-on": "^9.0.3"
+  }
+}

@@ -128,10 +128,9 @@ class LocalDocService {
                     const contentPath = path.join(getBookDir(book.ID_BOOK), `${node.ID_NODE}.html`);
                     let content = '';
                     if (fs.existsSync(contentPath)) {
-                        // Read only first 4000 chars to satisfy search index (performance optimization)
-                        // Use safe high-level API to avoid potential Buffer access violations in Electron
-                        const fullContent = fs.readFileSync(contentPath, 'utf-8');
-                        content = fullContent.substring(0, 4000);
+                        // Read full content to ensure "all sheets" are indexed
+                        // We will rely on aiService to manage the prompt context window size
+                        content = fs.readFileSync(contentPath, 'utf-8');
                     }
 
                     allNodes.push({
@@ -273,15 +272,19 @@ class LocalDocService {
 
             if (node) {
                 // Recursive collect all descendants to delete their files
-                const toDeleteIds = [id];
+                // Ensure we use the correct type from the found node
+                const targetId = node.ID_NODE;
+                const toDeleteIds = [targetId];
+
                 const findDescendants = (parentId) => {
+                    // Use loose equality for parent check too just in case
                     const children = nodes.filter(n => n.ID_PARENT_NODE == parentId);
                     for (const child of children) {
                         toDeleteIds.push(child.ID_NODE);
                         findDescendants(child.ID_NODE);
                     }
                 };
-                findDescendants(id);
+                findDescendants(targetId);
 
                 // Delete files
                 for (const delId of toDeleteIds) {
@@ -291,7 +294,7 @@ class LocalDocService {
                     }
                 }
 
-                // Remove from structure
+                // Remove from structure - Use filter with includes on IDs
                 nodes = nodes.filter(n => !toDeleteIds.includes(n.ID_NODE));
                 writeStructure(book.ID_BOOK, nodes);
 

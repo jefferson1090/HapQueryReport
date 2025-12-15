@@ -1,0 +1,5 @@
+=== 1. Checking Database Connection ===
+Connection failed: NJS-503: connection to host 127.0.0.1 port 1521 could not be established. (CONNECTION_ID=nnL9TJzs8yam+n8Lub7iaQ==)
+connect ECONNREFUSED 127.0.0.1:1521
+FATAL ERROR: NJS-503: connection to host 127.0.0.1 port 1521 could not be established. (CONNECTION_ID=nnL9TJzs8yam+n8Lub7iaQ==)
+connect ECONNREFUSED 127.0.0.1:1521
