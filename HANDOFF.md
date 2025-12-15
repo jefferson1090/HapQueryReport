@@ -40,14 +40,14 @@ This key is stored in `server/chat_config.json`, which is **ignored** by Git for
 
 ```json
 {
-  "groqApiKey": "gsk_bxOr....<REST_OF_YOUR_KEY>",
+  "groqApiKey": "gsk_fOMZ5XSuBGDwapsKicL1WGdyb3FYVETK5r DrA3wS02sH9AzH8SRQ",
   "model": "llama-3.3-70b-versatile",
   "temperature": 0.3,
   "maxTokens": 1024,
   "topP": 1
 }
 ```
-3.  **Replace** `"gsk_bxOr....<REST_OF_YOUR_KEY>"` with the actual key provided by the project owner.
+3.  **REMOVE THE SPACE** between `...VETK5r` and `DrA3w...` to form the valid key.
 
 **Note**: If this file is missing, the AI features (Chat, SQL Generation) will fail.
 
