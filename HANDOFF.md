@@ -30,11 +30,26 @@ If you (the next agent) need to reinstall or move environments:
     -   `framer-motion`: Animations (TechReveal).
     -   `vite-plugin-node-polyfills`: Critical for Client build.
 
-## Environment & API Keys
-**CRITICAL**: This project uses a `chat_config.json` (or `.env` in dev) to store the Groq API Key.
--   **Location**: `server/chat_config.json`
--   **Action Reqd**: Ensure the target listener (local or production) has a valid API Key configured.
--   **Note**: The source code repo **does NOT** contain the live keys (security). You must restore `chat_config.json` from a secure backup or ask the user for the key if it's missing in the new environment.
+## 🔑 Environment & API Keys (CRITICAL)
+**The project requires a valid API Key to function (Groq AI).**
+This key is stored in `server/chat_config.json`, which is **ignored** by Git for security.
+
+### How to Restore the API Key
+1.  Create a file named `chat_config.json` in the `server/` directory.
+2.  Paste the following structure into it:
+
+```json
+{
+  "groqApiKey": "gsk_bxOr....<REST_OF_YOUR_KEY>",
+  "model": "llama-3.3-70b-versatile",
+  "temperature": 0.3,
+  "maxTokens": 1024,
+  "topP": 1
+}
+```
+3.  **Replace** `"gsk_bxOr....<REST_OF_YOUR_KEY>"` with the actual key provided by the project owner.
+
+**Note**: If this file is missing, the AI features (Chat, SQL Generation) will fail.
 
 **Command to Install:**
 ```bash
