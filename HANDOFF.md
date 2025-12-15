@@ -30,6 +30,12 @@ If you (the next agent) need to reinstall or move environments:
     -   `framer-motion`: Animations (TechReveal).
     -   `vite-plugin-node-polyfills`: Critical for Client build.
 
+## Environment & API Keys
+**CRITICAL**: This project uses a `chat_config.json` (or `.env` in dev) to store the Groq API Key.
+-   **Location**: `server/chat_config.json`
+-   **Action Reqd**: Ensure the target listener (local or production) has a valid API Key configured.
+-   **Note**: The source code repo **does NOT** contain the live keys (security). You must restore `chat_config.json` from a secure backup or ask the user for the key if it's missing in the new environment.
+
 **Command to Install:**
 ```bash
 cd client && npm install
