@@ -1,10 +1,11 @@
-# Handoff Instructions - v2.0.0 Release
+# Handoff Instructions - v2.1.0 (Dev)
 
 ## Project Status
-**Current Version:** v2.0.0 (Client & Server)
-**Stability:** Stable (Golden Release)
-**Last Action:** Published v2.0.0 to GitHub Releases.
+**Current Version:** v2.1.0-dev
+**Stability:** Beta (Autocomplete in debugging phase)
+**Last Action:** Implemented Tab Renaming, Theme Switcher Fix, and Autocomplete Backend Fixes.
 
+<<<<<<< HEAD
 ## Key Changes Implemented
 1.  **AI Context & Data Exploration (Phase 7 - Completed)**:
     -   **Context Isolation**: Implemented `[SYSTEM: SET_CONTEXT]` and `[SYSTEM: CLEAR_CONTEXT]`. AI now "locks" onto the viewed table (`session.lastTable`) and forgets it when closed.
@@ -25,6 +26,22 @@
 4.  **Build Process**:
     -   **Clean Build**: `package.json` now has `clean` scripts that run automatically before `build` or `dist`.
     -   **No Cache Corruption**: `dist` folders are nuked before every build.
+=======
+## Key Changes Implemented (Session 2024-12-16)
+1.  **Tab Renaming**:
+    -   Implemented double-click to rename query tabs in `SqlRunner.jsx`.
+
+2.  **Theme Switcher Fix**:
+    -   Corrected `App.jsx` to use dynamic classes from `ThemeContext`, fixing the broken theme selection.
+
+3.  **Updater Fix**:
+    -   Added `artifactName` to `server/package.json` to enforce hyphenated filenames (fixing 404 error).
+
+4.  **Autocomplete SQL (Work in Progress)**:
+    -   **Backend**: Fixed critical bug in `db.js`. Query was not executing, and `currentUser` reference was broken. Now returns dictionary correctly.
+    -   **Frontend**: Updated `SqlRunner.jsx` to fetch schema *after* connection. Implemented case-insensitive alias support (normalizing keys).
+    -   **Status**: Code logic is sound, but user reported issues in final test. Needs verification of `db.js` execution logs.
+>>>>>>> ffed7d72cc9bc342a39e430bbd071b05ff3a4605
 
 ## Dependencies & Installation
 If you (the next agent) need to reinstall or move environments:
