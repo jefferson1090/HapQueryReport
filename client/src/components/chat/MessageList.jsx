@@ -1,11 +1,11 @@
 import React, { useRef, useLayoutEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, CheckCheck, Smile, CornerDownRight } from 'lucide-react';
+import { Check, CheckCheck, Smile, CornerDownRight, Database } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 
 const ReactionBar = ({ onReact, showPicker, togglerRef }) => {
     return (
-        <div className="absolute -top-3 right-2 bg-white shadow-sm border border-gray-200 rounded-full px-2 py-0.5 flex space-x-1 opacity-0 group-hover/msg:opacity-100 transition-opacity z-10">
+        <div className="absolute -top-5 right-2 bg-white shadow-md border border-gray-200 rounded-full px-2 py-0.5 flex space-x-1 opacity-0 group-hover/msg:opacity-100 transition-opacity z-20">
             {['👍', '❤️', '😂', '😮'].map(emoji => (
                 <button key={emoji} onClick={() => onReact(emoji)} className="hover:scale-125 transition-transform text-sm">{emoji}</button>
             ))}

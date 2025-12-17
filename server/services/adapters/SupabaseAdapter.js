@@ -636,6 +636,79 @@ class SupabaseAdapter {
             return false;
         }
     }
+
+    // --- HIVE MIND (Global Knowledge) ---
+
+    async getGlobalMemory() {
+        if (!this.client) return [];
+        try {
+            const { data, error } = await this.client
+                .from('ai_global_memory')
+                .select('*')
+                .eq('validation_status', 'VERIFIED'); // Only fetch valid knowledge, or fetch all and filter locally?
+            // Let's fetch all verified nodes (Base + Approved Collective)
+            // Actually, we might want PENDING items too if we want to show suggestions?
+            // For 'sync' (loading intelli), we usually only want trusted data. 
+            // However, the NeuralService can decide validity. Let's fetch verified + pending?
+            // For safety, let's just fetch verified for now to prevent pollution, unless explicitly requested.
+            // CHANGED: Fetch EVERYTHING, NeuralService decides trust level.
+
+            // Re-fetch:
+            const { data: allData, error: err } = await this.client
+                .from('ai_global_memory')
+                .select('*');
+
+            if (err) {
+                console.error('[SupabaseAdapter] getGlobalMemory error:', err);
+                return [];
+            }
+            return allData;
+        } catch (e) {
+            console.error('[SupabaseAdapter] getGlobalMemory exception:', e);
+            return [];
+        }
+    }
+
+    async upsertGlobalMemory(nodes) {
+        // nodes: Array of { term, target, type, source_type, created_by, app_version }
+        if (!this.client || !nodes || nodes.length === 0) return false;
+
+        try {
+            const { error } = await this.client
+                .from('ai_global_memory')
+                .upsert(nodes, { onConflict: 'term,target', ignoreDuplicates: false });
+            // We want to UPDATE if it exists (e.g. update weight or validation status if authorized)
+            // But usually standard users only INSERT.
+            // If conflict, and user is MANUAL_OVERRIDE, we might want to update? 
+            // Logic: Upsert will update fields. Be careful not to overwrite OFFICIAL_DEV data with PASSIVE.
+            // RLS policies should handle protection, but here we just try to upsert.
+
+            if (error) {
+                console.error('[SupabaseAdapter] upsertGlobalMemory error:', error);
+                return false;
+            }
+            return true;
+        } catch (e) {
+            console.error('[SupabaseAdapter] upsertGlobalMemory exception:', e);
+            return false;
+        }
+    }
+
+    async getConfig(key) {
+        if (!this.client) return null;
+        try {
+            const { data, error } = await this.client
+                .from('ai_config')
+                .select('value')
+                .eq('key', key)
+                .single();
+
+            if (error) return null;
+            return data.value;
+        } catch (e) {
+            return null;
+        }
+    }
 }
 
 module.exports = SupabaseAdapter;

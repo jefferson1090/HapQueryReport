@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Book, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { useApi } from '../../context/ApiContext';
 
-const DocsSelector = ({ onShare }) => {
+const DocsSelector = ({ onShare, user }) => {
     const [books, setBooks] = useState([]);
     const [expandedBooks, setExpandedBooks] = useState({});
     const [bookTrees, setBookTrees] = useState({});
@@ -10,11 +10,13 @@ const DocsSelector = ({ onShare }) => {
 
     useEffect(() => {
         fetchBooks();
-    }, []);
+    }, [user?.username]);
 
     const fetchBooks = async () => {
         try {
-            const res = await fetch(`${apiUrl}/api/docs/books`);
+            const headers = {};
+            if (user?.username) headers['x-username'] = user.username;
+            const res = await fetch(`${apiUrl}/api/docs/books`, { headers });
             const data = await res.json();
             setBooks(data);
         } catch (e) { console.error("Failed to fetch books", e); }

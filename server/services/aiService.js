@@ -1,6 +1,9 @@
 const Groq = require("groq-sdk");
 const db = require('../db');
 const learningService = require('./learningService');
+const knowledgeService = require('./knowledgeService');
+const neuralService = require('./neuralService');
+const agentService = require('./agentService');
 
 class AiService {
 
@@ -18,8 +21,10 @@ class AiService {
         // Regex Patterns for Local Mode
         this.localIntents = [
             {
-                // FIND TABLES
-                regex: /(?:busque|encontre|listar|mostre|quais|onde ficam|procurar|pesquisar|localizar)(?:\s+as)?(?:\s+tabelas?)?(?:\s+(?:de|do|da|dos|das|por|que contenham:?))?\s+(.+)/i,
+                // FIND TABLES (Specific - avoid capturing "show records")
+                // Matches: "Listar tabelas de X", "Busque tabela X"
+                // Excludes: "Mostre registros...", "Mostre dados..."
+                regex: /^(?:listar|ver|quais|buscar|encontrar|procurar)(?:\s+as)?\s+tabelas?(?:\s+(?:de|do|da|dos|das|que\s+contenham))?\s+(?!.*(?:registro|dado|valor|conteudo|linha))(.+)$/i,
                 action: 'list_tables'
             },
             {
@@ -54,14 +59,25 @@ class AiService {
             }
         ];
 
-        // State for Multi-turn Conversations
-        this.conversationState = {
-            status: 'IDLE',
-            payload: null
-        };
+        // State for Multi-turn Conversations (Session Isolated)
+        this.sessions = new Map();
     }
 
-    async processMessage(message, mode = 'ai', history = []) {
+    getSession(userId) {
+        if (!userId) return { status: 'IDLE', payload: null, lastTable: null, lastRecord: null };
+        if (!this.sessions.has(userId)) {
+            this.sessions.set(userId, {
+                status: 'IDLE',
+                payload: null,
+                lastTable: null, // Sticky Context
+                lastRecord: null,
+                columnOverride: null
+            });
+        }
+        return this.sessions.get(userId);
+    }
+
+    async processMessage(message, mode = 'ai', history = [], userId = 'default') {
         if (mode === 'ai' && !this.groq) {
             return {
                 text: "⚠️ API Key não configurada. Alternando para modo Local.",
@@ -70,21 +86,49 @@ class AiService {
             };
         }
 
-        // --- 1. HANDLE PENDING CONFIRMATIONS ---
-        if (this.conversationState.status === 'AWAITING_CONFIRMATION') {
+        const session = this.getSession(userId);
+
+
+        // --- 1.1 HANDLE SYSTEM COMMANDS ---
+        if (message === '[SYSTEM: CLEAR_CONTEXT]') {
+            session.lastTable = null;
+            session.lastRecord = null;
+            session.payload = null;
+            session.status = 'IDLE';
+            console.log(`[SESSION] Context cleared for user ${userId}`);
+            return { text: null, action: 'silent_ack' };
+        }
+
+        if (message.startsWith('[SYSTEM: SET_CONTEXT]')) {
+            try {
+                const payload = JSON.parse(message.replace('[SYSTEM: SET_CONTEXT]', '').trim());
+                if (payload.table) {
+                    session.lastTable = payload.table;
+                    console.log(`[SESSION] Context set to table: ${payload.table} for user ${userId}`);
+                    return { text: null, action: 'silent_ack' };
+                }
+            } catch (e) {
+                console.error("Failed to parse SET_CONTEXT:", e);
+            }
+        }
+
+        // --- 1.2 HANDLE PENDING CONFIRMATIONS ---
+        if (session.status === 'AWAITING_CONFIRMATION') {
             const lowerMsg = message.trim().toLowerCase();
             if (['sim', 'yes', 's', 'y', 'confirmar', 'ok'].includes(lowerMsg)) {
-                const pendingData = this.conversationState.payload;
-                this.conversationState = { status: 'IDLE', payload: null };
+                const pendingData = session.payload;
+                session.status = 'IDLE';
+                session.payload = null;
 
                 if (pendingData.action === 'drop_table') {
                     return await this.executeAction({
                         action: 'drop_table',
                         data: pendingData.data
-                    });
+                    }, userId);
                 }
             } else {
-                this.conversationState = { status: 'IDLE', payload: null };
+                session.status = 'IDLE';
+                session.payload = null;
                 return {
                     text: "🆗 Ação cancelada. O que gostaria de fazer agora?",
                     action: "text_response"
@@ -92,11 +136,97 @@ class AiService {
             }
         }
 
+
+        // --- 1.1 HANDLE LEARNING RESPONSES (Phase 1) ---
+        if (session.status === 'AWAITING_TABLE_SELECTION') {
+            // User selected a table. Learn connection: originalTerm -> selectedTable
+            const selectedTable = message.match(/(?:Consultar tabela|Use a tabela)\s+([a-zA-Z0-9_$.]+)/i)?.[1]?.trim().toUpperCase();
+            const { originalTerm, originalData } = session.payload;
+
+            // 1. TEACH NEURAL NETWORK
+            if (originalTerm && selectedTable) {
+                // If original was "PESSOA" and selected was "TBL_PESSOA"
+                neuralService.addEdge(originalTerm, selectedTable, 1.0, 'is_alias_of');
+                neuralService.saveGraph(); // Persist immediately
+                console.log(`[LEARNING] Connected "${originalTerm}" -> "${selectedTable}"`);
+            }
+
+            // 2. RETRY ACTION WITH CORRECT TABLE
+            session.status = 'IDLE';
+            session.payload = null; // Reset state
+            const newData = { ...originalData, table_name: selectedTable };
+
+            return await this.executeAction({
+                action: 'find_record',
+                data: newData,
+                text: `Entendi! Aprendi que **"${originalTerm}"** se refere a **${selectedTable}**. Buscando...`
+            }, userId);
+        }
+
+        if (session.status === 'AWAITING_COLUMN_SELECTION') {
+            // User selected columns. Learn connection: originalTerm -> selectedColumn
+            // The message format from UI might be complex, let's assume it sends the cleaned column name or a standard phrase
+            // For now, let's assume the UI sends "Buscar ... na coluna COL_X" or similar. 
+            // Ideally UI should send a structured choice, but we are parsing text.
+
+            // Regex to extract column from standard UI messages (singular or plural start)
+            let selectedCol = null;
+            const colMatch = message.match(/(?:coluna|colunas)\s+([a-zA-Z0-9_$#]+)/i);
+            if (colMatch) selectedCol = colMatch[1].toUpperCase();
+
+            const { originalTerm, originalData, tableName, mode } = session.payload;
+
+            if (selectedCol) {
+                // 1. TEACH NEURAL NETWORK
+                // Connect Table_Term -> Column (e.g. "TBL_PESSOA_CPF" -> "NR_CPF") creates a unique node for context?
+                // Simpler: Connect "CPF" -> "NR_CPF" (Global edge, or contextualized?)
+                // NeuralService supports global nodes. Let's do term -> column.
+                neuralService.addEdge(originalTerm, selectedCol, 0.9, 'is_column_alias');
+                neuralService.saveGraph();
+                console.log(`[LEARNING] Connected "${originalTerm}" -> "${selectedCol}"`);
+            }
+
+            session.status = 'IDLE';
+            session.payload = null;
+
+            // 2. RETRY
+            if (mode === 'projection') {
+                // Retry with resolved columns is tricky if multiple were missing.
+                // For Phase 1, let's just retry the query with the selected column found.
+                // We might need to re-resolve the full list. 
+                // Simple path: Update specific request and re-run.
+                // But wait, 'originalData' has 'show_columns'. We need to update that array.
+                const newShowCols = originalData.show_columns.map(c => c === originalTerm && selectedCol ? selectedCol : c);
+                return await this.executeAction({
+                    action: 'find_record',
+                    data: { ...originalData, show_columns: newShowCols, table_name: tableName },
+                    text: `Certo! Aprendi que **"${originalTerm}"** é **${selectedCol}**. Exibindo dados...`
+                }, userId);
+            } else {
+                // Filter mode
+                return await this.executeAction({
+                    action: 'find_record',
+                    data: { ...originalData, column_name: selectedCol, table_name: tableName },
+                    text: `Certo! Aprendi que **"${originalTerm}"** é **${selectedCol}**. Buscando...`
+                }, userId);
+            }
+        }
+
+        // --- 1.2 HANDLE CONTEXTUAL FILTERING (Phase 7) ---
+        // If message implies a filter ("show active", "from last month") and we have a Sticky Table Context
+        // We need to inject this context into the prompt processing.
+        if (session.lastTable && !message.match(/^nova busca|^reset|^esqueça/i)) {
+            // Heuristic: If we have a table context, append it to the message for the LLM
+            // But valid only if the user isn't asking for a NEW table.
+            // We'll let the LLM decide, but we provide the context.
+            // Note: effectively done in 'processWithGroq' via system prompt injection.
+        }
+
         let result;
         if (mode === 'local') {
-            result = await this.processWithRegex(message);
+            result = await this.processWithRegex(message, userId);
         } else {
-            result = await this.processWithGroq(message, history);
+            result = await this.processWithGroq(message, history, userId);
         }
 
         // --- 2. INTERCEPT DANGEROUS ACTIONS ---
@@ -109,53 +239,174 @@ class AiService {
                 };
             }
 
-            this.conversationState = {
-                status: 'AWAITING_CONFIRMATION',
-                payload: result
-            };
+            const session = this.getSession(userId);
+            session.status = 'AWAITING_CONFIRMATION';
+            session.payload = result;
+
             return {
                 text: `⚠️ **CONFIRMAÇÃO NECESSÁRIA** ⚠️\n\nVocê pediu para excluir a tabela **${tableName}**.\nEssa ação não pode ser desfeita.\n\nDigite **sim** para confirmar ou qualquer outra coisa para cancelar.`,
                 action: 'text_response'
             };
         }
 
-        if (result.action && result.action !== 'chat' && result.action !== 'text_response') {
-            learningService.logInteraction(result.action, message, true);
-        }
+        // processWithGroq ALREADY calls executeAction. Sending the result back to executeAction again
+        // causes the "Double Execution" bug where the output array is treated as input params.
 
+        // --- 3. RETURN RESULT DIRECTLY ---
+        // If the result already has 'text' and 'action', it's a finished response.
         return result;
     }
 
-    async processWithGroq(message, history) {
+    async processWithGroq(message, history, userId) {
         if (!this.groq) return { text: "⚠️ IA não configurada.", action: 'switch_mode', mode: 'local' };
+
+        // --- 1. RETRIEVAL (RAG) ---
+        const knownTerms = knowledgeService.search(message, 'all');
+        let knowledgeContext = "";
+        if (knownTerms.length > 0) {
+            knowledgeContext = "\n# CONTEXTO APRENDIDO (Terminologia do Usuário):\n" +
+                knownTerms.map(k => `- "${k.term}" refere-se a ${k.type.toUpperCase()} "${k.target}" (Confiança: ${k.confidence})`).join("\n") +
+                "\nUse este contexto para resolver ambiguidades (ex: se o usuário pedir 'Nota', e o contexto diz que Nota = NOTA_FISCAL, use NOTA_FISCAL).\n";
+        }
+
+        // --- 1.1 NEURAL ACTIVATION (Deep Memory) ---
+        // Activate graph based on key nouns in the message
+        let neuralContext = "";
+        const words = message.split(/[\s,;?!]+/);
+        const activatedNodes = [];
+        const seen = new Set();
+
+        for (const w of words) {
+            if (w.length > 3) {
+                const activation = neuralService.activate(w);
+                for (const node of activation) {
+                    if (!seen.has(node.id) && node.relevance > 0.4) {
+                        activatedNodes.push(node);
+                        seen.add(node.id);
+                    }
+                }
+            }
+        }
+
+        if (activatedNodes.length > 0) {
+            neuralContext = "\n# MEMÓRIA ASSOCIATIVA (Rede Neural):\n" +
+                activatedNodes.slice(0, 5).map(n => `- "${n.id}" está conectado a este contexto (Relevância: ${n.relevance.toFixed(2)})`).join("\n") +
+                "\n(Isso indica relações prováveis. Ex: Se 'Venda' ativa 'Produto', é provável que a query precise de JOIN entre eles).\n";
+        }
 
         // System Prompt defining the Persona and Tools
         const systemPrompt = `
-        Você é o Hap AI, um assistente especialista em Banco de Dados Oracle, atuando como um **Assistente de Dados** e **Assistente de Product Owner**.
-        Sua missão é ajudar o usuário a consultar, entender e manipular dados, além de fornecer insights de negócio.
+        Você é o Hap AI, um assistente especialista em Banco de Dados Oracle.
+        Sua missão é ajudar o usuário a consultar, entender e manipular dados.
+
+        ${knowledgeContext}
+        ${neuralContext}
+
+        # PADRÕES DE NOMENCLATURA (Apenas para Entendimento)
+        Use estas dicas para *identificar* tabelas que você ENCONTRAR na busca, mas **NÃO USE** para adivinhar nomes:
+        1. **Owners Comuns**: 
+           - **INCORPORA** e **HUMASTER** são os principais.
+        2. **Prefixos Comuns (Dica de Leitura)**:
+           - TB_OPE, AU_OPE, TT_OPE, VW_OPE.
+           - Se você buscar por "pessoa" e encontrar 'INCORPORA.TB_OPE_PESSOA_FISICA', este é provavelmente o correto.
+           - MAS se você buscar por "pessoa" e não encontrar nada, **NÃO INVENTE** 'TB_OPE_PESSOA'.
+        3. **Colunas (Prefixos)**:
+           - CD_ (Código), NM_ (Nome/Razão Social), NR_ (Nome Reduzido)
+           - DS_ (Descrição), NU_ (Número), DT_ (Data)
+           - QT_ (Quantidade), FL_ (Flag), VL_ (Valor), PC_ (Percentual)
+           - DG_ (Dígito Verificador), IM_ (Imagem), VD_ (Vídeo)
+           - _B (Processo anterior), _A (Processo posterior)
+        4. **Outros Objetos**:
+           - TG_OPE (Trigger), FN_OPE (Função), PR_OPE (Procedure)
+           - IX_OPE (Índice), CT_OPE (Constraint), CP_OPE (PK), CE_OPE (FK)
 
         # FERRAMENTAS DISPONÍVEIS (Responda com JSON se precisar usar uma)
-        Se o usuário pedir algo que exija acesso ao banco, retorne APENAS um JSON no seguinte formato:
+        Se o usuário pedir algo que exija acesso ao banco, retorne APENAS um JSON:
         { "action": "NOME_DA_ACAO", "params": { ... } }
 
         Ações:
         1. list_tables { search_term: string } -> Listar tabelas (Use quando user pedir "ver tabelas", "buscar", "listar").
-        2. describe_table { tableName: string } -> Ver colunas/estrutura.
-        3. run_sql { sql: string } -> Executar SELECT (Apenas SELECT!).
-        4. draft_table { tableName: string, columns: array, ... } -> Criar rascunho de tabela.
+        2. describe_table { tableName: string } -> Ver estrutura.
+        3. run_sql { sql: string } -> Executar SELECT. REGRAS ORACLE:
+           - JAMAIS USE 'LIMIT'. Use 'FETCH NEXT N ROWS ONLY'.
+           - Datas: Use TO_DATE('...', 'YYYY-MM-DD').
+           - Strings: Case Sensitive. Use UPPER(col) LIKE UPPER('%val%').
+        4. draft_table { tableName: string, columns: array, ... } -> Criar rascunho.
         5. list_triggers { table_name: string } -> Listar triggers.
-        6. find_record { table_name: string, value: string, column_name?: string, show_columns?: string[] } -> Localizar registro. REGRA MÚLTIPLOS: Se houver vários códigos/valores, envie TODOS no campo 'value' separados por espaço. REGRA COLUNAS: Use 'show_columns' para listar campos que o usuário pediu para ver (Ex: ["NOME", "CPF"]).
+        6. find_record { table_name: string, value: string } -> Localizar registro.
+        6. find_record { table_name: string, value: string } -> Localizar registro.
+        7. create_routine { name: string, goal: string, steps: array } -> Criar uma nova rotina/script AGENTE.
+           - Steps deve ser um array de ações JSON (ex: [{action: 'run_sql', params: {...}}]).
+        8. execute_routine { name: string } -> Executar uma rotina existente.
+        9. clarification { question: string, options: string[] } -> USE SE HOUVER AMBIGUIDADE.
 
-        # REGRAS DE RESPOSTA (CRÍTICO)
-        1. PRIORIZE A AÇÃO. Se o usuário pedir dados, execute a query (run_sql) em vez de apenas mostrar o SQL.
-        2. Se for apenas conversa, responda em texto normal (Markdown).
-        3. Se for uma ação, responda APENAS o JSON.
-        4. Se o usuário pedir para criar uma tabela, use a ação 'draft_table' ou sugira o SQL.
-        5. Sempre seja cordial e profissional.
+        # FLUXO DE PENSAMENTO (IMPORTANTE):
+        - Se o usuário selecionar uma tabela após sua pergunta de clarificação, **LEMBRE-SE DO PEDIDO ORIGINAL**.
+        - Se o pedido original era "Mostre 5 registros", ASSIM QUE VOCÊ TIVER O NOME DA TABELA, execute 'run_sql'. NÃO execute 'describe_table' a menos que pedido explicitamente.
+        - Exemplo: User: "Mostre users" -> AI: "Qual tabela?" -> User: "TBL_USERS" -> AI: 'run_sql' (SELECT * ...).
+
+        # REGRAS DE COMPORTAMENTO (CRÍTICO)
+        1. **INTENÇÃO DE DADOS vs SCRIPT**:
+           - Se o usuário disser "Mostre os dados", "Traga os 10 primeiros", "Quem é o cliente X?" -> USE AÇÃO 'run_sql' ou 'find_record'.
+           - Se o usuário disser "Monte uma query", "Como faço para...", "Gere o SQL" -> APENAS MENSTRAR O CÓDIGO SQL (Markdown), NÃO EXECUTE.
+        2. **SINTAXE ORACLE**:
+           - Você é um DB Admin Oracle 19c. Não invente comandos MySQL/Postgres.
+        3. **AMBIGUIDADE E ALUCINAÇÃO (CRÍTICO)**:
+           - **NÃO ADIVINHE** prefixos ou owners se o usuário falar um nome genérico.
+           - Se o usuário disser "tabela pessoa":
+             ERRADO: Assumir 'INCORPORA.TB_OPE_PESSOA_FISICA'.
+             CERTO: Usar 'list_tables' com 'search_term: "PESSOA"'.
+           - **Prioridade de Busca**: Ao usar 'list_tables', o resultado já virá ordenado por relevância ('HUMASTER'/'INCORPORA' primeiro).
+           - **FALLBACK**: Se você buscar e não encontrar nada nestes owners principais:
+             1. Informe ao usuário: "Não encontrei em HUMASTER ou INCORPORA."
+             2. Sugira: "Deseja buscar em outros owners/schemas?"
+           - **AUDITORIA**: Se o usuário pedir "Auditoria de X":
+           - **AUDITORIA (Regra Estrita)**:
+             - Se o usuário pedir "Auditoria de X" ou "Tabela de Auditoria X":
+             - **PASSO 1**: Busque IMEDIATAMENTE por tabelas iniciando com 'AU_' ou 'AUDITORIA_' + nome.
+             - **PASSO 2**: Tente: 'list_tables' com 'search_term: "AU_{nome}"'.
+             - **NÃO** traga a tabela normal (ex: 'TB_PESSOA'). Traga a 'AU_PESSOA'.
+             - **NÃO ASUMA** nomes completos (ex: 'INCORPORA.AU_PESSOA_FISICA'). Busque 'AU_PESSOA'.
+           - **REGRA DE OURO (SEM ERRO)**:
+             1. Se o usuário falar um nome genérico ("Pessoa", "Produto") -> BUSQUE ('list_tables').
+             2. Se o usuário falar "Auditoria de Pessoa" -> BUSQUE ('list_tables' com 'PESSOA').
+             3. SÓ EXECUTE ('run_sql'/'find_record') se o usuário tiver **CONFIRMADO** o nome técnico exato antes ou se ele digitar o nome exato (ex: 'HUMASTER.TB_PESSOA').
+           - **JAMAIS** pergunte "Qual tabela?" sem oferecer opções (use 'list_tables' para gerar essas opções).
+        
+        # EXEMPLOS DE COMPORTAMENTO CORRETO:
+        User: "Mostre os dados da tabela de clientes" 
+        AI: { "action": "list_tables", "params": { "search_term": "clientes" } } 
+        (Explicação: "clientes" é genérico. Eu não sei qual é a tabela real. Busco primeiro.)
+
+        User: "Mostre os dados da TBL_CLIENTES_V1"
+        AI: { "action": "run_sql", "params": { "sql": "SELECT * FROM TBL_CLIENTES_V1 FETCH NEXT 10 ROWS ONLY" } }
+        (Explicação: O usuário deu o nome exato. Posso executar.)
+
+        User: "Quantos registros tem na tabela de pedidos?"
+        AI: { "action": "list_tables", "params": { "search_term": "pedidos" } }
         `;
 
+        // --- 1.2 HANDLE CONTEXTUAL FILTERING (Phase 7 - Backend Injection) ---
+        // --- 1.2 HANDLE CONTEXTUAL FILTERING (Phase 7 - Backend Injection) ---
+        let contextInjection = "";
+        const session = this.getSession(userId);
+        if (session.lastTable) {
+            contextInjection = `\n# CONTEXTO ATIVO ("DATA MODE"):
+             O usuário está visualizando a tabela: "${session.lastTable}".
+             
+             ## REGRAS DE FILTRO (CRÍTICO):
+             1. **FULL TABLE SCAN**: O usuário quer filtrar a tabela inteira no banco, NÃO apenas o que vê na tela.
+             2. **GERAÇÃO DE SQL**: Para qualquer pedido de filtro (ex: "apenas ativos", "de 2023", "nome joao"), você DEVE gerar um JSON 'run_sql'.
+             3. **NÃO EXPLIQUE**: Não diga "Vou filtrar...". Apenas gere o JSON.
+             4. **DATAS**:
+                - Se pedir "intervalo" ou "entre datas", use: \`WHERE CAMPO BETWEEN TO_DATE('...', 'YYYY-MM-DD') AND TO_DATE('...', 'YYYY-MM-DD')\`.
+                - Se pedir "mês passado", calcule as datas e use o BETWEEN explicitamente.
+             5. **SQL**: \`SELECT * FROM ${session.lastTable} WHERE ... FETCH NEXT 50 ROWS ONLY\`.
+             \n`;
+        }
+
         const messages = [
-            { role: "system", content: systemPrompt },
+            { role: "system", content: systemPrompt + contextInjection },
             ...history.map(h => ({ role: h.sender === 'user' ? 'user' : 'assistant', content: h.text })),
             { role: "user", content: message }
         ];
@@ -164,11 +415,13 @@ class AiService {
             const completion = await this.groq.chat.completions.create({
                 messages: messages,
                 model: this.modelName,
-                temperature: 0.3,
+                temperature: 0.1,
+                response_format: { type: "json_object" },
                 stop: null
             });
 
             const content = completion.choices[0]?.message?.content || "";
+            console.log("[DEBUG] Groq Raw Content:", content); // Debug Log
 
             // Try to parse JSON action
             try {
@@ -179,14 +432,17 @@ class AiService {
                     const actionData = JSON.parse(jsonStr);
 
                     if (actionData.action) {
+                        // Normalize data/params
+                        const payload = actionData.params || actionData.data || actionData.parameters || actionData.arguments || {};
                         return await this.executeAction({
                             action: actionData.action,
-                            data: actionData.params || actionData.data,
+                            data: payload,
                             text: null // Let executeAction generate the text
                         });
                     }
                 }
             } catch (e) {
+                console.error("JSON Parse Error (Attempted recovery):", e);
                 // Not JSON, treat as text
             }
 
@@ -274,6 +530,47 @@ class AiService {
             }
         }
 
+        // Reset/Correction Intent
+        const resetMatch = cleanMsg.match(/(?:esqueça|esquecer|reaprender|corrigir)\s+(?:o\s+termo\s+)?(.+)/i);
+        if (resetMatch) {
+            return await this.executeAction({
+                action: 'reset_term',
+                data: { term: resetMatch[1].trim() },
+                text: `[Modo Aprendizado] Esquecendo associações para "${resetMatch[1].trim()}"...`
+            });
+        }
+
+        // Column Override Intent (New)
+        // Matches: "Use a coluna X", "Pelo campo Y", "Na coluna Z"
+        // Column Override Intent (Improved)
+        // Matches: "Use a coluna X", "Pelo campo Y", "Na coluna Z", "campo codigo"
+        const colOverrideMatch = cleanMsg.match(/(?:use|pelo|na|no|usar|testar)?\s*(?:a\s+)?(?:coluna|campo)\s+([a-zA-Z0-9_$]+)/i);
+        if (colOverrideMatch) {
+            const newCol = colOverrideMatch[1].trim().toUpperCase();
+
+            // Check if we have a previous search context to re-run immediately
+            if (this.conversationState && this.conversationState.lastAction === 'find_record') {
+                const lastData = this.conversationState.lastPayload;
+                // Update column and re-run
+                const newData = { ...lastData, column_name: newCol };
+
+                // Set override for safety
+                this.conversationState.columnOverride = newCol;
+
+                return await this.executeAction({
+                    action: 'find_record',
+                    data: newData,
+                    text: `[Correção] Entendido. Buscando em **${lastData.table_name}** usando a coluna **${newCol}**...`
+                });
+            }
+
+            return await this.executeAction({
+                action: 'column_override',
+                data: { columnName: newCol },
+                text: `[Modo Correção] Entendido. Vou usar a coluna **${newCol}** na próxima busca.`
+            });
+        }
+
         return {
             text: "🤖 [Modo Local] Não entendi. Tente usar formatos padrão como 'Buscar tabelas de X'.",
             action: null
@@ -283,6 +580,8 @@ class AiService {
     async executeAction(aiResponse) {
         let { action, data, text } = aiResponse;
         data = data || aiResponse.params || {};
+
+        console.log(`[DEBUG] executeAction: action=${action}, data=${JSON.stringify(data)}`);
 
         if (!text && data) {
             text = data.text || data.message || data.response || data.answer || data.content;
@@ -298,8 +597,25 @@ class AiService {
         }
 
         try {
+            if (action === 'clarification') {
+                const questionText = data.question || "Qual tabela você se refere?";
+                return {
+                    text: questionText,
+                    action: 'clarification',
+                    data: {
+                        question: questionText,
+                        options: data.options || []
+                    }
+                };
+            }
+
             if (action === 'list_tables') {
-                const term = data.search_term ? data.search_term.trim() : '';
+                // Robust extraction: Check search_term, term, value, name
+                const rawTerm = data.search_term || data.term || data.value || data.name || '';
+                const term = typeof rawTerm === 'string' ? rawTerm.trim() : '';
+
+                console.log(`[DEBUG] list_tables: term="${term}" (extracted from ${JSON.stringify(data)})`);
+
                 const objects = await db.findObjects(term);
                 if (objects.length === 0) {
                     return { text: `Hmm, não encontrei nenhuma tabela com **"${term}"**.`, action: 'chat' };
@@ -363,6 +679,20 @@ class AiService {
 
             if (action === 'run_sql') {
                 const sql = data.sql || "";
+
+                // --- TEACH NEURAL NETWORK ---
+                // If SQL contains JOINs, learn the connection
+                if (sql.toUpperCase().includes('JOIN')) {
+                    // Simple regex to find table names (very basic)
+                    const matches = sql.match(/FROM\s+([a-zA-Z0-9_$#]+)|JOIN\s+([a-zA-Z0-9_$#]+)/gi);
+                    if (matches && matches.length >= 2) {
+                        const tables = matches.map(m => m.split(/\s+/).pop());
+                        for (let i = 0; i < tables.length - 1; i++) {
+                            neuralService.addEdge(tables[i], tables[i + 1], 0.2, 'joined_in_query');
+                        }
+                    }
+                }
+
                 if (sql.trim().toUpperCase().startsWith('SELECT')) {
                     try {
                         const result = await db.executeQuery(sql, {}, 50); // Limit 50 rows
@@ -376,6 +706,22 @@ class AiService {
                     }
                 }
                 return { text: `SQL sugerido (Não executado automaticamente):\n\`\`\`sql\n${sql}\n\`\`\``, action: 'chat' };
+            }
+
+            if (action === 'create_routine') {
+                const routine = agentService.saveRoutine({
+                    name: data.name,
+                    goal: data.goal,
+                    steps: data.steps || []
+                });
+                return {
+                    text: `✅ **Rotina Criada!**\nNome: **${routine.name}**\nObjetivo: ${routine.goal}\n\nAgora você pode pedir "Executar rotina ${routine.name}".`,
+                    action: 'chat'
+                };
+            }
+
+            if (action === 'execute_routine') {
+                return await agentService.executeRoutine(data.name, this);
             }
 
             if (action === 'text_response') {
@@ -497,10 +843,25 @@ class AiService {
         return match;
     }
 
-    async performFindRecord(data) {
+    async performFindRecord(data, userId) {
+        const session = this.getSession(userId);
+
         let tableName = (data.table_name || "").toUpperCase();
         const valueRaw = data.value;
-        const columnName = data.column_name ? data.column_name.toUpperCase() : null;
+        let columnName = data.column_name ? data.column_name.toUpperCase() : null;
+
+        // Apply Override from SESSION if exists
+        if (session.columnOverride) {
+            console.log(`[AiService] Applying Column Override: ${session.columnOverride}`);
+            columnName = session.columnOverride;
+            // Clear it after use - single shot override
+            session.columnOverride = null;
+        }
+
+        // Store context for potential retry/override in SESSION
+        session.lastAction = 'find_record';
+        session.lastPayload = { ...data, column_name: columnName };
+        session.lastTable = tableName; // STICKY CONTEXT
 
         if (!tableName) return { text: "Por favor, informe o nome da tabela." };
 
@@ -515,10 +876,19 @@ class AiService {
                      WHERE OBJECT_TYPE IN ('TABLE','VIEW') 
                      AND (OBJECT_NAME = :name OR OBJECT_NAME LIKE '%' || :name || '%')
                      AND OWNER NOT IN ('SYS','SYSTEM') 
-                     FETCH NEXT 5 ROWS ONLY`,
+                     AND OWNER NOT IN ('SYS','SYSTEM')`,
                     { name: searchName }
                 );
                 if (similar.rows.length > 0) {
+                    // STORE STATE FOR LEARNING
+                    this.conversationState = {
+                        status: 'AWAITING_TABLE_SELECTION',
+                        payload: {
+                            originalTerm: tableName, // The ambiguous term (e.g., "PESSOA")
+                            originalData: data       // The full original request
+                        }
+                    };
+
                     return {
                         text: `Não encontrei a tabela **${tableName}**. Você quis dizer alguma dessas?`,
                         action: 'table_selection',
@@ -585,6 +955,16 @@ class AiService {
 
                 // If STILL null -> Interactive Filter Selection
                 if (!targetCol) {
+                    // STORE STATE FOR LEARNING
+                    this.conversationState = {
+                        status: 'AWAITING_COLUMN_SELECTION',
+                        payload: {
+                            tableName: tableName,
+                            originalTerm: columnName || valueRaw, // What was ambiguous
+                            originalData: data
+                        }
+                    };
+
                     return {
                         text: `Não sei em qual campo buscar o valor **"${valueRaw}"** na tabela **${tableName}**. Por favor, selecione:`,
                         action: 'column_selection',
@@ -615,6 +995,17 @@ class AiService {
                 }
 
                 if (missingCols.length > 0) {
+                    // STORE STATE FOR LEARNING (Projection)
+                    this.conversationState = {
+                        status: 'AWAITING_COLUMN_SELECTION',
+                        payload: {
+                            tableName: tableName,
+                            originalTerm: missingCols[0], // Learn the first missing one for now
+                            originalData: data,
+                            mode: 'projection'
+                        }
+                    };
+
                     return {
                         text: `Encontrei a coluna de busca (${targetCol.COLUMN_NAME}), mas não achei os campos para exibir: **${missingCols.join(', ')}**. Por favor, selecione o que deseja ver:`,
                         action: 'column_selection',

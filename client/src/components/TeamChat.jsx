@@ -320,7 +320,7 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                                         {/* Docs Integration */}
                                         <div className="border-b border-gray-100 pb-2 mb-2">
                                             <span className="text-xs font-bold px-2 text-blue-600 block mb-1">Documentação</span>
-                                            <DocsSelector onShare={(data) => handleShare(data.type || 'DOC', data)} />
+                                            <DocsSelector onShare={(data) => handleShare(data.type || 'DOC', data)} user={user} />
                                         </div>
 
                                         {/* Saved SQL */}
@@ -380,6 +380,112 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                                 setSavedQueries(prev => [...prev, data]);
                                 showToast("Query adicionada com sucesso!");
                             }
+                        } else if (type === 'DOC' || type === 'PAGE') {
+                            // NEW: Handle Shared Doc/Page safely (Copy instead of Move)
+                            // We need to ask user WHERE to put it, or just put it in a "Shared with Me" book?
+                            // For MVP urgency fix: Create a "Recebidos" book if not exists, or ask backend to do it.
+                            // But we don't have book creation logic here easily.
+                            // Let's assume we copy it to a new Book called "Importados" or similar, OR 
+                            // Since we can't easily pop a modal here without refactoring, let's auto-create a Book "Itens Compartilhados"
+                            // and add it there.
+
+                            // Better: Just tell the user we are importing.
+                            // We will call the new /api/docs/nodes/copy endpoint.
+                            // We need a target Book ID. We'll fetch books first.
+
+                            const importSharedDoc = async () => {
+                                try {
+                                    // 1. Get Books
+                                    const headers = {};
+                                    if (user?.username) headers['x-username'] = user.username;
+
+                                    const resBooks = await fetch(`${apiUrl}/api/docs/books`, { headers });
+                                    const books = await resBooks.json();
+
+                                    let targetBook = books.find(b => b.NM_TITLE === 'Itens Compartilhados');
+                                    if (!targetBook) {
+                                        // Create it
+                                        const resCreate = await fetch(`${apiUrl}/api/docs/books`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                ...(user?.username ? { 'x-username': user.username } : {})
+                                            },
+                                            body: JSON.stringify({ title: 'Itens Compartilhados', description: 'Documentos recebidos via chat' })
+                                        });
+                                        const newBookData = await resCreate.json();
+                                        // The create endpoint returns { id: ... } ? No, look at DocsModule... 
+                                        // DocsModule: res.json(); fetchBooks();
+                                        // LocalDocService: returns ID. 
+                                        // Wait, index.js: res.json({ id }) ? No, index.js calls createBook and returns result.
+                                        // Let's check index.js: app.post('/api/docs/books') -> docService.createBook -> returns ID.
+                                        // Response is res.json(id). (Actually index.js line 1241 for createNode returns object {id}).
+                                        // check createBook in index.js (I probably missed viewing it, but let's assume standard)
+
+                                        // If I can't be sure, I'll filter books again. 
+                                        // Actually simplest is to just use a fixed ID? No.
+
+                                        // Let's try to assume we can default to the First Book if "Itens Compartilhados" fails?
+                                        // No, let's create it.
+                                    }
+
+                                    // Re-fetch to get ID
+                                    const resBooks2 = await fetch(`${apiUrl}/api/docs/books`, { headers });
+                                    const books2 = await resBooks2.json();
+                                    targetBook = books2.find(b => b.NM_TITLE === 'Itens Compartilhados');
+
+                                    if (!targetBook) {
+                                        if (books2.length > 0) targetBook = books2[0]; // Fallback
+                                        else { showToast("Crie um livro primeiro!", "error"); return; }
+                                    }
+
+                                    // 2. Call Copy
+                                    const resCopy = await fetch(`${apiUrl}/api/docs/nodes/copy`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                            nodeId: data.ID_NODE || data.id, // Support legacy
+                                            targetBookId: targetBook.ID_BOOK,
+                                            targetParentId: null, // Root
+                                            newIndex: 9999
+                                        })
+                                    });
+
+                                    if (resCopy.ok) {
+                                        showToast(`Importado para "${targetBook.NM_TITLE}" com sucesso!`);
+                                    } else {
+                                        showToast("Falha ao importar documento.", "error");
+                                    }
+                                } catch (e) {
+                                    console.error(e);
+                                    showToast("Erro ao processar documento.", "error");
+                                }
+                            };
+                            importSharedDoc();
+
+                        } else if (type === 'BOOK') {
+                            const importBook = async () => {
+                                try {
+                                    const res = await fetch(`${apiUrl}/api/docs/books/copy`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                            sourceBookId: data.bookId || data.id,
+                                            newTitle: data.title
+                                        })
+                                    });
+                                    if (res.ok) {
+                                        showToast(`Livro "${data.title}" importado com sucesso!`);
+                                    } else {
+                                        showToast("Erro ao importar livro.", "error");
+                                    }
+                                } catch (e) {
+                                    console.error(e);
+                                    showToast("Erro ao processar livro.", "error");
+                                }
+                            };
+                            importBook();
+
                         } else if (type === 'REMINDER') {
                             if (reminders.some(r => r.id === data.id)) {
                                 showToast("Lembrete já existe ou foi atualizado.", 'error');

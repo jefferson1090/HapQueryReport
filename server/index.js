@@ -1,3 +1,4 @@
+
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
@@ -5,7 +6,13 @@ const cors = require('cors');
 const oracledb = require('oracledb');
 const db = require('./db');
 const aiService = require('./services/aiService');
+const agentService = require('./services/agentService');
+const neuralService = require('./services/neuralService');
+
 const learningService = require('./services/learningService');
+const chatService = require('./services/chatService');
+// const docsChatService = require('./services/docsChatService');
+const knowledgeService = require('./services/knowledgeService');
 const multer = require('multer');
 // const path = require('path'); // Already imported at top
 const os = require('os');
@@ -42,7 +49,6 @@ const io = new Server(server, {
   }
 });
 
-const chatService = require('./services/chatService');
 chatService.setSocketIo(io);
 
 const PORT = process.env.PORT || 3001;
@@ -82,14 +88,14 @@ if (!fs.existsSync(uploadsDir)) {
   try {
     fs.mkdirSync(uploadsDir, { recursive: true });
   } catch (err) {
-    console.error(`Failed to create uploads dir at ${uploadsDir}: ${err.message}`);
-    debugLog(`Failed to create uploads dir at ${uploadsDir}: ${err.message}`);
+    console.error(`Failed to create uploads dir at ${uploadsDir}: ${err.message} `);
+    debugLog(`Failed to create uploads dir at ${uploadsDir}: ${err.message} `);
     // Fallback to temp
     uploadsDir = path.join(os.tmpdir(), 'hap-query-report-uploads');
     if (!fs.existsSync(uploadsDir)) {
       try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (e) { /* give up */ }
     }
-    console.log(`Falling back to uploads directory: ${uploadsDir}`);
+    console.log(`Falling back to uploads directory: ${uploadsDir} `);
   }
 }
 
@@ -139,7 +145,7 @@ try {
     }
   }
 
-  debugLog(`Initializing Oracle Client from: ${clientPath}`);
+  debugLog(`Initializing Oracle Client from: ${clientPath} `);
   oracledb.initOracleClient({ libDir: clientPath });
   debugLog('Oracle Client initialized successfully');
 } catch (err) {
@@ -157,15 +163,15 @@ try {
 // In production/packaged mode, serve the React app from 'client/dist'
 const clientDistPath = path.join(__dirname, '..', 'client', 'dist');
 if (fs.existsSync(clientDistPath)) {
-  console.log(`[DEBUG] Serving static files from: ${clientDistPath}`);
-  console.log(`[DEBUG] Directory contents: ${fs.readdirSync(clientDistPath).join(', ')}`);
+  console.log(`[DEBUG] Serving static files from: ${clientDistPath} `);
+  console.log(`[DEBUG] Directory contents: ${fs.readdirSync(clientDistPath).join(', ')} `);
   app.use(express.static(clientDistPath));
   // SPA Fallback
   app.get(/.*/, (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
       return next();
     }
-    console.log(`[DEBUG] Serving index.html for path: ${req.path}`);
+    console.log(`[DEBUG] Serving index.html for path: ${req.path} `);
     res.sendFile(path.join(clientDistPath, 'index.html'));
   });
 } else {
@@ -190,7 +196,7 @@ app.post('/api/connect', async (req, res) => {
 app.post('/api/chat/register', async (req, res) => {
   try {
     const { username, password, team } = req.body;
-    console.log(`Registering user: ${username}`);
+    console.log(`Registering user: ${username} `);
     await chatService.registerUser(username, password, team);
     res.json({ success: true });
   } catch (e) {
@@ -203,7 +209,7 @@ app.post('/api/chat/register', async (req, res) => {
 app.post('/api/chat/register', async (req, res) => {
   try {
     const { username, password, team } = req.body;
-    console.log(`Registering user: ${username}`);
+    console.log(`Registering user: ${username} `);
     const result = await chatService.registerUser(username, password, team);
     res.json(result);
   } catch (e) {
@@ -215,7 +221,7 @@ app.post('/api/chat/register', async (req, res) => {
 app.post('/api/chat/login', async (req, res) => {
   try {
     const { username, password } = req.body;
-    console.log(`Logging in user: ${username}`);
+    console.log(`Logging in user: ${username} `);
     const result = await chatService.loginUser(username, password);
     if (result.success) res.json(result);
     else res.status(401).json(result);
@@ -242,7 +248,7 @@ io.on('connection', (socket) => {
     const username = typeof data === 'object' ? data.username : data;
     const team = typeof data === 'object' ? data.team : 'Geral';
 
-    console.log(`[DEBUG] Socket JOIN received: ${username} (${team}) ID: ${socket.id}`);
+    console.log(`[DEBUG] Socket JOIN received: ${username} (${team}) ID: ${socket.id} `);
 
     chatService.users.set(socket.id, { username, team });
 
@@ -260,7 +266,7 @@ io.on('connection', (socket) => {
     // Also explicitly send to the joining socket to be sure
     socket.emit('update_user_list', userList);
 
-    console.log(`${username} (${team}) joined chat. Total users: ${userList.length}`);
+    console.log(`${username} (${team}) joined chat.Total users: ${userList.length} `);
   });
 
   // Typing Indicators
@@ -314,7 +320,7 @@ io.on('connection', (socket) => {
 
   socket.on('share_item', async (data) => {
     // data: { sender, recipient, itemType, itemData }
-    console.log(`[Share] ${data.sender} -> ${data.recipient} type: ${data.itemType}`);
+    console.log(`[Share] ${data.sender} -> ${data.recipient} type: ${data.itemType} `);
 
     try {
       // Use ChatService to handle persistence and broadcasing (via Adapter if active)
@@ -322,7 +328,7 @@ io.on('connection', (socket) => {
       const metadata = { itemType: data.itemType, itemData: data.itemData };
 
       // This will trigger SupabaseAdapter.sendMessage, which now handles serialization correctly
-      await chatService.saveMessage(data.sender, `Compartilhou um ${data.itemType}`, type, metadata, data.recipient);
+      await chatService.saveMessage(data.sender, `Compartilhou um ${data.itemType} `, type, metadata, data.recipient);
 
     } catch (e) {
       console.error("Share error:", e);
@@ -340,7 +346,7 @@ io.on('connection', (socket) => {
 
   socket.on('message_reaction', async (data) => {
     // data: { messageId, emoji, username }
-    console.log(`[Socket] Received reaction from ${data.username}: ${data.emoji} on msg ${data.messageId}`);
+    console.log(`[Socket] Received reaction from ${data.username}: ${data.emoji} on msg ${data.messageId} `);
     try {
       await chatService.addReaction(data.messageId, data.emoji, data.username);
       // Broadcast reaction to update UI
@@ -356,7 +362,7 @@ io.on('connection', (socket) => {
     if (!data.messageIds || data.messageIds.length === 0) return;
     try {
       await chatService.markAsRead(data.messageIds); // This triggers adapter update -> listener -> emit
-      console.log(`[Socket] Marked ${data.messageIds.length} msgs as read by ${data.username}`);
+      console.log(`[Socket] Marked ${data.messageIds.length} msgs as read by ${data.username} `);
     } catch (e) {
       console.error("MarkRead error:", e);
     }
@@ -460,10 +466,10 @@ app.post('/api/ai/create-table-confirm', async (req, res) => {
 app.post('/api/ai/chat', async (req, res) => {
   try {
     console.log('[DEBUG] POST /api/ai/chat received');
-    const { message, mode, history } = req.body;
-    console.log(`[DEBUG] Processing message in mode: ${mode}, content: ${message?.substring(0, 50)}...`);
+    const { message, mode, history, userId } = req.body;
+    console.log(`[DEBUG] Processing message in mode: ${mode}, user: ${userId}, content: ${message?.substring(0, 50)}...`);
 
-    const result = await aiService.processMessage(message, mode, history);
+    const result = await aiService.processMessage(message, mode, history, userId);
     console.log('[DEBUG] processMessage result:', JSON.stringify(result));
 
     if (result === undefined) {
@@ -522,7 +528,7 @@ app.post('/api/query', async (req, res) => {
       });
 
       if (whereClauses.length > 0) {
-        finalSql = `SELECT * FROM (${sql}\n) WHERE ${whereClauses.join(' AND ')}`;
+        finalSql = `SELECT * FROM(${sql}\n) WHERE ${whereClauses.join(' AND ')} `;
       }
     }
 
@@ -537,7 +543,7 @@ app.post('/api/query/count', async (req, res) => {
   const { sql, params } = req.body;
   try {
     const cleanSql = sql.trim().replace(/;$/, '');
-    const countSql = `SELECT COUNT(*) FROM (${cleanSql}\n)`;
+    const countSql = `SELECT COUNT(*) FROM(${cleanSql}\n)`;
     const result = await db.executeQuery(countSql, params || []);
     res.json({ count: result.rows[0][0] });
   } catch (err) {
@@ -580,7 +586,7 @@ app.post('/api/export/csv', async (req, res) => {
       });
 
       if (whereClauses.length > 0) {
-        finalSql = `SELECT * FROM (${sql}\n) WHERE ${whereClauses.join(' AND ')}`;
+        finalSql = `SELECT * FROM(${sql}\n) WHERE ${whereClauses.join(' AND ')} `;
       }
     }
 
@@ -588,7 +594,7 @@ app.post('/api/export/csv', async (req, res) => {
     conn = connection;
 
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="export_${Date.now()}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename = "export_${Date.now()}.csv"`);
     res.write('\ufeff'); // BOM
 
     stream.on('metadata', (meta) => {
@@ -954,7 +960,7 @@ app.post('/api/cancel-import/:jobId', (req, res) => {
 // AI Text Processing Endpoint
 app.post('/api/ai/text', async (req, res) => {
   try {
-    const { text, instruction } = req.body;
+    const { text, instruction, history } = req.body;
     console.log(`[AI Endpoint] Received request. Text length: ${text?.length}, Instruction: ${instruction?.substring(0, 50)}...`);
 
     if (!text || !instruction) {
@@ -962,17 +968,36 @@ app.post('/api/ai/text', async (req, res) => {
       return res.status(400).json({ error: 'Missing text or instruction' });
     }
 
-    // Ensure aiService has the method
-    if (!aiService.processText) {
-      return res.status(503).json({ error: 'AI Service capabilities not fully loaded' });
+    // Pass history to aiService
+    if (!aiService.processWithGroq) { // Check specific method if needed
+      // fallback or error
     }
 
-    const result = await aiService.processText(text, instruction);
+    const result = await aiService.processWithGroq(text || instruction, history || []);
     res.json({ result });
   } catch (e) {
     console.error("AI Route Error:", e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// AI Feedback / Learning Endpoint
+app.post('/api/ai/feedback', (req, res) => {
+  try {
+    const { term, value, type, context } = req.body;
+    if (!term || !value || !type) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+    const result = knowledgeService.learn(term, value, type, context);
+    res.json({ success: true, learned: result });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// AI Knowledge Debug Endpoint
+app.get('/api/ai/knowledge', (req, res) => {
+  res.json(knowledgeService.knowledge);
 });
 
 function analyzeCsvStructure(headers, rows) {
@@ -1117,9 +1142,14 @@ app.get('/api/docs/search-index', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Helper to get user from headers
+const getUser = (req) => req.headers['x-username'] || 'USER';
+
 app.get('/api/docs/books', async (req, res) => {
   try {
-    const books = await docService.listBooks();
+    const owner = getUser(req);
+    console.log(`[Docs] Listing books for owner: '${owner}' (Header: ${req.headers['x-username']})`);
+    const books = await docService.listBooks(owner);
     res.json(books);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1127,8 +1157,10 @@ app.get('/api/docs/books', async (req, res) => {
 app.post('/api/docs/books', async (req, res) => {
   try {
     const { title, description } = req.body;
-    const id = await docService.createBook(title, description);
-    res.json({ id, message: 'Book created' });
+    const owner = getUser(req);
+    console.log(`[Docs] Creating book '${title}' for owner: '${owner}'`);
+    const id = await docService.createBook(title, description, owner);
+    res.json({ id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1258,6 +1290,23 @@ app.post('/api/docs/nodes/move', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/docs/nodes/copy', async (req, res) => {
+  try {
+    const { nodeId, targetBookId, targetParentId, newIndex } = req.body;
+    const newId = await docService.copyNode(nodeId, targetBookId, targetParentId, newIndex);
+    res.json({ success: true, newId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/docs/books/copy', async (req, res) => {
+  try {
+    const { sourceBookId, newTitle } = req.body;
+    const owner = getUser(req);
+    const newId = await docService.copyBook(sourceBookId, newTitle, owner);
+    res.json({ success: true, newId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.delete('/api/docs/nodes/:id', async (req, res) => {
   try {
     await docService.deleteNode(req.params.id);
@@ -1284,6 +1333,82 @@ app.get(/.*/, (req, res) => {
   res.sendFile(path.join(rootDir, 'public', 'index.html'));
 });
 
+// --- ADMIN HIVE MIND ROUTES ---
+
+app.get('/api/ai/admin/memory', async (req, res) => {
+  try {
+    if (!chatService.adapter) return res.status(503).json({ error: "Supabase not connected" });
+    // Fetch ALL memory (not just verified) for review
+    const { data, error } = await chatService.adapter.client
+      .from('ai_global_memory')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (e) {
+    console.error("Admin Memory Fetch Error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/api/ai/admin/memory/:id', async (req, res) => {
+  try {
+    if (!chatService.adapter) return res.status(503).json({ error: "Supabase not connected" });
+    const { validation_status } = req.body;
+
+    const { error } = await chatService.adapter.client
+      .from('ai_global_memory')
+      .update({ validation_status })
+      .eq('id', req.params.id);
+
+    if (error) throw error;
+
+    // If approved, trigger a sync for the current server context too?
+    // Maybe logic: If approved, it becomes 'VERIFIED' and next sync picks it up.
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("Admin Memory Update Error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/ai/admin/config', async (req, res) => {
+  try {
+    if (!chatService.adapter) return res.status(503).json({ error: "Supabase not connected" });
+    const { data, error } = await chatService.adapter.client
+      .from('ai_config')
+      .select('key, value');
+
+    if (error) throw error;
+
+    // Transform array to object
+    const config = {};
+    data.forEach(item => config[item.key] = item.value);
+    res.json(config);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/ai/admin/config', async (req, res) => {
+  try {
+    const { key, value } = req.body;
+    if (!chatService.adapter) return res.status(503).json({ error: "Supabase not connected" });
+
+    const { error } = await chatService.adapter.client
+      .from('ai_config')
+      .upsert({ key, value });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
 // Start Server Function
 const startServer = (port) => {
   return new Promise((resolve, reject) => {
@@ -1293,12 +1418,22 @@ const startServer = (port) => {
 
       // Run Database Cleanup on Startup (Keep last 90 days)
       try {
-        setTimeout(() => {
+        setTimeout(async () => {
           console.log("Running scheduled cleanup...");
           chatService.cleanup(30);
-        }, 10000); // Delay 10s to not slow down startup
+
+          // Phase 4: Hive Mind Sync (Context Awareness)
+          // Wait for ChatService to establish Supabase connection
+          if (chatService.adapter) {
+            console.log("[Hive Mind] Initiating Knowledge Sync...");
+            await neuralService.sync(chatService.adapter);
+          } else {
+            console.warn("[Hive Mind] Supabase Adapter not ready. Skipping Sync.");
+          }
+
+        }, 5000); // Delay 5s to ensure connection and not slow down startup
       } catch (e) {
-        console.error("Cleanup error:", e);
+        console.error("Startup tasks error:", e);
       }
 
       resolve();

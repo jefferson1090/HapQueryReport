@@ -206,7 +206,7 @@ const BookItem = ({ book, pages, expanded, onToggle, onAddPage, activeId, onSele
     );
 };
 
-const DocsModule = ({ pendingDoc, onDocHandled }) => {
+const DocsModule = ({ pendingDoc, onDocHandled, user }) => {
     const { theme } = useContext(ThemeContext);
     const [books, setBooks] = useState([]);
     const [pagesMap, setPagesMap] = useState({}); // { [bookId]: [pages...] }
@@ -233,7 +233,7 @@ const DocsModule = ({ pendingDoc, onDocHandled }) => {
     // Load Books
     useEffect(() => {
         fetchBooks();
-    }, []);
+    }, [user?.username]);
 
     // Handle Pending Doc (Deep Link / Share)
     useEffect(() => {
@@ -270,7 +270,10 @@ const DocsModule = ({ pendingDoc, onDocHandled }) => {
 
     const fetchBooks = async () => {
         try {
-            const res = await fetch('http://localhost:3001/api/docs/books');
+            const headers = {};
+            if (user?.username) headers['x-username'] = user.username;
+
+            const res = await fetch('http://localhost:3001/api/docs/books', { headers });
             const data = await res.json();
             setBooks(data);
         } catch (e) { console.error(e); }
@@ -323,7 +326,10 @@ const DocsModule = ({ pendingDoc, onDocHandled }) => {
             // Fixed correct endpoint
             await fetch(`http://localhost:3001/api/docs/nodes/${pageId}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(user?.username ? { 'x-username': user.username } : {})
+                },
                 body: JSON.stringify({ content })
             });
             // Update local state to avoid stale content on re-select
@@ -361,7 +367,10 @@ const DocsModule = ({ pendingDoc, onDocHandled }) => {
             try {
                 const res = await fetch('http://localhost:3001/api/docs/nodes', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(user?.username ? { 'x-username': user.username } : {})
+                    },
                     body: JSON.stringify({
                         bookId: bookId,
                         parentId: null, // Always root of book for now
@@ -528,7 +537,10 @@ const DocsModule = ({ pendingDoc, onDocHandled }) => {
         try {
             const res = await fetch('http://localhost:3001/api/docs/books', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(user?.username ? { 'x-username': user.username } : {})
+                },
                 body: JSON.stringify({ title, description: '' })
             });
             if (res.ok) {

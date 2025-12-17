@@ -75,8 +75,21 @@ class LocalDocService {
     }
 
     // --- BOOKS ---
-    async listBooks() {
-        return readBooks().sort((a, b) => new Date(b.DT_CREATED) - new Date(a.DT_CREATED));
+    async listBooks(owner) {
+        let books = readBooks();
+        if (owner) {
+            // Filter: Owner matches OR Owner is 'USER' (legacy/default) OR Owner is missing (legacy)
+            // Strict mode: Only matches owner.
+            // Transition: matches owner OR !b.CD_OWNER OR b.CD_OWNER === 'USER' (shared/legacy)
+            // User requested: "different users" seeing things. So we want strict isolation for NEW things. 
+            // OLD things: visible to all?
+            // Strategy: Show my books + Public books (no owner or 'USER')? 
+            // If I want strict separation, I should only show MY books.
+            // But if I hide legacy books, users lose access.
+            // Compromise: Show books where owner == owner OR owner is falsy/USER.
+            books = books.filter(b => !b.CD_OWNER || b.CD_OWNER === 'USER' || b.CD_OWNER === owner);
+        }
+        return books.sort((a, b) => new Date(b.DT_CREATED) - new Date(a.DT_CREATED));
     }
 
     async createBook(title, description, owner = 'USER') {
@@ -373,6 +386,146 @@ class LocalDocService {
         writeStructure(targetBookId, finalNodes);
 
         return true;
+    }
+
+    async copyNode(nodeId, targetBookId, targetParentId, newIndex) {
+        const books = readBooks();
+        let sourceBookId = null;
+        let nodeToCopy = null;
+
+        for (const book of books) {
+            const nodes = readStructure(book.ID_BOOK);
+            const node = nodes.find(n => n.ID_NODE == nodeId);
+            if (node) {
+                sourceBookId = book.ID_BOOK;
+                nodeToCopy = { ...node };
+                break;
+            }
+        }
+
+        if (!nodeToCopy) throw new Error("Source node not found");
+
+        const targetNodes = readStructure(targetBookId);
+
+        const copyRecursive = (originalNode, pId) => {
+            const newId = Date.now() + Math.floor(Math.random() * 100000);
+
+            const newNode = {
+                ...originalNode,
+                ID_NODE: newId,
+                ID_BOOK: targetBookId,
+                ID_PARENT_NODE: pId,
+                DT_UPDATED: new Date().toISOString()
+            };
+
+            const sourcePath = path.join(getBookDir(sourceBookId), `${originalNode.ID_NODE}.html`);
+            const targetPath = path.join(getBookDir(targetBookId), `${newId}.html`);
+
+            if (fs.existsSync(sourcePath)) {
+                fs.copyFileSync(sourcePath, targetPath);
+            } else {
+                fs.writeFileSync(targetPath, '', 'utf-8');
+            }
+
+            return newNode;
+        };
+
+        const newRoot = copyRecursive(nodeToCopy, targetParentId);
+
+        const siblings = targetNodes.filter(n => n.ID_PARENT_NODE == targetParentId);
+        const nonSiblings = targetNodes.filter(n => n.ID_PARENT_NODE != targetParentId);
+
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex > siblings.length) newIndex = siblings.length;
+
+        siblings.splice(newIndex, 0, newRoot);
+
+        siblings.forEach((sib, idx) => sib.NU_ORDER = idx);
+
+        let finalNodes = [...nonSiblings, ...siblings];
+
+        const sourceBookNodes = readStructure(sourceBookId);
+
+        const copyDescendants = (originalId, newId) => {
+            const children = sourceBookNodes.filter(n => n.ID_PARENT_NODE == originalId);
+            for (const child of children) {
+                const newChild = copyRecursive(child, newId);
+                finalNodes.push(newChild);
+                copyDescendants(child.ID_NODE, newChild.ID_NODE);
+            }
+        };
+
+        copyDescendants(nodeToCopy.ID_NODE, newRoot.ID_NODE);
+
+        writeStructure(targetBookId, finalNodes);
+
+        return newRoot.ID_NODE;
+    }
+
+    async copyBook(sourceBookId, newTitle, newOwner) {
+        const books = readBooks();
+        const sourceBook = books.find(b => b.ID_BOOK == sourceBookId);
+        if (!sourceBook) throw new Error("Source book not found");
+
+        // 1. Create New Book
+        const newBookId = Date.now();
+        const newBook = {
+            ID_BOOK: newBookId,
+            NM_TITLE: newTitle || `${sourceBook.NM_TITLE} (Cópia)`,
+            DS_DESCRIPTION: sourceBook.DS_DESCRIPTION,
+            CD_OWNER: newOwner || 'USER',
+            DT_CREATED: new Date().toISOString()
+        };
+        books.push(newBook);
+        writeBooks(books);
+
+        // Create Dir
+        const newDir = getBookDir(newBookId);
+        if (!fs.existsSync(newDir)) fs.mkdirSync(newDir, { recursive: true });
+
+        // 2. Read Source Structure
+        const sourceNodes = readStructure(sourceBookId);
+        const sourceRoots = sourceNodes.filter(n => !n.ID_PARENT_NODE);
+
+        const newNodes = [];
+
+        // Helper to copy tree
+        const copyTree = (nodesToCopy, parentId) => {
+            for (const node of nodesToCopy) {
+                const newId = Date.now() + Math.floor(Math.random() * 100000);
+
+                // Copy Node Data
+                const newNode = {
+                    ...node,
+                    ID_NODE: newId,
+                    ID_BOOK: newBookId,
+                    ID_PARENT_NODE: parentId,
+                    DT_UPDATED: new Date().toISOString()
+                };
+                newNodes.push(newNode);
+
+                // Copy Content
+                const sourcePath = path.join(getBookDir(sourceBookId), `${node.ID_NODE}.html`);
+                const targetPath = path.join(getBookDir(newBookId), `${newId}.html`);
+                if (fs.existsSync(sourcePath)) {
+                    fs.copyFileSync(sourcePath, targetPath);
+                } else {
+                    fs.writeFileSync(targetPath, '', 'utf-8');
+                }
+
+                // Recurse children
+                const children = sourceNodes.filter(n => n.ID_PARENT_NODE == node.ID_NODE);
+                copyTree(children, newId);
+            }
+        };
+
+        // Start Copy
+        copyTree(sourceRoots, null);
+
+        // Write Structure
+        writeStructure(newBookId, newNodes);
+
+        return newBookId;
     }
 }
 

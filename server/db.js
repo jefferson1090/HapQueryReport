@@ -101,7 +101,7 @@ async function findObjects(term) {
         }
 
         const exactResult = await conn.execute(
-            `${baseQuery} ${exactWhere} ORDER BY OWNER, OBJECT_NAME`,
+            `${baseQuery} ${exactWhere} ORDER BY (CASE WHEN OWNER IN ('INCORPORA', 'HUMASTER') THEN 0 ELSE 1 END), OWNER, OBJECT_NAME`,
             exactParams
         );
 
@@ -117,7 +117,7 @@ async function findObjects(term) {
         // 2. Fuzzy Match (Fallback)
         const fuzzyParams = { term: `%${term.toUpperCase()}%` };
         const fuzzyResult = await conn.execute(
-            `${baseQuery} AND UPPER(OBJECT_NAME) LIKE :term ORDER BY OBJECT_TYPE, OWNER, OBJECT_NAME FETCH NEXT 50 ROWS ONLY`,
+            `${baseQuery} AND UPPER(OBJECT_NAME) LIKE :term ORDER BY OBJECT_TYPE, (CASE WHEN OWNER IN ('INCORPORA', 'HUMASTER') THEN 0 ELSE 1 END), OWNER, OBJECT_NAME`,
             fuzzyParams
         );
 

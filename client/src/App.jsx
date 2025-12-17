@@ -588,6 +588,7 @@ function App() {
                                     <DocsModule
                                         pendingDoc={pendingDoc}
                                         onDocHandled={() => setPendingDoc(null)}
+                                        user={chatUser}
                                     />
                                 </ErrorBoundary>
                             </div>

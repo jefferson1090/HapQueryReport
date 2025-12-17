@@ -1,0 +1,92 @@
+{
+  "nodes": {
+    "CLIENTE": {
+      "id": "CLIENTE",
+      "type": "concept",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
+    },
+    "VENDA": {
+      "id": "VENDA",
+      "type": "concept",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
+    },
+    "PRODUTO": {
+      "id": "PRODUTO",
+      "type": "concept",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
+    },
+    "ESTOQUE": {
+      "id": "ESTOQUE",
+      "type": "concept",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
+    },
+    "PESSOA": {
+      "id": "PESSOA",
+      "type": "auto",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
+    },
+    "HUMASTER.TB_PESSOA": {
+      "id": "HUMASTER.TB_PESSOA",
+      "type": "auto",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
+    },
+    "AU_PESSOA": {
+      "id": "AU_PESSOA",
+      "type": "auto",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
+    },
+    "HUMASTER.AU_PESSOA": {
+      "id": "HUMASTER.AU_PESSOA",
+      "type": "auto",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
+    }
+  },
+  "edges": [
+    {
+      "from": "CLIENTE",
+      "to": "VENDA",
+      "weight": 0.9,
+      "relation": "performs"
+    },
+    {
+      "from": "VENDA",
+      "to": "PRODUTO",
+      "weight": 0.9,
+      "relation": "contains"
+    },
+    {
+      "from": "PRODUTO",
+      "to": "ESTOQUE",
+      "weight": 0.8,
+      "relation": "tracked_by"
+    },
+    {
+      "from": "PESSOA",
+      "to": "HUMASTER.TB_PESSOA",
+      "weight": 1,
+      "relation": "is_alias_of"
+    },
+    {
+      "from": "AU_PESSOA",
+      "to": "HUMASTER.AU_PESSOA",
+      "weight": 1,
+      "relation": "is_alias_of"
+    }
+  ]
+}

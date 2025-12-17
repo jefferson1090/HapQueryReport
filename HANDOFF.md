@@ -6,17 +6,23 @@
 **Last Action:** Published v2.0.0 to GitHub Releases.
 
 ## Key Changes Implemented
-1.  **UI Overhaul (V2.0)**:
+1.  **AI Context & Data Exploration (Phase 7 - Completed)**:
+    -   **Context Isolation**: Implemented `[SYSTEM: SET_CONTEXT]` and `[SYSTEM: CLEAR_CONTEXT]`. AI now "locks" onto the viewed table (`session.lastTable`) and forgets it when closed.
+    -   **Smart Inputs**: UI Column Filters now trigger AI execution on `Enter` ("Filtre tabela X onde Y..."), enabling **Full Table Scans** instead of just local filtering.
+    -   **Full Table Scan Rule**: AI System Prompt updated to generate `run_sql` with `WHERE` clauses (including `TO_DATE` for dates) whenever a filter is requested in Data Mode.
+    -   **Bug Fix**: Resolved "Double Execution" in `aiService.js` that caused empty search terms (`""`).
+
+2.  **UI Overhaul (V2.0)**:
     -   **Glassmorphism**: New Login & Splash screens with transparent/blur effects.
     -   **Navigation**: Updated tabs to match new Identity (Orange/Blue).
     -   **Icons**: Migrated to `lucide-react` (Loader2, etc.).
 
-2.  **Update System Fixes**:
+3.  **Update System Fixes**:
     -   **Loop Fix**: Added 15s timeout to `checkForUpdates` in `App.jsx`.
     -   **IPC Fix**: Changed `manual-check-update` to use `ipcMain.handle` (Server) and `invoke` (Client).
     -   **Debug Logs**: Enabled `electron-log` in `electron-main.js` (Logs to `%APPDATA%\Hap Assistente de Dados\logs`).
 
-3.  **Build Process**:
+4.  **Build Process**:
     -   **Clean Build**: `package.json` now has `clean` scripts that run automatically before `build` or `dist`.
     -   **No Cache Corruption**: `dist` folders are nuked before every build.
 
