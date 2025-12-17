@@ -288,7 +288,7 @@ const AiBuilder = ({ isVisible }) => {
                     setActiveView('schema_view');
                     setViewData(data.data);
                 } else if (data.action === 'show_data') {
-                    setActiveView('data_view');
+                    setActiveView('data');
                     // Store COMPLETE data object (metaData + rows) to allow correct header rendering
                     setViewData(data.data);
                 } else if (data.action === 'draft_table') {
@@ -909,7 +909,7 @@ const AiBuilder = ({ isVisible }) => {
                 // Synthesize a prompt for the AI based on active filters
                 const activeFilters = Object.entries(dataFilters)
                     .filter(([_, val]) => val && val.trim() !== '')
-                    .map(([col, val]) => `${col} contém "${val}"`)
+                    .map(([col, val]) => `${col} = "${val}"`)
                     .join(", ");
 
                 if (activeFilters.length > 0) {
@@ -923,8 +923,34 @@ const AiBuilder = ({ isVisible }) => {
             }
         };
 
+        if (!viewData || !viewData.rows) return <div className="p-4 text-gray-400">Nenhum dado para exibir.</div>;
+
+        const isTruncated = viewData.rows.length >= 500;
+
         return (
-            <div className="flex flex-col h-full bg-white">
+            <div className="flex flex-col h-full bg-white relative">
+                {/* TRUNCATION BANNER */}
+                {isTruncated && (
+                    <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex justify-between items-center animate-in fade-in slide-in-from-top-2">
+                        <div className="flex items-center gap-2 text-amber-800 text-xs font-semibold">
+                            <span className="bg-amber-100 p-1 rounded">⚠️</span>
+                            <span>Exibindo os primeiros 500 registros (Limite de Segurança)</span>
+                        </div>
+                        <button
+                            onClick={() => {
+                                if (viewData.sql) {
+                                    window.dispatchEvent(new CustomEvent('hap-run-sql', { detail: { query: viewData.sql } }));
+                                } else {
+                                    alert("SQL original não disponível.");
+                                }
+                            }}
+                            className="bg-amber-100 hover:bg-amber-200 text-amber-900 px-3 py-1 rounded text-xs font-bold transition-colors flex items-center gap-1 border border-amber-200"
+                        >
+                            <span>⚡ Ver Tudo no Editor SQL</span>
+                        </button>
+                    </div>
+                )}
+
                 <div className="flex-1 overflow-auto custom-scroll relative">
                     <table className="min-w-full divide-y divide-gray-200 border-collapse">
                         <thead className="bg-gray-50 sticky top-0 z-20 shadow-sm">

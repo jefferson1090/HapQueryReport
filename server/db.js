@@ -393,6 +393,10 @@ async function executeQuery(sql, params = [], limit = 1000, extraOptions = {}) {
             maxRows: limit === 'all' ? undefined : Number(limit),
             ...extraOptions
         };
+
+        console.log(`[DB] Executing SQL: ${sql}`);
+        if (params && params.length > 0) console.log(`[DB] Params: ${JSON.stringify(params)}`);
+
         const result = await conn.execute(sql, params, options);
         return {
             metaData: result.metaData,

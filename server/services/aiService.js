@@ -394,14 +394,16 @@ class AiService {
             contextInjection = `\n# CONTEXTO ATIVO ("DATA MODE"):
              O usuário está visualizando a tabela: "${session.lastTable}".
              
-             ## REGRAS DE FILTRO (CRÍTICO):
-             1. **FULL TABLE SCAN**: O usuário quer filtrar a tabela inteira no banco, NÃO apenas o que vê na tela.
-             2. **GERAÇÃO DE SQL**: Para qualquer pedido de filtro (ex: "apenas ativos", "de 2023", "nome joao"), você DEVE gerar um JSON 'run_sql'.
-             3. **NÃO EXPLIQUE**: Não diga "Vou filtrar...". Apenas gere o JSON.
+             ## REGRAS DE FILTRO (CRÍTICO - PERFORMANCE):
+             1. **FULL TABLE SCAN (PERIGO)**: JAMAIS use \`LIKE '%valor%'\` a menos que o usuário diga "contém". Isso trava o banco.
+             2. **PRIORIDADE DE BUSCA**:
+                - Se o valor parece um código (ex: "1V4QS000001", "12345"), use **IGUALDADE**: \`WHERE CAMPO = 'valor'\`.
+                - Se for texto/nome, use **PREFIXO**: \`WHERE UPPER(CAMPO) LIKE UPPER('valor%')\`.
+                - Só use \`%valor%\` se for pedido explícito de "parte do texto".
+             3. **GERAÇÃO DE SQL**: Todas as buscas devem gerar JSON 'run_sql'.
              4. **DATAS**:
-                - Se pedir "intervalo" ou "entre datas", use: \`WHERE CAMPO BETWEEN TO_DATE('...', 'YYYY-MM-DD') AND TO_DATE('...', 'YYYY-MM-DD')\`.
-                - Se pedir "mês passado", calcule as datas e use o BETWEEN explicitamente.
-             5. **SQL**: \`SELECT * FROM ${session.lastTable} WHERE ... FETCH NEXT 50 ROWS ONLY\`.
+                - Intervalos: \`WHERE CAMPO BETWEEN TO_DATE(...) AND TO_DATE(...)\`.
+             5. **SQL FINAL**: \`SELECT * FROM ${session.lastTable} WHERE ... FETCH NEXT 500 ROWS ONLY\`.
              \n`;
         }
 
@@ -699,7 +701,7 @@ class AiService {
                         return {
                             text: text || "Executei a consulta para você:",
                             action: 'show_data',
-                            data: { metaData: result.metaData, rows: result.rows }
+                            data: { metaData: result.metaData, rows: result.rows, sql: sql }
                         };
                     } catch (e) {
                         return { text: `Tentei executar, mas houve um erro:\n\`${e.message}\`\n\nSQL:\n\`\`\`sql\n${sql}\n\`\`\``, action: 'chat' };
