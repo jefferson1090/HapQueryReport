@@ -1,12 +1,10 @@
 # Handoff Instructions - v2.1.0 (Dev)
 
 ## Project Status
-**Current Version:** v2.1.0-dev
+**Current Version:** v2.5.1-dev
 **Stability:** Beta (Autocomplete in debugging phase)
 **Last Action:** Implemented Tab Renaming, Theme Switcher Fix, and Autocomplete Backend Fixes.
 
-<<<<<<< HEAD
-## Key Changes Implemented
 ## Key Changes Implemented (Session 2024-12-17 - Phase 7 & 8)
 1.  **AI Context & Data Exploration (Completed)**:
     -   **Context Isolation**: Implemented `[SYSTEM: SET_CONTEXT]` and `[SYSTEM: CLEAR_CONTEXT]`. AI now "locks" onto the viewed table (`session.lastTable`) and forgets it when closed.
@@ -24,7 +22,15 @@
 > [!IMPORTANT]
 > **API Key Management**: Currently, the Groq API Key is loaded from a local `chat_config.json`. The next step should be moving this to a secure, remote configuration (e.g., Supabase `ai_config` table) so the application can fetch it dynamically on startup, removing the need for manual file distribution.
 
-
+4.  **Autocomplete SQL (Work in Progress)**:
+    -   **Backend**: Fixed critical bug in `db.js`. Query was not executing, and `currentUser` reference was broken. Now returns dictionary correctly.
+    -   **Frontend**: Updated `SqlRunner.jsx` to fetch schema *after* connection. Implemented case-insensitive alias support (normalizing keys).
+    -   **Status**: Code logic is sound, but user reported issues in final test. Needs verification of `db.js` execution logs.
+    
+5.  **Clarify Tab Connections (Session 2024-12-18)**:
+    -   **UI Improvements**: Clear distinction between Global Connection (sidebar) and Tab-specific connection (header).
+    -   **Indicators**: Added visual indicators for active/inactive tabs to show which connection is in use.
+    -   **Responsiveness**: Refactored header elements to prevent overlap on smaller screens.
 
 ## Dependencies & Installation
 If you (the next agent) need to reinstall or move environments:
@@ -46,11 +52,7 @@ This key is stored in `server/chat_config.json`, which is **ignored** by Git for
 
 ```json
 {
-  "groqApiKey": "gsk_fOMZ5XSuBGDwapsKicL1WGdyb3FYVETK5r DrA3wS02sH9AzH8SRQ",
-  "model": "llama-3.3-70b-versatile",
-  "temperature": 0.3,
-  "maxTokens": 1024,
-  "topP": 1
+  "groqApiKey": "<INSIRA_SUA_CHAVE_AQUI>",
 }
 ```
 3.  **REMOVE THE SPACE** between `...VETK5r` and `DrA3w...` to form the valid key.
@@ -106,6 +108,11 @@ npm run dist   # Automatically runs 'npm run clean' and copies client assets
     2.  Check `App.jsx` class injection (are we forcing a specific class?).
     3.  Restore theme switching capability.
 
+## CRITICAL INSTRUCTION: API Sync Check
+**Always verify the new API synchronization model on startup.**
+- Check if the sync mechanism is correctly pulling/pushing data as expected.
+- Verify logs for any sync errors immediately after application launch.
+
 ---
-**Maintainer:** Antigravity (Agent Session ID: 29)
-**Date:** 2025-12-15
+**Maintainer:** Antigravity (Agent Session ID: 30)
+**Date:** 2024-12-19

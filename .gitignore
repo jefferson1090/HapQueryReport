@@ -15,3 +15,5 @@ server/debug_*.js
 server/.env
 server/public/assets
 server/public/index.html
+
+server/chat_config.json.bak

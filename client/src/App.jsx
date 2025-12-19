@@ -17,7 +17,7 @@ import { getApiUrl } from './config';
 import UpdateManager from './components/UpdateManager';
 import {
     MessageSquare, Database, Sparkles, FileInput, Calendar, BookOpen,
-    RefreshCw, ShieldCheck, User as UserIcon, LogOut
+    RefreshCw, ShieldCheck, User as UserIcon, LogOut, Cloud
 } from 'lucide-react';
 
 // --- Theme Context & Definitions ---
@@ -79,13 +79,29 @@ function App() {
 
     // Oracle Connection State (Gated Features)
     const [connection, setConnection] = useState(null);
+    const [isConnected, setIsConnected] = useState(false); // Socket.io status
+    const [appChannel, setAppChannel] = useState(null); // 'production' | 'beta'
 
+    useEffect(() => {
+        // Fetch System Info (Channel)
+        fetch(`${apiUrl}/api/config/info`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.channel === 'beta') setAppChannel('beta');
+            })
+            .catch(err => console.error("Failed to fetch channel info:", err));
+    }, [apiUrl]);
+
+    // Handle initial auth check (Local Storage)
     const [activeTab, setActiveTab] = useState('team-chat'); // Default to chat after login
     const [pendingDoc, setPendingDoc] = useState(null); // { id, bookId, query }
 
     // Theme State
     const [currentThemeName, setCurrentThemeName] = useState(() => localStorage.getItem('app_theme') || 'default');
     const theme = THEMES[currentThemeName] || THEMES.default;
+
+    // Interactive Badge State
+    const [connectionBadgeExpanded, setConnectionBadgeExpanded] = useState(false);
 
     const changeTheme = (name) => {
         setCurrentThemeName(name);
@@ -349,6 +365,55 @@ function App() {
         setConnection(null); // Also disconnect Oracle
     };
 
+    // --- Data Persistence: Manual Backup & Restore ---
+    const handleBackupData = () => {
+        const data = {
+            version: VERSION,
+            exportDate: new Date().toISOString(),
+            savedQueries: savedSqlQueries,
+            sqlTabs: sqlTabs.map(t => ({ ...t, results: null })), // Clean results
+            reminders: reminders,
+            theme: currentThemeName,
+            chatUser: chatUser
+        };
+
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `hap_backup_${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    const handleRestoreData = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = JSON.parse(e.target.result);
+                if (data.savedQueries) setSavedSqlQueries(data.savedQueries);
+                if (data.sqlTabs) setSqlTabs(data.sqlTabs);
+                if (data.reminders) saveReminders(data.reminders); // Use the wrapper
+                if (data.theme) changeTheme(data.theme);
+                // Note: We deliberately do NOT restore chatUser to avoid session conflicts,
+                // unless explicitly desired. User is already logged in.
+
+                alert("Dados restaurados com sucesso!");
+            } catch (err) {
+                console.error("Restore failed:", err);
+                alert("Erro ao restaurar arquivo: Formato inválido.");
+            }
+        };
+        reader.readAsText(file);
+        // Reset input
+        event.target.value = '';
+    };
+
     // V2: Refined Navigation Tab (Clean & Elegant with Tech Colors)
     const NavTab = ({ id, icon: Icon, label, colorClass = "text-blue-600", bgClass = "bg-blue-50" }) => {
         const isActive = activeTab === id;
@@ -408,7 +473,7 @@ function App() {
     // 2. Main Application Layout
     return (
         <ThemeContext.Provider value={{ theme, currentThemeName, changeTheme }}>
-            <div className={`flex flex-col h-screen ${theme.bg} font-sans overflow-hidden transition-colors duration-300`}>
+            <div className={`flex flex-col h-screen ${theme.bg} ${theme.text} font-sans overflow-hidden transition-colors duration-300`}>
 
                 {/* V2 Update Manager (Replaces Banner) */}
                 <UpdateManager
@@ -426,10 +491,17 @@ function App() {
                 {/* Header */}
 
                 {/* Top Navigation Bar */}
-                <header className={`h-16 shadow-sm flex items-center justify-between px-6 z-20 border-b bg-white border-gray-100 print:hidden transition-all duration-300`}>
+                <header className={`h-16 shadow-sm flex items-center justify-between px-6 z-20 border-b ${theme.navbar} ${theme.navbarText} ${theme.border} print:hidden transition-all duration-300`}>
 
-                    {/* Tabs */}
-                    <div className="flex-1 flex justify-start space-x-1">
+                    {/* Channel Indicator (Beta) */}
+                    {appChannel === 'beta' && (
+                        <div className="absolute top-0 left-1/2 transform -translate-x-1/2 bg-yellow-400 text-yellow-900 text-[10px] font-bold px-3 py-0.5 rounded-b-lg shadow-sm z-50">
+                            MODE: BETA (ADMIN)
+                        </div>
+                    )}
+
+                    {/* Tabs - Responsive Scrollable Container */}
+                    <div className="flex-1 flex justify-start space-x-1 overflow-x-auto no-scrollbar mask-gradient-right min-w-0 mr-2">
                         <NavTab id="team-chat" icon={MessageSquare} label="Chat" colorClass="text-blue-600" bgClass="bg-blue-50" />
                         <NavTab id="sql-runner" icon={Database} label="Editor SQL" colorClass="text-orange-600" bgClass="bg-orange-50" />
                         <NavTab id="query-builder" icon={Sparkles} label="Construtor AI" colorClass="text-purple-600" bgClass="bg-purple-50" />
@@ -438,8 +510,23 @@ function App() {
                         <NavTab id="docs" icon={BookOpen} label="Docs" colorClass="text-indigo-600" bgClass="bg-indigo-50" />
                     </div>
 
-                    {/* Right Side: Version & User */}
-                    <div className="flex items-center gap-3 min-w-[200px] justify-end">
+                    {/* Right Side: Version & User - Fixed / flexible but won't be crushed */}
+                    <div className="flex items-center gap-2 flex-shrink-0 justify-end">
+
+                        {/* Backup Actions - Always visible but compact */}
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={handleBackupData}
+                                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                title="Fazer Backup"
+                            >
+                                <Cloud size={18} />
+                            </button>
+                            <label className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-all cursor-pointer" title="Restaurar Backup">
+                                <RefreshCw size={18} />
+                                <input type="file" onChange={handleRestoreData} accept=".json" className="hidden" />
+                            </label>
+                        </div>
 
                         <ErrorBoundary>
                             <UpdateManager
@@ -451,6 +538,39 @@ function App() {
                                 onDismiss={() => setUpdateStatus('idle')}
                             />
                         </ErrorBoundary>
+
+                        {/* Global Connection Badge - Responsive & Interactive */}
+                        {connection && (
+                            <div
+                                onClick={() => setConnectionBadgeExpanded(!connectionBadgeExpanded)}
+                                className={`
+                                    flex items-center gap-2 px-2 py-1.5 rounded-full text-xs font-bold border shadow-sm transition-all duration-300 cursor-pointer select-none
+                                    ${connectionBadgeExpanded
+                                        ? 'bg-indigo-600 text-white border-indigo-500 pr-4'
+                                        : 'bg-white text-indigo-600 border-indigo-100 hover:bg-indigo-50'
+                                    }
+                                `}
+                                title={`Conexão: ${connection.connectionName || 'N/A'}\nUsuário: ${connection.user}\nHost: ${connection.connectString}`}
+                            >
+                                <div className={`p-0.5 rounded-full transition-colors ${connectionBadgeExpanded ? 'bg-indigo-500 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
+                                    <Database size={14} className={`shrink-0`} />
+                                </div>
+
+                                <div className={`
+                                    overflow-hidden whitespace-nowrap transition-all duration-500 ease-in-out flex flex-col items-start
+                                    ${connectionBadgeExpanded ? 'max-w-[200px] opacity-100 ml-1' : 'max-w-0 opacity-0'}
+                                `}>
+                                    <span className="truncate leading-tight block">
+                                        {connection.connectionName || connection.user}
+                                    </span>
+                                    {connectionBadgeExpanded && <span className="text-[9px] font-normal opacity-80 block truncate w-full">{connection.user} @ {connection.connectString}</span>}
+                                </div>
+
+                                {/* Status Dot */}
+                                <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${connectionBadgeExpanded ? 'bg-green-300' : 'bg-green-500'}`}></span>
+                            </div>
+                        )}
+
                         <button
                             onClick={() => checkForUpdates(true)}
                             disabled={updateStatus === 'checking'}
@@ -463,20 +583,22 @@ function App() {
                             `}
                         >
                             <RefreshCw size={14} className={`${updateStatus === 'checking' ? 'animate-spin' : ''}`} />
-                            {updateStatus === 'checking' ? 'Buscando...' :
-                                updateStatus === 'available' ? 'Nova Versão!' :
-                                    updateStatus === 'ready' ? 'Instalar Agora' :
-                                        `v${VERSION}`}
+                            <span className="hidden lg:inline">
+                                {updateStatus === 'checking' ? 'Buscando...' :
+                                    updateStatus === 'available' ? 'Nova Versão!' :
+                                        updateStatus === 'ready' ? 'Instalar' :
+                                            `v${VERSION}`}
+                            </span>
                         </button>
 
-                        <div className="h-6 w-[1px] bg-gray-100 mx-1"></div>
+                        <div className="h-4 w-[1px] bg-gray-100 mx-1"></div>
 
                         {/* Theme Select (Compact) */}
                         <div className="relative group">
                             <select
                                 value={currentThemeName}
                                 onChange={(e) => changeTheme(e.target.value)}
-                                className={`text-xs py-1.5 px-2 rounded-lg bg-gray-50 border border-gray-200 outline-none cursor-pointer hover:bg-white hover:border-blue-300 transition-colors text-gray-600 font-medium`}
+                                className={`text-xs py-1 px-1 rounded-lg bg-gray-50 border border-gray-200 outline-none cursor-pointer hover:bg-white hover:border-blue-300 transition-colors text-gray-600 font-medium max-w-[80px] truncate`}
                                 title="Mudar Tema"
                             >
                                 {Object.entries(THEMES).map(([key, val]) => (
@@ -485,10 +607,8 @@ function App() {
                             </select>
                         </div>
 
-                        <div className="h-6 w-[1px] bg-gray-100 mx-1"></div>
-
-                        {/* Chat User Info (V2 Clean) */}
-                        <div className="text-right hidden md:block group cursor-default">
+                        {/* Chat User Info (Hidden on smaller screens) */}
+                        <div className="text-right hidden 2xl:block group cursor-default">
                             <p className="text-sm font-bold leading-tight text-gray-700 group-hover:text-blue-600 transition-colors">{chatUser.username}</p>
                             <p className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">{chatUser.team || 'Geral'}</p>
                         </div>
@@ -499,7 +619,7 @@ function App() {
                             className="p-2 rounded-xl text-gray-400 hover:bg-red-50 hover:text-red-500 transition-all duration-300"
                             title="Sair / Logout"
                         >
-                            <LogOut size={18} />
+                            <LogOut size={16} />
                         </button>
                     </div>
                 </header>
@@ -599,5 +719,6 @@ function App() {
         </ThemeContext.Provider>
     );
 }
+
 
 export default App;

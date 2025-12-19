@@ -63,6 +63,28 @@ class AiService {
         this.sessions = new Map();
     }
 
+    updateConfig(config) {
+        if (!config) return;
+
+        let changed = false;
+        if (config.groqApiKey && config.groqApiKey !== this.apiKey) {
+            console.log('[AiService] Updating API Key from config...');
+            this.apiKey = config.groqApiKey;
+            this.groq = new Groq({ apiKey: this.apiKey });
+            changed = true;
+        }
+
+        if (config.model && config.model !== this.modelName) {
+            console.log(`[AiService] Updating Model to ${config.model}...`);
+            this.modelName = config.model;
+            changed = true;
+        }
+
+        if (changed) {
+            console.log('[AiService] Configuration reloaded successfully.');
+        }
+    }
+
     getSession(userId) {
         if (!userId) return { status: 'IDLE', payload: null, lastTable: null, lastRecord: null };
         if (!this.sessions.has(userId)) {

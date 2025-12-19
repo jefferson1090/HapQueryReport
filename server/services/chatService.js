@@ -8,17 +8,20 @@ class ChatService {
         this.adapter = null;
         this.users = new Map(); // socketId -> { username, team }
 
-        // Load Configuration
-        this.configPath = path.join(__dirname, '../chat_config.json');
-        this.loadConfig();
-
-        // Initialize Local Storage for Users (Auth)
-        // Note: storage options for Auth are separate from Chat Backend for now
+        // Initialize Data Directory (APPDATA)
         const appData = process.env.APPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share");
-        const dbDir = path.join(appData, 'HapAssistenteDeDados');
-        if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
-        this.usersFile = path.join(dbDir, 'users.json');
+        this.dbDir = path.join(appData, 'HapAssistenteDeDados');
+        if (!fs.existsSync(this.dbDir)) fs.mkdirSync(this.dbDir, { recursive: true });
+
+        // Paths
+        this.legacyConfigPath = path.join(__dirname, '../chat_config.json');
+        this.configPath = path.join(this.dbDir, 'config.json');
+        this.usersFile = path.join(this.dbDir, 'users.json');
+
         if (!fs.existsSync(this.usersFile)) fs.writeFileSync(this.usersFile, '[]', 'utf-8');
+
+        // Load & Migrate Configuration
+        this.loadConfig();
 
         // Initialize Adapter
         this.initAdapter();
@@ -26,10 +29,26 @@ class ChatService {
 
     loadConfig() {
         try {
+            // 1. Migration: Check for legacy config in install dir
+            if (fs.existsSync(this.legacyConfigPath)) {
+                console.log("ChatService: Legacy config found. Migrating to APPDATA...");
+                try {
+                    const legacyData = fs.readFileSync(this.legacyConfigPath, 'utf-8');
+                    fs.writeFileSync(this.configPath, legacyData, 'utf-8');
+                    // Rename legacy to .bak to avoid re-migration/confusion, or delete.
+                    // Let's rename for safety.
+                    fs.renameSync(this.legacyConfigPath, this.legacyConfigPath + '.bak');
+                    console.log("ChatService: Migration successful.");
+                } catch (migErr) {
+                    console.error("ChatService: Migration failed:", migErr);
+                }
+            }
+
+            // 2. Load from APPDATA
             if (fs.existsSync(this.configPath)) {
                 this.config = JSON.parse(fs.readFileSync(this.configPath, 'utf-8'));
             } else {
-                console.warn("Chat config not found, defaulting to local.");
+                console.warn("Chat config not found in APPDATA, defaulting to local/empty.");
                 this.config = { activeBackend: 'local' };
             }
         } catch (e) {

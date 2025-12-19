@@ -19,6 +19,7 @@ const os = require('os');
 const upload = multer({ dest: path.join(os.tmpdir(), 'oracle-lowcode-uploads') });
 const fs = require('fs');
 const csv = require('csv-parser');
+const configManager = require('./services/ConfigManager');
 
 // Docs Module Imports
 const docService = require('./services/localDocService');
@@ -36,6 +37,26 @@ function debugLog(msg) {
 debugLog('Starting server...');
 debugLog('Node version: ' + process.version);
 debugLog('Electron version: ' + process.versions.electron);
+
+// Initialize Config Sync (Async - non-blocking for UI, but important for AI keys)
+// 1. Load Local Config Immediately
+try {
+  const localConfig = configManager.get('groqApiKey') ? configManager.config : configManager.loadLocalConfig();
+  if (localConfig.groqApiKey) {
+    aiService.updateConfig(localConfig);
+    console.log('Local config loaded into AI Service.');
+  }
+} catch (e) { console.error('Error loading local config:', e); }
+
+// 2. Sync Remote (Async)
+configManager.syncResponse().then((newConfig) => {
+  debugLog('Config Sync completed.');
+  console.log('Config Sync completed.');
+  if (newConfig) {
+    aiService.updateConfig(newConfig);
+  }
+}).catch(console.error);
+
 
 
 const app = express();
@@ -239,6 +260,15 @@ app.get('/api/chat/history', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// --- SYSTEM ROUTES ---
+app.get('/api/config/info', (req, res) => {
+  res.json({
+    channel: configManager.getChannel(),
+    version: process.env.npm_package_version || '2.0.0'
+  });
+});
+
+
 // --- SOCKET.IO EVENTS ---
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
@@ -379,11 +409,30 @@ io.on('connection', (socket) => {
   });
 });
 
+// Helper to get connection params from request
+const getDbParams = (req) => {
+  // 1. Try Header (JSON encoded)
+  if (req.headers['x-db-connection']) {
+    try {
+      return JSON.parse(req.headers['x-db-connection']);
+    } catch (e) {
+      console.error("Failed to parse x-db-connection header:", e);
+    }
+  }
+  // 2. Try Body (for POST) - optional, but header is standard
+  if (req.body && req.body.connection) {
+    return req.body.connection;
+  }
+  // 3. Fallback to null (db.js will try global or error)
+  return null;
+};
+
 // 2. List Tables
 app.get('/api/tables', async (req, res) => {
   try {
     const search = req.query.search || '';
-    const tables = await db.getTables(search);
+    const dbParams = getDbParams(req);
+    const tables = await db.getTables(search, dbParams);
     res.json(tables);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -393,7 +442,8 @@ app.get('/api/tables', async (req, res) => {
 // 3. List Columns
 app.get('/api/columns/:table', async (req, res) => {
   try {
-    const columns = await db.getColumns(req.params.table);
+    const dbParams = getDbParams(req);
+    const columns = await db.getColumns(req.params.table, dbParams);
     res.json(columns);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -403,7 +453,8 @@ app.get('/api/columns/:table', async (req, res) => {
 // 3.1 Get Schema Dictionary (Tables & Columns)
 app.get('/api/schema/dictionary', async (req, res) => {
   try {
-    const dictionary = await db.getSchemaDictionary();
+    const dbParams = getDbParams(req);
+    const dictionary = await db.getSchemaDictionary(dbParams);
     res.json(dictionary);
   } catch (err) {
     console.error("Schema Dictionary Error:", err);
@@ -418,7 +469,8 @@ app.post('/api/export', async (req, res) => {
   // ... (Export logic is handled client-side now, but keeping this as backup/legacy)
   try {
     const { sql, params, format } = req.body;
-    const result = await db.executeQuery(sql, params);
+    const dbParams = getDbParams(req);
+    const result = await db.executeQuery(sql, params, 1000, {}, dbParams);
 
     if (format === 'csv') {
       const fields = result.metaData.map(m => m.name);
@@ -454,15 +506,17 @@ app.post('/api/export', async (req, res) => {
 app.post('/api/ai/create-table-confirm', async (req, res) => {
   try {
     const { tableName, columns, indices, grants } = req.body;
+    const dbParams = getDbParams(req);
     if (!tableName || !columns) throw new Error("Dados incompletos.");
 
-    await db.createTable(tableName, columns, indices, grants);
+    await db.createTable(tableName, columns, indices, grants, dbParams);
     res.json({ success: true, tableName });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// ... (AI Chat Code Omitted - No DB access there yet) ...
 app.post('/api/ai/chat', async (req, res) => {
   try {
     console.log('[DEBUG] POST /api/ai/chat received');
@@ -484,29 +538,15 @@ app.post('/api/ai/chat', async (req, res) => {
   }
 });
 
-app.post('/api/ai/sql/optimize', async (req, res) => {
-  try {
-    const { sql } = req.body;
-    const result = await aiService.optimizeSql(sql);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.post('/api/query', async (req, res) => {
   const { sql, params, limit, filter } = req.body;
+  const dbParams = getDbParams(req);
   try {
     let finalSql = sql;
 
     // Server-side filtering (Global search)
     if (filter && typeof filter === 'string' && filter.trim() !== '') {
       // We don't know columns here easily, so we can't do a smart "WHERE col LIKE %val%".
-      // But we can try to wrap. However, without column names, we can't construct the WHERE clause.
-      // The client needs to send column names or we need to fetch them first.
-      // Fetching columns for every query is slow.
-      // Alternative: The client sends the filter as a simple string, and we accept it ONLY if we also get a list of columns?
-      // Or, we just support the "Column Filters" sent from the UI.
     }
 
     // Support structured column filters from UI
@@ -516,12 +556,7 @@ app.post('/api/query', async (req, res) => {
         if (val && typeof val === 'string' && val.trim() !== '') {
           // Sanitize column name (basic)
           const safeCol = col.replace(/[^a-zA-Z0-9_]/g, '');
-          // Use bind parameters for values would be best, but for now we'll use sanitized injection for simplicity in this wrapper
-          // OR better: use a subquery with string matching?
-          // Let's use simple string concatenation for the wrapper, assuming the inner query is valid.
-          // We need to be careful about SQL injection here.
-          // Since we are wrapping, we can use: UPPER("col") LIKE UPPER('%val%')
-          // We should escape single quotes in val.
+          // Escape single quotes
           const safeVal = val.replace(/'/g, "''");
           whereClauses.push(`UPPER("${safeCol}") LIKE UPPER('%${safeVal}%')`);
         }
@@ -532,7 +567,7 @@ app.post('/api/query', async (req, res) => {
       }
     }
 
-    const result = await db.executeQuery(finalSql, params || [], limit);
+    const result = await db.executeQuery(finalSql, params || [], limit, {}, dbParams);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -541,15 +576,18 @@ app.post('/api/query', async (req, res) => {
 
 app.post('/api/query/count', async (req, res) => {
   const { sql, params } = req.body;
+  const dbParams = getDbParams(req);
   try {
     const cleanSql = sql.trim().replace(/;$/, '');
-    const countSql = `SELECT COUNT(*) FROM(${cleanSql}\n)`;
-    const result = await db.executeQuery(countSql, params || []);
+    const countSql = `SELECT COUNT(*) FROM (${cleanSql}\n)`;
+    const result = await db.executeQuery(countSql, params || [], 1000, {}, dbParams);
     res.json({ count: result.rows[0][0] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ... (CSV Export Code omitted/truncated) ...
 
 // 5. Upload SQL
 app.post('/api/upload/sql', upload.single('file'), async (req, res) => {

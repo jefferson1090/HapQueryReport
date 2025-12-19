@@ -2,6 +2,12 @@ const oracledb = require('oracledb');
 const fs = require('fs');
 const path = require('path');
 
+try {
+    oracledb.initOracleClient({ libDir: path.join(__dirname, 'instantclient_23_4') });
+} catch (err) {
+    console.error('Whoops! Oracle Client not found or already initialized:', err);
+}
+
 // Enable auto-commit for this simple app
 oracledb.autoCommit = true;
 
@@ -18,21 +24,29 @@ function log(msg) {
     }
 }
 
-let connectionParams = null;
+// Stateful connection params (Legacy/Validation only)
+// We keep this for the initial login check, allowing the frontend to validade credentials.
+// But widely execution should pass params explicitly.
+let lastConnectionParams = null;
 
-async function getConnection() {
-    if (!connectionParams) {
-        throw new Error("Não conectado ao banco de dados. Por favor, conecte-se primeiro.");
+async function getConnection(params = null) {
+    // If specific params provided, use them.
+    if (params) {
+        return await oracledb.getConnection(params);
     }
-    return await oracledb.getConnection(connectionParams);
+    // Fallback to last known (Legacy support)
+    if (lastConnectionParams) {
+        return await oracledb.getConnection(lastConnectionParams);
+    }
+    throw new Error("Nenhuma credencial de banco de dados fornecida.");
 }
 
 async function checkConnection(params) {
     let conn;
     try {
         conn = await oracledb.getConnection(params);
-        // If successful, store params for future use (simple session management for single user)
-        connectionParams = params;
+        // Store for legacy fallback, but we encourage passing it explicitly
+        lastConnectionParams = params;
         log("Connection successful for user: " + params.user);
         return true;
     } catch (err) {
@@ -45,10 +59,10 @@ async function checkConnection(params) {
     }
 }
 
-async function getTables(search = '') {
+async function getTables(search = '', connectionParams = null) {
     let conn;
     try {
-        conn = await getConnection();
+        conn = await getConnection(connectionParams);
 
         // Query ALL_OBJECTS to get both tables and views
         let query = `SELECT OWNER || '.' || OBJECT_NAME, OBJECT_TYPE 
@@ -77,13 +91,13 @@ async function getTables(search = '') {
 }
 
 // Smart Search Logic
-async function findObjects(term) {
+async function findObjects(term, connectionParams = null) {
     let conn;
     try {
         term = term ? term.trim() : '';
         if (!term) return [];
 
-        conn = await getConnection();
+        conn = await getConnection(connectionParams);
 
         const baseQuery = `SELECT OWNER, OBJECT_NAME, OBJECT_TYPE 
                            FROM ALL_OBJECTS 
@@ -133,7 +147,7 @@ async function findObjects(term) {
     }
 }
 
-async function getColumns(tableNameInput) {
+async function getColumns(tableNameInput, connectionParams = null) {
     let conn;
     try {
         let owner, tableName;
@@ -141,11 +155,13 @@ async function getColumns(tableNameInput) {
             [owner, tableName] = tableNameInput.split('.');
         } else {
             // Fallback if no owner provided
-            owner = connectionParams.user.toUpperCase();
+            // Use user from connection params if available, else fallback
+            const currentUser = (connectionParams && connectionParams.user) ? connectionParams.user.toUpperCase() : (lastConnectionParams ? lastConnectionParams.user.toUpperCase() : 'USER');
+            owner = currentUser;
             tableName = tableNameInput;
         }
 
-        conn = await getConnection();
+        conn = await getConnection(connectionParams);
 
         // 1. Try to get View Definition
         // Improved Logic: If owner is provided, check directly. If not, or if failed, try to find the view globally (in ALL_VIEWS).
@@ -155,36 +171,20 @@ async function getColumns(tableNameInput) {
             let viewSql = `SELECT TEXT FROM ALL_VIEWS WHERE UPPER(VIEW_NAME) = UPPER(:tableName)`;
             const viewParams = { tableName };
 
-            if (owner && owner !== connectionParams.user.toUpperCase()) {
+            if (owner) {
                 viewSql += ` AND UPPER(OWNER) = UPPER(:owner)`;
                 viewParams.owner = owner;
-            } else {
-                // Optimization: Prefer current user, but if not found, we might search others? 
-                // Actually, if no owner specified, it might be a public synonym or another schema.
-                // Let's first try exact match if we can. 
-            }
-
-            // Let's just try to find ANY view with this name accessible to us.
-            // If we have an owner, enforce it.
-            let finalViewSql = `SELECT TEXT FROM ALL_VIEWS WHERE UPPER(VIEW_NAME) = UPPER(:tableName)`;
-            let finalViewParams = { tableName };
-
-            if (owner) {
-                finalViewSql += ` AND UPPER(OWNER) = UPPER(:owner)`;
-                finalViewParams.owner = owner;
             }
 
             // Fetch
             const viewResult = await conn.execute(
-                finalViewSql + " FETCH NEXT 1 ROWS ONLY",
-                finalViewParams,
+                viewSql + " FETCH NEXT 1 ROWS ONLY",
+                viewParams,
                 { fetchInfo: { TEXT: { type: oracledb.STRING } } }
             );
 
             if (viewResult.rows.length > 0) {
                 viewText = viewResult.rows[0][0];
-            } else if (!owner) {
-                // Return Null, handled later.
             }
         } catch (e) {
             // Ignore view check errors
@@ -204,7 +204,8 @@ async function getColumns(tableNameInput) {
             columnParams.owner = owner;
         } else {
             // Prioritize current user if no owner specified, but allow others
-            columnSql += ` ORDER BY (CASE WHEN UPPER(OWNER) = UPPER('${connectionParams.user}') THEN 0 ELSE 1 END), OWNER, COLUMN_ID`;
+            const currentUser = (connectionParams && connectionParams.user) ? connectionParams.user.toUpperCase() : 'USER';
+            columnSql += ` ORDER BY (CASE WHEN UPPER(OWNER) = UPPER('${currentUser}') THEN 0 ELSE 1 END), OWNER, COLUMN_ID`;
         }
 
         if (owner) {
@@ -226,7 +227,6 @@ async function getColumns(tableNameInput) {
         }
 
         // Map to ensure uppercase keys (just in case) and add view definition if exists
-        // Map to ensure uppercase keys (just in case) and add view definition if exists
         const structure = finalRows.map(row => ({
             COLUMN_NAME: row.COLUMN_NAME,
             DATA_TYPE: row.DATA_TYPE,
@@ -234,15 +234,6 @@ async function getColumns(tableNameInput) {
             NULLABLE: row.NULLABLE,
             DATA_DEFAULT: row.DATA_DEFAULT
         }));
-
-        if (viewText) {
-            // Attach view text to the array as a special property (or handle elsewhere)
-            // But getColumns returns an array. Let's return the array, but with a hidden prop? 
-            // Better: Let the caller handle it. But we need to return it.
-            // Let's attach it to the first column or return an object wrapper?
-            // Existing code expects array. Let's stick to array but maybe add a property to the array itself.
-            structure.viewDefinition = viewText;
-        }
 
         if (viewText) {
             structure.viewDefinition = viewText;
@@ -254,10 +245,11 @@ async function getColumns(tableNameInput) {
     }
 }
 
-async function getSchemaDictionary() {
+async function getSchemaDictionary(connectionParams = null) {
     let conn;
     try {
-        conn = await getConnection();
+        conn = await getConnection(connectionParams);
+        const currentUser = (connectionParams && connectionParams.user) ? connectionParams.user.toUpperCase() : (lastConnectionParams ? lastConnectionParams.user.toUpperCase() : 'USER');
 
         // Blocklist for system schemas
         const ownerBlocklist = `
@@ -267,7 +259,6 @@ async function getSchemaDictionary() {
         `;
 
         // Fetch columns for tables and views
-        // Prioritize schemas: Current User, HUMASTER, INCORPORA, then others.
         const sql = `
             SELECT OWNER, TABLE_NAME, COLUMN_NAME, DATA_TYPE
             FROM ALL_TAB_COLUMNS
@@ -281,65 +272,10 @@ async function getSchemaDictionary() {
                 OWNER, TABLE_NAME, COLUMN_ID
         `;
 
-        // Set a safe limit (200,000 columns) to prevent browser crash, 
-        // but rely on prioritization to get the important stuff.
+        // Set a safe limit (200,000 columns)
         const result = await conn.execute(sql, [], { maxRows: 200000 });
 
         const dictionary = {};
-        const ownersFound = new Set();
-
-        // Current User (to prioritize short names)
-        const currentUser = connectionParams.user.toUpperCase();
-
-        result.rows.forEach(row => {
-            const [owner, tableName, colName, dataType] = row;
-
-            // 1. Fully Qualified Name: OWNER.TABLE_NAME
-            const fullName = `${owner}.${tableName}`;
-            if (!dictionary[fullName]) dictionary[fullName] = [];
-            dictionary[fullName].push(colName);
-
-            // 2. Short Name: TABLE_NAME (Only if it belongs to current user or isn't taken yet)
-            // If collision (same table name in multiple schemas), current user wins.
-            if (owner === currentUser) {
-                // Always overwrite/set for current user
-                if (!dictionary[tableName]) dictionary[tableName] = [];
-                dictionary[tableName].push(colName);
-            } else {
-                // Only set if not already present (avoid overwriting current user's table with same name from another schema)
-                if (!dictionary[tableName]) {
-                    dictionary[tableName] = [];
-                    dictionary[tableName].push(colName);
-                } else {
-                    // If it exists, append only if it's the SAME array (meaning it was set by this block previously)
-                    // Actually, if dictionary[tableName] exists, it might be from current user OR another schema.
-                    // It's complex to track "who owns the short key".
-                    // Simplification: Short name `TABLE` maps to the first one found (alphabetic owner order mostly) OR current user.
-                    // Since we process row by row, and we want current user priority, we should ideally simply maintain two sets or just trust the overwrite logic above?
-                    // My logic above: 
-                    // - If owner is current user -> Force write to dictionary[tableName] (because subsequent lines for same table will just append).
-                    // - If owner is NOT current user -> Only write if dictionary[tableName] is empty.
-                    // The issue: What if we processed 'OTHER_USER' first, filled dictionary['T1'], and then encounter 'CURRENT_USER' later?
-                    // We would overwrite dictionary['T1'] with a NEW array, essentially clearing the 'OTHER_USER' columns from the short name entry.
-                    // That is CORRECT behavior for prioritization. 
-
-                    // However, we need to make sure we are appending to the *correct* array instance.
-                    // When we do dictionary[tableName] = [], we create a new array.
-                    // Subsequent rows for that same table:
-                    // Owner matches -> dictionary[tableName].push
-                    // Owner doesn't match -> dictionary[tableName].push (if it was created by that non-owner logic).
-
-                    // Optimization: Just push to `dictionary[fullName]`.
-                    // Then handle `dictionary[tableName]` carefully.
-                }
-            }
-        });
-
-        // Second Pass for Short Names to avoid the "overwrite clears previous columns" issue during iteration
-        // Actually, let's simpler:
-        // Use the `fullName` entries to populate `tableName` entries.
-        // Filter keys by owner == current user, set those first.
-        // Then remaining keys that don't conflict.
 
         // Optimized Single Pass approach:
         // Map: Owner -> Table -> [Cols]
@@ -373,9 +309,6 @@ async function getSchemaDictionary() {
             });
         });
 
-        console.log(`[Schema Dictionary] Loaded ${Object.keys(dictionary).length} keys from ${ownersFound.size} schemas.`);
-        console.log(`[Schema Dictionary] Schemas found: ${Array.from(ownersFound).sort().join(', ')}`);
-
         return dictionary;
 
     } finally {
@@ -383,11 +316,10 @@ async function getSchemaDictionary() {
     }
 }
 
-
-async function executeQuery(sql, params = [], limit = 1000, extraOptions = {}) {
+async function executeQuery(sql, params = [], limit = 1000, extraOptions = {}, connectionParams = null) {
     let conn;
     try {
-        conn = await getConnection();
+        conn = await getConnection(connectionParams);
         // Limit rows to avoid crashing browser, default 1000 but adjustable
         const options = {
             maxRows: limit === 'all' ? undefined : Number(limit),
@@ -400,18 +332,19 @@ async function executeQuery(sql, params = [], limit = 1000, extraOptions = {}) {
         const result = await conn.execute(sql, params, options);
         return {
             metaData: result.metaData,
-            rows: result.rows
+            rows: result.rows,
+            rowsAffected: result.rowsAffected
         };
     } finally {
         if (conn) await conn.close();
     }
 }
 
-async function execute(sql, params = [], options = {}) {
+async function execute(sql, params = [], options = {}, connectionParams = null) {
     let conn;
     try {
-        conn = await getConnection();
-        // Default autoCommit to true if not specified, since global might be set but good to be explicit
+        conn = await getConnection(connectionParams);
+        // Default autoCommit to true if not specified
         const execOptions = { autoCommit: true, ...options };
         return await conn.execute(sql, params, execOptions);
     } finally {
@@ -419,10 +352,10 @@ async function execute(sql, params = [], options = {}) {
     }
 }
 
-async function createTable(tableName, columns, indices = [], grants = []) {
+async function createTable(tableName, columns, indices = [], grants = [], connectionParams = null) {
     let conn;
     try {
-        conn = await getConnection();
+        conn = await getConnection(connectionParams);
 
         // 1. Create Table
         const colDefs = columns.map(c => `"${c.name}" ${c.type}`).join(', ');
@@ -430,7 +363,6 @@ async function createTable(tableName, columns, indices = [], grants = []) {
         log("Executing Create Table: " + sql);
         await conn.execute(sql);
 
-        // 2. Add Indices / Constraints
         // 2. Add Indices / Constraints
         for (const idx of indices) {
             // Support Object format: { name: 'IDX_NAME', column: 'COL_NAME' }
@@ -476,13 +408,12 @@ async function createTable(tableName, columns, indices = [], grants = []) {
     }
 }
 
-async function insertData(tableName, columns, data) {
+async function insertData(tableName, columns, data, connectionParams = null) {
     let conn;
     try {
-        conn = await getConnection();
+        conn = await getConnection(connectionParams);
 
         // Construct INSERT statement
-        // INSERT INTO table (col1, col2) VALUES (:1, :2)
         const colNames = columns.map(c => `"${c.name}"`).join(', ');
         const bindVars = columns.map((_, i) => `:${i + 1}`).join(', ');
         const sql = `INSERT INTO "${tableName}" (${colNames}) VALUES (${bindVars})`;
@@ -492,10 +423,6 @@ async function insertData(tableName, columns, data) {
         // Prepare data for bind
         const binds = data.map(row => {
             return columns.map(c => {
-                // Use the sanitized name to look up data if we mapped it in index.js, 
-                // OR use originalName if we are still using the raw CSV row object.
-                // In index.js we mapped data to new keys, so we should use c.name.
-                // BUT, let's check both to be robust.
                 let val = row[c.name];
                 if (val === undefined) {
                     val = row[c.originalName];
@@ -504,7 +431,6 @@ async function insertData(tableName, columns, data) {
                 if (val === undefined || val === null || val === '') return null;
 
                 if (c.type === 'NUMBER') {
-                    // Handle comma decimals
                     if (typeof val === 'string') {
                         val = val.replace(',', '.');
                     }
@@ -513,13 +439,11 @@ async function insertData(tableName, columns, data) {
                 }
 
                 if (c.type === 'DATE') {
-                    // Simple date handling - Oracle expects Date object or string in specific format
-                    // Let's try to parse to Date object
                     const d = new Date(val);
                     return isNaN(d.getTime()) ? null : d;
                 }
 
-                return String(val); // Ensure string for VARCHAR
+                return String(val);
             });
         });
 
@@ -542,18 +466,18 @@ async function insertData(tableName, columns, data) {
     }
 }
 
-async function getStream(sql, params = []) {
-    const conn = await getConnection();
+async function getStream(sql, params = [], connectionParams = null) {
+    const conn = await getConnection(connectionParams);
     return {
         stream: conn.queryStream(sql, params),
         connection: conn
     };
 }
 
-async function checkTableExists(tableName) {
+async function checkTableExists(tableName, connectionParams = null) {
     let conn;
     try {
-        conn = await getConnection();
+        conn = await getConnection(connectionParams);
         const result = await conn.execute(
             `SELECT count(*) FROM user_tables WHERE table_name = :tableName`,
             [tableName.toUpperCase()]
@@ -564,10 +488,10 @@ async function checkTableExists(tableName) {
     }
 }
 
-async function dropTable(tableName) {
+async function dropTable(tableName, connectionParams = null) {
     let conn;
     try {
-        conn = await getConnection();
+        conn = await getConnection(connectionParams);
         await conn.execute(`DROP TABLE "${tableName.toUpperCase()}"`);
         log(`Table ${tableName} dropped.`);
     } catch (err) {

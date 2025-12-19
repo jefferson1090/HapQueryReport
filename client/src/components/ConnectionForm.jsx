@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import hapLogo from '../assets/hap_logo_sql.png';
-import CryptoJS from 'crypto-js';
-
-const SECRET_KEY = 'hap-query-report-secret-key';
+import { encryptPassword, decryptPassword } from '../utils/security';
 
 const DEFAULT_CONNECTIONS = [
     {
@@ -77,22 +75,6 @@ function ConnectionForm({ onConnect }) {
 
         setSavedConnections(initialConnections);
     }, []);
-
-    const encryptPassword = (password) => {
-        if (!password) return '';
-        return CryptoJS.AES.encrypt(password, SECRET_KEY).toString();
-    };
-
-    const decryptPassword = (ciphertext) => {
-        if (!ciphertext) return '';
-        try {
-            const bytes = CryptoJS.AES.decrypt(ciphertext, SECRET_KEY);
-            const originalText = bytes.toString(CryptoJS.enc.Utf8);
-            return originalText || ciphertext;
-        } catch (e) {
-            return ciphertext;
-        }
-    };
 
     const handleChange = (e) => {
         setFormData({
@@ -393,8 +375,8 @@ function ConnectionForm({ onConnect }) {
 
                             {status.message && (
                                 <div className={`p-3 rounded-xl text-sm font-medium flex items-center animate-fade-in-up ${status.type === 'error' ? 'bg-red-50 text-red-600 border border-red-100' :
-                                        status.type === 'success' ? 'bg-green-50 text-green-600 border border-green-100' :
-                                            'bg-blue-50 text-blue-600 border border-blue-100'
+                                    status.type === 'success' ? 'bg-green-50 text-green-600 border border-green-100' :
+                                        'bg-blue-50 text-blue-600 border border-blue-100'
                                     }`}>
                                     {status.type === 'error' ? '⚠️' : status.type === 'success' ? '✅' : 'ℹ️'}
                                     <span className="ml-2">{status.message}</span>
