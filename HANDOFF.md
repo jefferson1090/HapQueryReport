@@ -1,7 +1,7 @@
-# Handoff Instructions - v2.5.1 (Dev)
+# Handoff Instructions - v2.5.2 (Dev)
 
 ## Project Status
-**Current Version:** v2.5.1
+**Current Version:** v2.5.2
 **Stability:** Beta (Autocomplete in debugging phase)
 **Last Action:** Implemented Tab Renaming, Theme Switcher Fix, and Autocomplete Backend Fixes.
 

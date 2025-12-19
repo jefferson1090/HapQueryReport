@@ -369,9 +369,29 @@ io.on('connection', (socket) => {
 
   socket.on('reminder_update', (data) => {
     // data: { reminder, sender }
-    // Broadcast to all connected clients so they can update their board if they have it open
-    // In a more complex app, we might join 'rooms' based on boards, but for now broadcast is fine.
-    io.emit('reminder_update', data);
+    const reminder = data.reminder;
+    const allowedUsers = new Set();
+
+    // 1. Authorize Creator/Sender
+    if (data.sender) allowedUsers.add(data.sender);
+    if (reminder.sharedBy) allowedUsers.add(reminder.sharedBy);
+
+    // 2. Authorize Shared Recipients
+    if (Array.isArray(reminder.sharedWith)) {
+      reminder.sharedWith.forEach(u => allowedUsers.add(typeof u === 'string' ? u : u.username));
+    }
+
+    // 3. Selective Broadcast
+    // Iterate all connected sockets and send ONLY to authorized users
+    for (const [socketId, user] of chatService.users.entries()) {
+      // If user is authorized OR if it's explicitly public (future proofing)
+      if (allowedUsers.has(user.username)) {
+        io.to(socketId).emit('reminder_update', data);
+      }
+    }
+
+    // Debug log for privacy check
+    console.log(`[Privacy] Reminder ${reminder.id} update sent to ${[...allowedUsers].join(', ')}`);
   });
 
   socket.on('message_reaction', async (data) => {
