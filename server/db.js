@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 try {
-    oracledb.initOracleClient({ libDir: path.join(__dirname, 'instantclient_23_4') });
+    oracledb.initOracleClient({ libDir: path.join(__dirname, 'instantclient') });
 } catch (err) {
     console.error('Whoops! Oracle Client not found or already initialized:', err);
 }
@@ -24,28 +24,72 @@ function log(msg) {
     }
 }
 
+const poolCache = {};
+
+// Helper to generate a unique key for the pool based on credentials
+function getPoolKey(params) {
+    if (!params) return 'default';
+    return `${params.user}_${params.connectString}`;
+}
+
 // Stateful connection params (Legacy/Validation only)
 // We keep this for the initial login check, allowing the frontend to validade credentials.
 // But widely execution should pass params explicitly.
 let lastConnectionParams = null;
 
 async function getConnection(params = null) {
-    // If specific params provided, use them.
-    if (params) {
-        return await oracledb.getConnection(params);
+    // 1. Resolve Parameters
+    let connectionParams = params;
+    if (!connectionParams) {
+        if (lastConnectionParams) {
+            connectionParams = lastConnectionParams;
+        } else {
+            throw new Error("Nenhuma credencial de banco de dados fornecida.");
+        }
     }
-    // Fallback to last known (Legacy support)
-    if (lastConnectionParams) {
-        return await oracledb.getConnection(lastConnectionParams);
+
+    // 2. Check Pool Cache
+    const poolKey = getPoolKey(connectionParams);
+
+    if (!poolCache[poolKey]) {
+        log(`[DB] Creating new connection pool for: ${poolKey}`);
+        try {
+            poolCache[poolKey] = await oracledb.createPool({
+                user: connectionParams.user,
+                password: connectionParams.password,
+                connectString: connectionParams.connectString,
+                poolMin: 1,
+                poolMax: 10,
+                poolIncrement: 1,
+                poolTimeout: 60 // Close idle connections after 60s
+            });
+            log(`[DB] Pool created successfully.`);
+        } catch (err) {
+            log(`[DB] Failed to create pool: ${err.message}`);
+            throw err;
+        }
     }
-    throw new Error("Nenhuma credencial de banco de dados fornecida.");
+
+    // 3. Get Connection from Pool
+    try {
+        const pool = poolCache[poolKey];
+        const conn = await pool.getConnection();
+        return conn;
+    } catch (err) {
+        log(`[DB] Error getting connection from pool: ${err.message}`);
+        // If pool is invalid, try to recreate it (simple retry logic)
+        delete poolCache[poolKey];
+        throw err;
+    }
 }
 
 async function checkConnection(params) {
     let conn;
     try {
-        conn = await oracledb.getConnection(params);
-        // Store for legacy fallback, but we encourage passing it explicitly
+        // This will create the pool if it doesn't exist
+        conn = await getConnection(params);
+
+        // Store for legacy fallback
         lastConnectionParams = params;
         log("Connection successful for user: " + params.user);
         return true;
@@ -316,20 +360,55 @@ async function getSchemaDictionary(connectionParams = null) {
     }
 }
 
-async function executeQuery(sql, params = [], limit = 1000, extraOptions = {}, connectionParams = null) {
+async function executeQuery(sql, params = [], limit = 50000, extraOptions = {}, connectionParams = null) {
     let conn;
     try {
         conn = await getConnection(connectionParams);
-        // Limit rows to avoid crashing browser, default 1000 but adjustable
+
+        // Handle Pagination (Offset + Limit)
+        // If offset is provided in extraOptions, we wrap the query
+        let finalSql = sql;
+        const currentLimit = limit === 'all' ? 1000000000 : Number(limit);
+        const currentOffset = extraOptions.offset ? Number(extraOptions.offset) : 0;
+
+        if (currentOffset > 0 || (limit !== 'all' && limit > 0)) {
+            // Use Oracle ROWNUM pagination (Compatible with older versions too)
+            // Note: We need to ensure the ORDER BY is inside the inner query if specific order is needed.
+            // But we assume 'sql' already contains necessary ORDER BY.
+
+            // Calculate max row for ROWNUM (offset + limit)
+            const maxRow = currentOffset + currentLimit;
+
+            // We only wrap if we are actually paginating or limiting specifically via this method
+            // The original code used conn.execute(..., { maxRows: limit }) which is efficient for just top-N.
+            // But for offset, we MUST query.
+
+            if (currentOffset > 0) {
+                finalSql = `
+                    SELECT * FROM (
+                        SELECT a.*, ROWNUM rnum FROM (
+                            ${sql}
+                        ) a WHERE ROWNUM <= ${maxRow}
+                    ) WHERE rnum > ${currentOffset}
+                `;
+            }
+        }
+
         const options = {
-            maxRows: limit === 'all' ? undefined : Number(limit),
+            // If we are wrapping with ROWNUM, we don't strictly need maxRows in the driver, 
+            // but keeping it as a safeguard is okay. However, if we wrapped it, the result count is already limited.
+            // If we didn't wrap (offset=0), we rely on maxRows.
+            maxRows: (currentOffset > 0) ? undefined : (limit === 'all' ? undefined : Number(limit)),
             ...extraOptions
         };
 
-        console.log(`[DB] Executing SQL: ${sql}`);
-        if (params && params.length > 0) console.log(`[DB] Params: ${JSON.stringify(params)}`);
+        // Remove offset from extraOptions passed to driver to avoid errors if driver doesn't support it
+        if (options.offset !== undefined) delete options.offset;
 
-        const result = await conn.execute(sql, params, options);
+        console.log(`[DB] Executing SQL (Offset: ${currentOffset}, Limit: ${limit})...`);
+        // if (params && params.length > 0) console.log(`[DB] Params: ${JSON.stringify(params)}`);
+
+        const result = await conn.execute(finalSql, params, options);
         return {
             metaData: result.metaData,
             rows: result.rows,

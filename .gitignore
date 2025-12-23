@@ -16,4 +16,7 @@ server/.env
 server/public/assets
 server/public/index.html
 
+server/chat_config.json
+
 server/chat_config.json.bak
+backup*

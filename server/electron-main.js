@@ -299,7 +299,12 @@ autoUpdater.on('error', (err) => {
 
 ipcMain.handle('manual-check-update', async () => {
     try {
-        return await autoUpdater.checkForUpdates();
+        if (!app.isPackaged) {
+            log.info('Skipping update check (Dev Mode)');
+            return null;
+        }
+        const result = await autoUpdater.checkForUpdates();
+        return result;
     } catch (error) {
         log.error("Error checking for updates:", error);
         throw error;
@@ -349,8 +354,15 @@ app.on('ready', async () => {
     // Note: Feed URL is now configured via package.json (GitHub Provider)
     // We still query DB to show "New Version Available" banner in UI via chatService
 
-    autoUpdater.checkForUpdatesAndNotify();
+    // Prevent English notification, let UI handle it
+    autoUpdater.checkForUpdates();
 });
+
+ipcMain.on('restart_app', () => {
+    log.info("Client requested restart. Calling quitAndInstall...");
+    autoUpdater.quitAndInstall();
+});
+
 
 ipcMain.handle('get-server-port', () => {
     return serverPort;

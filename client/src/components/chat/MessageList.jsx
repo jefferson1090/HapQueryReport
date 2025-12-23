@@ -1,11 +1,14 @@
 import React, { useRef, useLayoutEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, CheckCheck, Smile, CornerDownRight, Database } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 
-const ReactionBar = ({ onReact, showPicker, togglerRef }) => {
+const ReactionBar = ({ onReact, showPicker, togglerRef, isMe }) => {
     return (
-        <div className="absolute -top-5 right-2 bg-white shadow-md border border-gray-200 rounded-full px-2 py-0.5 flex space-x-1 opacity-0 group-hover/msg:opacity-100 transition-opacity z-20">
+        <div className={`absolute -top-5 bg-white shadow-md border border-gray-200 rounded-full px-2 py-0.5 flex space-x-1 opacity-0 group-hover/msg:opacity-100 transition-opacity z-20
+            ${isMe ? 'right-2' : 'left-full ml-2'} 
+        `}>
             {['👍', '❤️', '😂', '😮'].map(emoji => (
                 <button key={emoji} onClick={() => onReact(emoji)} className="hover:scale-125 transition-transform text-sm">{emoji}</button>
             ))}
@@ -18,9 +21,27 @@ const ReactionBar = ({ onReact, showPicker, togglerRef }) => {
 
 const MessageItem = ({ msg, isMe, previousSameSender, onReact, onReply, onAddSharedItem }) => {
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [pickerPos, setPickerPos] = useState({});
     const pickerRef = useRef(null);
 
     const isShared = msg.type === 'SHARED_ITEM' && msg.metadata?.itemData;
+
+    const handleTogglePicker = (e) => {
+        e.stopPropagation(); // Prevent closing immediately
+        if (showEmojiPicker) {
+            setShowEmojiPicker(false);
+        } else {
+            if (pickerRef.current) {
+                const rect = pickerRef.current.getBoundingClientRect();
+                setPickerPos({
+                    top: rect.bottom + 10,
+                    left: isMe ? undefined : rect.left,
+                    right: isMe ? (window.innerWidth - rect.right) : undefined
+                });
+            }
+            setShowEmojiPicker(true);
+        }
+    };
 
     return (
         <div className={`group/msg relative flex flex-col ${isMe ? 'items-end' : 'items-start'} ${previousSameSender ? 'mt-1' : 'mt-4'}`}>
@@ -134,7 +155,7 @@ const MessageItem = ({ msg, isMe, previousSameSender, onReact, onReply, onAddSha
 
                 {/* Reactions Display */}
                 {msg.reactions && msg.reactions.length > 0 && (
-                    <div className={`absolute -bottom-3 ${isMe ? 'right-0' : 'left-0'} flex space-x-1`}>
+                    <div className={`absolute -bottom-3 ${isMe ? 'right-0' : 'left-0'} flex space-x-1 z-10`}>
                         {Object.entries(msg.reactions.reduce((acc, r) => { acc[r.emoji] = (acc[r.emoji] || 0) + 1; return acc; }, {})).map(([emoji, count]) => (
                             <span key={emoji} className="bg-white text-[10px] border border-gray-100 shadow-sm rounded-full px-1.5 py-0.5" title={`${count} reaction(s)`}>
                                 {emoji} {count > 1 && count}
@@ -145,8 +166,9 @@ const MessageItem = ({ msg, isMe, previousSameSender, onReact, onReply, onAddSha
 
                 {/* Actions Hover Bar */}
                 <ReactionBar
+                    isMe={isMe}
                     onReact={(emoji) => onReact(msg.id, emoji)}
-                    showPicker={() => setShowEmojiPicker(!showEmojiPicker)}
+                    showPicker={handleTogglePicker}
                     togglerRef={pickerRef}
                 />
 
@@ -156,16 +178,27 @@ const MessageItem = ({ msg, isMe, previousSameSender, onReact, onReply, onAddSha
                 </button>
             </div>
 
-            {showEmojiPicker && (
-                <div className="absolute z-50 top-8 right-0 shadow-xl rounded-lg">
+            {showEmojiPicker && createPortal(
+                <div
+                    className="fixed z-[9999] shadow-2xl rounded-xl animate-fade-in-up"
+                    style={{
+                        top: pickerPos.top + 'px',
+                        left: pickerPos.left ? pickerPos.left + 'px' : 'auto',
+                        right: pickerPos.right ? pickerPos.right + 'px' : 'auto'
+                    }}
+                >
                     <EmojiPicker
                         onEmojiClick={(data) => { onReact(msg.id, data.emoji); setShowEmojiPicker(false); }}
                         width={300}
                         height={400}
                     />
                     {/* Backdrop to close */}
-                    <div className="fixed inset-0 z-[-1]" onClick={() => setShowEmojiPicker(false)}></div>
-                </div>
+                    <div className="fixed inset-0 z-[-1]" onClick={(e) => {
+                        e.stopPropagation();
+                        setShowEmojiPicker(false);
+                    }}></div>
+                </div>,
+                document.body
             )}
         </div>
     );

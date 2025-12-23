@@ -13,6 +13,7 @@ const learningService = require('./services/learningService');
 const chatService = require('./services/chatService');
 // const docsChatService = require('./services/docsChatService');
 const knowledgeService = require('./services/knowledgeService');
+const { parseSigoSql } = require('./services/sigoSqlParser');
 const multer = require('multer');
 // const path = require('path'); // Already imported at top
 const os = require('os');
@@ -74,7 +75,10 @@ chatService.setSocketIo(io);
 
 const PORT = process.env.PORT || 3001;
 
+const compression = require('compression');
+
 app.use(cors());
+app.use(compression()); // Enable GZIP compression
 app.use(express.json({ limit: '50mb' })); // Increased limit for data import
 
 // Disable caching for all routes
@@ -269,6 +273,14 @@ app.get('/api/config/info', (req, res) => {
 });
 
 
+// --- CHAT SERVICE SETUP ---
+if (chatService.setStatusHandler) {
+  chatService.setStatusHandler((status) => {
+    console.log("[Index] Broadcasting backend status:", status);
+    io.emit('backend_status', status);
+  });
+}
+
 // --- SOCKET.IO EVENTS ---
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
@@ -312,6 +324,12 @@ io.on('connection', (socket) => {
     try {
       if (data.messageIds && data.messageIds.length > 0) {
         await chatService.markAsRead(data.messageIds);
+
+        // Broadcast update to Senders (Simpler to broadcast to all, clients filter by ID)
+        const readAt = new Date().toISOString();
+        data.messageIds.forEach(id => {
+          io.emit('message_update', { id, read_at: readAt });
+        });
       }
     } catch (e) {
       console.error("MarkRead Error:", e);
@@ -320,14 +338,17 @@ io.on('connection', (socket) => {
 
   socket.on('message', async (data) => {
     // data: { sender, content, type, metadata, recipient }
+    let msgPayload;
     try {
-      await chatService.saveMessage(data.sender, data.content, data.type, data.metadata, data.recipient);
+      msgPayload = await chatService.saveMessage(data.sender, data.content, data.type, data.metadata, data.recipient);
     } catch (e) {
       console.error("SaveMessage Error:", e);
-      // Continue to echo so the chat doesn't feel broken, even if persistence failed
+      // Fallback
+      msgPayload = { ...data, timestamp: new Date() };
     }
 
-    const msgPayload = { ...data, timestamp: new Date() };
+    // Ensure payload has everything
+    if (!msgPayload) msgPayload = { ...data, timestamp: new Date() };
 
     if (data.recipient && data.recipient !== 'ALL') {
       // Private Message
@@ -335,15 +356,15 @@ io.on('connection', (socket) => {
       let sent = false;
       for (const [id, user] of chatService.users.entries()) {
         if (user.username === data.recipient) {
-          // io.to(id).emit('message', msgPayload); // REMOVED: Rely on Adapter/Supabase broadcast only
+          io.to(id).emit('message', msgPayload);
           sent = true;
         }
       }
-      // Also send back to sender (so it appears in their chat)
-      // socket.emit('message', msgPayload); // REMOVED: Client now uses Optimistic UI
+      // Also send back to sender (so it confirms delivery/persistence)
+      socket.emit('message', msgPayload);
     } else {
       // Broadcast to all
-      // io.emit('message', msgPayload); // REMOVED: Rely on Adapter/Supabase broadcast only
+      io.emit('message', msgPayload);
     }
   });
 
@@ -559,8 +580,9 @@ app.post('/api/ai/chat', async (req, res) => {
 });
 
 app.post('/api/query', async (req, res) => {
-  const { sql, params, limit, filter } = req.body;
+  const { sql, params, limit, offset, filter } = req.body;
   const dbParams = getDbParams(req);
+  console.log('[API] /api/query called with SQL:', sql);
   try {
     let finalSql = sql;
 
@@ -587,9 +609,87 @@ app.post('/api/query', async (req, res) => {
       }
     }
 
-    const result = await db.executeQuery(finalSql, params || [], limit, {}, dbParams);
+    console.log(`[API] Executing query... (Limit: ${limit}, Offset: ${offset})`);
+    const result = await db.executeQuery(finalSql, params || [], limit, { offset }, dbParams);
+    console.log(`[API] Query executed. Rows: ${result.rows ? result.rows.length : 0}`);
+
     res.json(result);
   } catch (err) {
+    console.error('[API] /api/query failed:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint SIGO Workflow: Parse SQL File
+app.post('/api/parse-sql', (req, res) => {
+  try {
+    const { sqlContent } = req.body;
+    if (!sqlContent) {
+      return res.status(400).json({ error: 'Conteúdo SQL não fornecido.' });
+    }
+
+    const result = parseSigoSql(sqlContent);
+    res.json(result);
+
+  } catch (err) {
+    console.error('Error parsing SQL:', err);
+    res.status(500).json({ error: err.message, details: 'Falha ao processar o arquivo SQL.' });
+  }
+});
+
+app.post('/api/verify-missing', async (req, res) => {
+  const { tableName, columnName, values } = req.body;
+  const dbParams = getDbParams(req);
+
+  // Check required params
+  if (!tableName || !columnName || !values || !Array.isArray(values) || values.length === 0) {
+    return res.json({ missingItems: [], count: 0 });
+  }
+
+  try {
+    console.log(`[API] /api/verify-missing called for ${tableName}.${columnName} with ${values.length} items.`);
+
+    // 1. Prepare unique list
+    const uniqueValues = [...new Set(values.map(v => String(v).trim()).filter(v => v !== ''))];
+    if (uniqueValues.length === 0) return res.json({ missingItems: [], count: 0 });
+
+    // 2. Build Efficient SQL (Tuple IN)
+    const col = columnName; // Expecting safe column name or sanitize if needed
+    let whereClause = '';
+
+    // Simple heuristic: treat as string unless proven otherwise. 
+    // For verify, usually used for ID lists or Codes which are strings or safe numbers.
+    // We will stick to string quoting to be safe, unless col is known number?
+    // Let's assume string for general robustness with 'Tuples'.
+
+    if (uniqueValues.length > 1000) {
+      const tuples = uniqueValues.map(v => `('${v.replace(/'/g, "''")}', '0')`).join(',');
+      whereClause = `(${col}, '0') IN (${tuples})`;
+    } else {
+      const quoted = uniqueValues.map(v => `'${v.replace(/'/g, "''")}'`).join(',');
+      whereClause = `${col} IN (${quoted})`;
+    }
+
+    const sql = `SELECT DISTINCT ${col} FROM ${tableName} WHERE ${whereClause}`;
+
+    // 3. Execute with High Limit
+    // We fetching "found" items to diff against "uniqueValues"
+    // Limit 1M is safe for Node server memory (1M strings is maybe 100MB RAM, feasible).
+    const limit = 1000000;
+
+    // Not using db.executeQuery with offset, just raw execute if possible or reuse executeQuery with 'all'
+    // executeQuery handles formatting return, which is fine.
+    const result = await db.executeQuery(sql, [], limit, {}, dbParams);
+
+    // 4. Calculate Difference
+    const foundSet = new Set(result.rows.map(r => String(r[0]))); // Ensure string comparison
+    const missingItems = uniqueValues.filter(val => !foundSet.has(val));
+
+    console.log(`[API] Verified. Found: ${foundSet.size}, Missing: ${missingItems.length}`);
+
+    res.json({ missingItems, count: missingItems.length });
+  } catch (err) {
+    console.error('[API] /api/verify-missing failed:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -603,6 +703,23 @@ app.post('/api/query/count', async (req, res) => {
     const result = await db.executeQuery(countSql, params || [], 1000, {}, dbParams);
     res.json({ count: result.rows[0][0] });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint SIGO Workflow: Parse SQL File
+app.post('/api/parse-sql', (req, res) => {
+  try {
+    const { sqlContent } = req.body;
+    if (!sqlContent) {
+      return res.status(400).json({ error: 'Conteúdo SQL vazio' });
+    }
+
+    const result = parseSigoSql(sqlContent);
+    res.json(result);
+
+  } catch (err) {
+    console.error('Erro ao processar SQL:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -651,8 +768,11 @@ app.post('/api/export/csv', async (req, res) => {
     const { stream, connection } = await db.getStream(finalSql, params || []);
     conn = connection;
 
+    const now = new Date();
+    const ts = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0') + '_' + String(now.getHours()).padStart(2, '0') + '-' + String(now.getMinutes()).padStart(2, '0') + '-' + String(now.getSeconds()).padStart(2, '0');
+
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename = "export_${Date.now()}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename = "exportacao_${ts}.csv"`);
     res.write('\ufeff'); // BOM
 
     stream.on('metadata', (meta) => {
@@ -663,7 +783,17 @@ app.post('/api/export/csv', async (req, res) => {
     stream.on('data', (row) => {
       const csvRow = row.map(val => {
         if (val === null || val === undefined) return '';
-        if (val instanceof Date) return val.toISOString();
+        if (val instanceof Date) {
+          const d = val;
+          const day = String(d.getDate()).padStart(2, '0');
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const year = d.getFullYear();
+          const hours = String(d.getHours()).padStart(2, '0');
+          const minutes = String(d.getMinutes()).padStart(2, '0');
+          const seconds = String(d.getSeconds()).padStart(2, '0');
+          if (hours === '00' && minutes === '00' && seconds === '00') return `${day}/${month}/${year}`;
+          return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+        }
         const str = String(val);
         if (str.includes(';') || str.includes('"') || str.includes('\n')) {
           return `"${str.replace(/"/g, '""')}"`;
@@ -877,10 +1007,46 @@ app.post('/api/create-table', async (req, res) => {
       await db.dropTable(tableName);
     }
 
+    // 1. CREATE TABLE
+    if (jobId) activeJobs[jobId].status = 'Criando tabela...';
     await db.createTable(tableName, columns);
 
-    // Insert Data
+    // 2. CREATE INDICES (Moved before Data)
+    if (jobId) activeJobs[jobId].status = 'Criando índices...';
+    console.log(`Creating indices for table ${tableName}...`);
+
+    for (const col of columns) {
+      const shortTable = tableName.substring(0, 10);
+      const shortCol = col.name.substring(0, 10);
+      const rand = Math.floor(Math.random() * 1000);
+      const indexName = `IDX_${shortTable}_${shortCol}_${rand}`.toUpperCase().substring(0, 30);
+
+      try {
+        if (col.type === 'DATE') {
+          await db.executeQuery(`CREATE INDEX "${indexName}" ON "${tableName}" ("${col.name}")`);
+        } else if (col.type === 'NUMBER') {
+          await db.executeQuery(`CREATE INDEX "${indexName}" ON "${tableName}" ("${col.name}")`);
+        } else if (col.type.startsWith('VARCHAR')) {
+          await db.executeQuery(`CREATE INDEX "${indexName}" ON "${tableName}" (UPPER("${col.name}"))`);
+        }
+      } catch (idxErr) {
+        console.warn(`Failed to create index on ${col.name}:`, idxErr.message);
+      }
+    }
+
+    // 3. GRANT ACCESS (Moved before Data)
+    if (grantToUser) {
+      if (jobId) activeJobs[jobId].status = `Concedendo acesso a ${grantToUser}...`;
+      try {
+        await db.executeQuery(`GRANT ALL ON "${tableName}" TO ${grantToUser}`);
+      } catch (grantErr) {
+        console.warn("Grant failed:", grantErr.message);
+      }
+    }
+
+    // 4. INSERT DATA (Moved to End)
     let totalInserted = 0;
+    if (jobId) activeJobs[jobId].status = 'Inserindo dados...';
 
     if (filePath) {
       // FULL IMPORT FROM FILE (STREAMING)
@@ -935,32 +1101,6 @@ app.post('/api/create-table', async (req, res) => {
       // Legacy/Preview import
       await db.insertData(tableName, columns, data);
       totalInserted = data.length;
-    }
-
-    // CREATE INDICES (New Feature)
-    if (jobId) activeJobs[jobId].status = 'Criando índices...';
-    console.log(`Creating indices for table ${tableName}...`);
-
-    for (const col of columns) {
-      const shortTable = tableName.substring(0, 10);
-      const shortCol = col.name.substring(0, 10);
-      const rand = Math.floor(Math.random() * 1000);
-      const indexName = `IDX_${shortTable}_${shortCol}_${rand}`.toUpperCase().substring(0, 30);
-
-      try {
-        await db.executeQuery(`CREATE INDEX "${indexName}" ON "${tableName}" ("${col.name}")`);
-      } catch (idxErr) {
-        console.warn(`Failed to create index on ${col.name}:`, idxErr.message);
-      }
-    }
-
-    // Grant Access (Optional)
-    if (grantToUser) {
-      try {
-        await db.executeQuery(`GRANT ALL ON "${tableName}" TO ${grantToUser}`);
-      } catch (grantErr) {
-        console.warn("Grant failed:", grantErr.message);
-      }
     }
 
     if (jobId) {
@@ -1383,12 +1523,17 @@ app.get('/api/chat/history', async (req, res) => {
   }
 });
 
-// Serve static files from the public directory
-app.use(express.static(path.join(rootDir, 'public')));
+// --- FINAL ERROR HANDLING ---
 
-// Use a regex to avoid path-to-regexp issues in bundled environment
-app.get(/.*/, (req, res) => {
-  res.sendFile(path.join(rootDir, 'public', 'index.html'));
+// Bundle splitting regex fix (Legacy comment removal)
+// The previous block (1426-1433) was redundant with Lines 183-200.
+
+// 404 Handler for unhandled API routes (passed through by the first SPA fallback)
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ error: 'API Endpoint Not Found' });
+  }
+  next();
 });
 
 // --- ADMIN HIVE MIND ROUTES ---

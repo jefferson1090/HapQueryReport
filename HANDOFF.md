@@ -1,9 +1,9 @@
 # Handoff Instructions - v2.5.2 (Dev)
 
 ## Project Status
-**Current Version:** v2.5.2
-**Stability:** Beta (Autocomplete in debugging phase)
-**Last Action:** Implemented Tab Renaming, Theme Switcher Fix, and Autocomplete Backend Fixes.
+**Current Version:** v2.5.6 (Dev - Pending Fixes)
+**Stability:** Broken (Oracle Client Missing, Theme Switcher UI Glitch, Updater 404)
+**Last Action:** Bumped version to v2.5.6. Diagnosed Oracle Client, Theme Switcher, and Updater issues. Registered fixes for this version.
 
 ## Key Changes Implemented (Session 2024-12-17 - Phase 7 & 8)
 1.  **AI Context & Data Exploration (Completed)**:
@@ -116,3 +116,45 @@ npm run dist   # Automatically runs 'npm run clean' and copies client assets
 ---
 **Maintainer:** Antigravity (Agent Session ID: 30)
 **Date:** 2024-12-19
+
+## Session Update (2025-12-22) - v2.5.6 Planning
+**Agent:** Antigravity
+**Action:** Bumped version to v2.5.6. Analysis of pending tasks completed.
+
+### Registered Actions for v2.5.6:
+1.  **FIX CRITICAL:** Update server/db.js to point to the correct Oracle Instant Client path (instantclient instead of instantclient_23_4).
+2.  **FIX UI:** Restore Theme Switcher functionality in App.jsx. The current dropdown is hidden/broken in the new layout.
+3.  **FIX DEPLOY:** Rename productName in package.json to remove spaces or ensure rtifactName is hyphenated to prevent Updater 404 errors.
+4.  **SECURITY:** (Pending) Move API Key to Supabase.
+
+## Session Update (2025-12-23) - v2.5.7 (SIGO & Stability Fixes)
+**Agent:** Antigravity
+**Focus:** SIGO UI Standardization, SQL Import Interaction, and Startup Stability.
+
+### 1. SIGO Menu Standardization (UI/UX)
+-   **Visual Parity**: The SIGO menu cards have been resized (`h-[160px]`, `p-6`) and styled to exactly match the "Extração de Carga" cards. This ensures a consistent "premium" look across the application.
+-   **Header Removal**: Removed the redundant "SIGO Next" title and subtitle to cleaner interface.
+-   **Navigation**: Restored the "Voltar" button as a clean, icon-only element in the top-left, preserving navigation flow without visual clutter.
+
+### 2. SQL Import Functionality
+-   **Interaction Fix**: Fixed the "Importar SQL" card's click handler to reliably trigger the hidden file input.
+-   **Loading Feedback**: **New Global Feature**. Implemented a "Preparando estrutura...aguarde!" loading overlay that appears immediately when a SQL file is selected. This provides crucial feedback during the parsing phase.
+-   **Auto-Navigation**: The interaction is now seamless: Click -> Pick File -> Loading Overlay -> Auto-redirect to "Filtro de SQL" screen upon success.
+
+### 3. Critical Technical Fixes (`AiBuilder.jsx`)
+-   **Syntax Corruption Resolved**: Fixed a critical issue where the `AiBuilder.jsx` file contained a nested/duplicate definition of `handleSqlFileUpload` and a premature component closure, causing "Unexpected token" and "Export not at top level" errors.
+-   **`forwardRef` Implementation**: Refactored `AiBuilder` to use `React.forwardRef`. This was necessary because parent components use `useImperativeHandle` to reset the builder's state. The component is now correctly defined as:
+    ```javascript
+    const AiBuilder = React.forwardRef(({...}, ref) => { ... });
+    ```
+-   **State Management**: Consolidated logic to ensure `menuState` transitions only happen *after* async operations (like SQL parsing) are complete.
+
+### 4. New Files
+-   `server/services/sigoSqlParser.js`: New service to parse uploaded SQL files for SIGO filters.
+-   `server/test_sigo_parser.js`: Test script for the parser.
+
+### Next Steps for Agent
+1.  **Verify Build**: Ensure `npm run build` in `client` passes without warnings related to the new `forwardRef` structure.
+2.  **SQL Parsing Extension**: The current parser (`sigoSqlParser.js`) handles basic SELECTs. If user needs more complex SQL support, extend this service.
+3.  **Supabase Sync**: Check `server_log.txt` to ensure the new version communicates correctly with Supabase (if active).
+

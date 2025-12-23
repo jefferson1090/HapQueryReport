@@ -144,7 +144,7 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const headerContainerRef = useRef(null);
     const viewRef = useRef(null);
     const containerRef = useRef(null);
-    const listOuterRef = useRef(null); // Ref for the virtual list container (outer element)
+    const [listOuterElement, setListOuterElement] = useState(null); // Changed to state-ref for reliable effect triggering
 
     const showToast = (message, type = 'success', duration = 3000) => {
         setToast({ message, type });
@@ -457,6 +457,42 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const filteredRows = getFilteredRows();
 
     // ... (rest of export logic)
+    // Helper for consistency
+    const getFormattedTimestamp = () => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+        return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
+    };
+
+    const formatValueForExport = (val) => {
+        if (val === null || val === undefined) return '';
+        if (typeof val !== 'string') return val;
+        // Reuse strict date logic
+        const isoDateRegex = /^\d{4}-\d{2}-\d{2}/;
+        if (isoDateRegex.test(val)) {
+            const date = new Date(val);
+            if (!isNaN(date.getTime())) {
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                const seconds = String(date.getSeconds()).padStart(2, '0');
+
+                if (hours === '00' && minutes === '00' && seconds === '00') {
+                    return `${day}/${month}/${year}`;
+                }
+                return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+            }
+        }
+        return val;
+    };
+
     const downloadStreamExport = async () => {
         showToast("Iniciando download CSV...", "info", 2000);
         try {
@@ -468,7 +504,7 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
             });
             if (!res.ok) throw new Error("Erro na exportação");
             const blob = await res.blob();
-            saveAs(blob, `export_${Date.now()}.csv`);
+            saveAs(blob, `exportacao_${getFormattedTimestamp()}.csv`);
             showToast("Download concluído!");
         } catch (err) {
             showToast("Erro: " + err.message, 'error');
@@ -504,8 +540,14 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         setTimeout(async () => {
             try {
                 const header = activeTab.results.metaData.map(m => m.name);
-                const data = [header, ...filteredRows];
-                const filename = `export_${Date.now()}.${type}`;
+
+                // Process rows for formatting
+                const formattedRows = filteredRows.map(row => {
+                    return row.map(cell => formatValueForExport(cell));
+                });
+
+                const data = [header, ...formattedRows];
+                const filename = `exportacao_${getFormattedTimestamp()}.${type}`;
                 let contentToSend;
 
                 if (type === 'xlsx') {
@@ -654,12 +696,16 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     };
 
     useEffect(() => {
-        const el = listOuterRef.current;
-        if (el) {
-            el.addEventListener('scroll', handleScroll);
-            return () => el.removeEventListener('scroll', handleScroll);
+        if (listOuterElement) {
+            // Force initial sync to fix "disorganized header" on tab switch
+            if (headerContainerRef.current) {
+                headerContainerRef.current.scrollLeft = listOuterElement.scrollLeft;
+            }
+
+            listOuterElement.addEventListener('scroll', handleScroll);
+            return () => listOuterElement.removeEventListener('scroll', handleScroll);
         }
-    }, [listOuterRef.current, activeTab.results]);
+    }, [listOuterElement]); // Re-run only when element ref changes
 
     // Handle Switch Connection (Local)
     const handleSwitchConnection = () => {
@@ -1148,7 +1194,7 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                                                     width={width}
                                                                     itemCount={filteredRows.length}
                                                                     itemSize={36}
-                                                                    outerRef={listOuterRef}
+                                                                    outerRef={setListOuterElement}
                                                                     itemData={{
                                                                         rows: filteredRows,
                                                                         columnOrder,
@@ -1297,7 +1343,7 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                     )}
                 </PanelGroup>
             </div>
-        </ErrorBoundary>
+        </ErrorBoundary >
     );
 };
 

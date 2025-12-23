@@ -33,7 +33,11 @@ const UpdateManager = ({ updateInfo, status, progress, onCheck, onRestart, onDis
         return (
             <div className="fixed bottom-4 right-4 z-[9999] bg-red-50 border border-red-200 shadow-xl rounded-xl p-4 flex items-center gap-3 animate-fade-in-up">
                 <AlertCircle size={20} className="text-red-500" />
-                <span className="text-gray-700 font-medium">{updateInfo?.notes || 'Erro ao verificar atualizações.'}</span>
+                <span className="text-gray-700 font-medium">
+                    {updateInfo?.notes?.includes('404')
+                        ? 'Servidor de atualização em manutenção (Tente mais tarde).'
+                        : (updateInfo?.notes || 'Erro ao verificar atualizações.')}
+                </span>
                 <button onClick={onDismiss} className="ml-2 text-gray-400 hover:text-gray-600"><X size={16} /></button>
             </div>
         );

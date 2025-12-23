@@ -17,6 +17,8 @@ class ChatService {
         this.legacyConfigPath = path.join(__dirname, '../chat_config.json');
         this.configPath = path.join(this.dbDir, 'config.json');
         this.usersFile = path.join(this.dbDir, 'users.json');
+        this.onStatusCallback = null;
+        this.messagesFile = path.join(this.dbDir, 'messages.json');
 
         if (!fs.existsSync(this.usersFile)) fs.writeFileSync(this.usersFile, '[]', 'utf-8');
 
@@ -55,6 +57,27 @@ class ChatService {
             console.error("Failed to load chat config:", e);
             this.config = { activeBackend: 'local' };
         }
+
+        // FORCE SUPABASE from ENV if available (User Priority: Online)
+        const envUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const envKey = process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+        console.log(`[ChatService] Checking Env Logic: URL=${!!envUrl}, Key=${!!envKey ? 'YES' : 'NO'}`);
+        if (!envUrl) console.log("[ChatService] Env Vars available:", JSON.stringify(Object.keys(process.env).filter(k => k.includes('SUPABASE'))));
+
+        if (envUrl && envKey) {
+            // Determine if we should force switch
+            // User said "I want Online". If config is 'local', switch.
+            if (this.config.activeBackend === 'local' || !this.config.activeBackend) {
+                this.config.activeBackend = 'supabase';
+                console.log("ChatService: Supabase Environment Detected. Forcing Online Mode.");
+            }
+
+            // Ensure config has credentials
+            if (!this.config.supabase) this.config.supabase = {};
+            this.config.supabase.url = envUrl;
+            this.config.supabase.key = envKey;
+        }
     }
 
     async initAdapter() {
@@ -88,6 +111,11 @@ class ChatService {
                 this.adapter.setPresenceHandler((onlineUsers) => {
                     if (this.io) this.io.emit('update_user_list', onlineUsers);
                 });
+
+                if (this.onStatusCallback && this.adapter.setStatusHandler) {
+                    this.adapter.setStatusHandler(this.onStatusCallback);
+                }
+
             } else {
                 console.error("ChatService: FAILED to connect to Supabase. Check Adapter logs.");
             }
@@ -172,31 +200,72 @@ class ChatService {
         return { success: false, message: "Credenciais inválidas." };
     }
 
-    // Messaging Methods (Delegated to Adapter)
+    // Messaging Methods (Delegated to Adapter OR Local Storage)
     async saveMessage(sender, content, type = 'TEXT', metadata = null, recipient = 'ALL') {
+        const msg = {
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+            sender,
+            content,
+            type,
+            metadata,
+            recipient,
+            created_at: new Date().toISOString(),
+            read_at: null,
+            reactions: []
+        };
+
         if (this.adapter) {
-            // Global Mode
-            await this.adapter.sendMessage({ sender, content, type, metadata, recipient });
-            // Note: We don't need to manually emit to socket here if we are subscribed to the changes,
-            // because the adapter will receive the 'INSERT' event and call handleIncomingMessage -> broadcastToLocalClients.
-            // This ensures we see what actually reached the server.
+            await this.adapter.sendMessage(msg);
         } else {
-            // Local fallback (Legacy)
-            // ... (Simple implementation just to prevent crash if no adapter)
-            console.warn("No adapter active, message drop.");
+            // Local JSON Persistence
+            const messages = this.readJSON(this.messagesFile);
+            messages.push(msg);
+            // Limit history to 1000 messages
+            if (messages.length > 1000) messages.shift();
+            this.writeJSON(this.messagesFile, messages);
+
+            // Should we broadcast here? server/index.js handles socket.io broadcast.
+            // But if we want consistent ID, we should return the msg object?
+            // index.js constructs its own payload. Ideally we return the saved msg.
         }
+        return msg; // Return the full message object with ID
     }
 
     async getHistory(username) {
         if (this.adapter) {
             return await this.adapter.getHistory();
+        } else {
+            // Local JSON
+            // Filter: Public (ALL) or Private involving 'username'
+            const messages = this.readJSON(this.messagesFile);
+            if (!username || username === 'ALL') {
+                // Return last 50 global messages? 
+                // Current logic usually fetches ALL relevant.
+                return messages;
+            }
+            return messages.filter(m =>
+                m.recipient === 'ALL' ||
+                m.recipient === username ||
+                m.sender === username
+            );
         }
-        return [];
     }
 
     async markAsRead(messageIds) {
+        const timestamp = new Date().toISOString();
         if (this.adapter && this.adapter.markAsRead) {
             await this.adapter.markAsRead(messageIds);
+        } else {
+            // Local JSON
+            const messages = this.readJSON(this.messagesFile);
+            let updated = false;
+            messages.forEach(m => {
+                if (messageIds.includes(m.id) && !m.read_at) {
+                    m.read_at = timestamp;
+                    updated = true;
+                }
+            });
+            if (updated) this.writeJSON(this.messagesFile, messages);
         }
     }
 
@@ -204,18 +273,35 @@ class ChatService {
         if (this.adapter && this.adapter.addReaction) {
             try {
                 await this.adapter.addReaction(messageId, emoji, username);
-            } catch (e) {
-                console.error("Adapter addReaction failed:", e);
-                // Don't throw, allow broadcast to continue
-            }
+            } catch (e) { }
         } else {
-            // console.warn("Adapter does not support reactions (Persistence disabled).");
+            // Local JSON
+            const messages = this.readJSON(this.messagesFile);
+            const msg = messages.find(m => m.id === messageId);
+            if (msg) {
+                if (!msg.reactions) msg.reactions = [];
+                // Dedup
+                if (!msg.reactions.some(r => r.user === username && r.emoji === emoji)) {
+                    msg.reactions.push({ emoji, user: username });
+                    this.writeJSON(this.messagesFile, messages);
+
+                    // Broadcast reaction? index.js handles socket event but uses `addReaction` just for storage.
+                    // Ideally we emit here too? No, index.js listens to event provided by User.
+                }
+            }
         }
     }
 
-    async cleanup(days = 90) {
+    async cleanup(daysToKeep) {
         if (this.adapter && this.adapter.cleanupOldMessages) {
-            await this.adapter.cleanupOldMessages(days);
+            await this.adapter.cleanupOldMessages(daysToKeep);
+        }
+    }
+
+    setStatusHandler(callback) {
+        this.onStatusCallback = callback;
+        if (this.adapter && this.adapter.setStatusHandler) {
+            this.adapter.setStatusHandler(callback);
         }
     }
 

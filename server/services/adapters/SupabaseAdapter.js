@@ -78,6 +78,8 @@ class SupabaseAdapter {
                 })
                 .subscribe((status) => {
                     console.log('[SupabaseAdapter] Subscription status:', status);
+                    if (this.onStatusCallback) this.onStatusCallback(status);
+
                     if (status === 'SUBSCRIBED') {
                         this.trackPresence();
                         if (this.pollingInterval) clearInterval(this.pollingInterval); // Stop polling if WS works
@@ -361,6 +363,10 @@ class SupabaseAdapter {
             console.log('[SupabaseAdapter] Parsed Online Users (WS):', onlineUsers.length);
             this.onPresenceCallback(onlineUsers);
         }
+    }
+
+    setStatusHandler(callback) {
+        this.onStatusCallback = callback;
     }
 
     setMessageHandler(callback) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { io } from "socket.io-client";
 import ConnectionForm from './components/ConnectionForm';
 import QueryBuilder from './components/QueryBuilder'; // Legacy
@@ -23,6 +23,7 @@ import {
 // --- Theme Context & Definitions ---
 import { ThemeContext, THEMES } from './context/ThemeContext';
 import { useApi } from './context/ApiContext';
+import { decryptPassword } from './utils/security';
 
 import pkg from '../package.json';
 
@@ -145,33 +146,168 @@ function App() {
         return [];
     });
 
-    // Reminders State (Lifted)
-    const [reminders, setReminders] = useState(() => {
-        const saved = localStorage.getItem('hap_reminders');
+    // Connection Switcher State
+    const [savedConnections, setSavedConnections] = useState([]);
+    const [showConnectionSwitcher, setShowConnectionSwitcher] = useState(false);
+    const dropdownRef = useRef(null);
+    const [toast, setToast] = useState(null); // { message, type }
+
+    // Auto-dismiss toast
+    useEffect(() => {
+        if (toast) {
+            const timer = setTimeout(() => setToast(null), 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [toast]);
+
+    // Click outside to close connection switcher
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+                setConnectionBadgeExpanded(false);
+                setShowConnectionSwitcher(false); // Reset to main view
+            }
+        };
+
+        if (connectionBadgeExpanded) {
+            document.addEventListener("mousedown", handleClickOutside);
+        }
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+        };
+    }, [connectionBadgeExpanded]);
+
+    const loadSavedConnections = () => {
+        const saved = localStorage.getItem('oracle_connections');
         if (saved) {
             try {
-                let parsed = JSON.parse(saved);
-                // Migration: Ensure status exists
-                parsed = parsed.map(r => {
-                    if (!r.status) {
-                        return { ...r, status: r.completed ? 'COMPLETED' : 'PENDING' };
-                    }
-                    return r;
-                });
-                return parsed;
-            } catch (e) {
-                console.error("Failed to parse reminders", e);
+                setSavedConnections(JSON.parse(saved));
+            } catch (e) { console.error(e); }
+        }
+    };
+
+    useEffect(() => {
+        loadSavedConnections();
+        // Listen for storage changes in case ConnectionForm updates it
+        const handleStorageChange = (e) => {
+            if (e.key === 'oracle_connections') {
+                loadSavedConnections();
             }
+        };
+        window.addEventListener('storage', handleStorageChange);
+        return () => window.removeEventListener('storage', handleStorageChange);
+    }, []);
+
+    const handleQuickSwitch = async (conn) => {
+        const decryptedConn = {
+            ...conn,
+            password: decryptPassword(conn.password),
+            connectString: conn.isDefault ? decryptPassword(conn.connectString) : conn.connectString
+        };
+
+        try {
+            // Force Backend Re-connection
+            const response = await fetch(`${apiUrl}/api/connect`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(decryptedConn)
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                handleConnect(decryptedConn);
+                setShowConnectionSwitcher(false);
+                setConnectionBadgeExpanded(false);
+                setToast({ message: `Conectado a ${conn.connectionName || conn.user}`, type: 'success' });
+            } else {
+                setToast({ message: 'Falha ao trocar: ' + data.message, type: 'error' });
+            }
+        } catch (e) {
+            console.error(e);
+            setToast({ message: 'Erro ao conectar: ' + e.message, type: 'error' });
+        }
+    };
+
+    // Reminders State (Lifted & User-Scoped)
+    // Synchronous Initialization to prevent "Empty Flash" on F5
+    const [reminders, setReminders] = useState(() => {
+        const rawUser = localStorage.getItem('chat_user');
+        if (rawUser) {
+            try {
+                const u = JSON.parse(rawUser);
+                const userKey = `hap_reminders_${u.username}`;
+                const saved = localStorage.getItem(userKey);
+
+                // 1. User specific
+                if (saved) return JSON.parse(saved).map(r => (!r.status ? { ...r, status: r.completed ? 'COMPLETED' : 'PENDING' } : r));
+
+                // 2. Migration (Startups)
+                const legacy = localStorage.getItem('hap_reminders');
+                if (legacy) return JSON.parse(legacy).map(r => (!r.status ? { ...r, status: r.completed ? 'COMPLETED' : 'PENDING' } : r));
+            } catch (e) { }
         }
         return [];
     });
 
-    // Persistence for Reminders
+    // Guard Ref to prevent saving "Old User Data" to "New User Key" during switch
+    const remindersLoadedFor = React.useRef(() => {
+        const raw = localStorage.getItem('chat_user');
+        return raw ? JSON.parse(raw).username : null;
+    });
+
+    // 1. Load Reminders when ChatUser changes (Switch Profiles)
     useEffect(() => {
-        if (reminders.length > 0) { // Optional: prevent clearing on initial load if empty? No, initialization handles that.
-            localStorage.setItem('hap_reminders', JSON.stringify(reminders));
+        if (chatUser) {
+            // Fix ref init if needed (function check)
+            if (typeof remindersLoadedFor.current === 'function') {
+                try { remindersLoadedFor.current = remindersLoadedFor.current(); } catch (e) { remindersLoadedFor.current = null; }
+            }
+
+            // If switching user (current ref != new user), load.
+            if (remindersLoadedFor.current !== chatUser.username) {
+                const userKey = `hap_reminders_${chatUser.username}`;
+                const legacyKey = 'hap_reminders';
+
+                const saved = localStorage.getItem(userKey);
+                if (saved) {
+                    try {
+                        let parsed = JSON.parse(saved);
+                        parsed = parsed.map(r => (!r.status ? { ...r, status: r.completed ? 'COMPLETED' : 'PENDING' } : r));
+                        setReminders(parsed);
+                    } catch (e) { setReminders([]); }
+                } else {
+                    // Fallback
+                    const legacy = localStorage.getItem(legacyKey);
+                    if (legacy && !localStorage.getItem(`migrated_${chatUser.username}`)) {
+                        try {
+                            let parsed = JSON.parse(legacy);
+                            parsed = parsed.map(r => (!r.status ? { ...r, status: r.completed ? 'COMPLETED' : 'PENDING' } : r));
+                            setReminders(parsed);
+                        } catch (e) { setReminders([]); }
+                    } else {
+                        setReminders([]);
+                    }
+                }
+                // Mark as loaded for this user
+                remindersLoadedFor.current = chatUser.username;
+            }
+        } else {
+            setReminders([]);
+            remindersLoadedFor.current = null;
         }
-    }, [reminders]);
+    }, [chatUser]);
+
+    // 2. Persist Reminders (User-Scoped)
+    useEffect(() => {
+        // Only save if we are sure the current `reminders` state belongs to `chatUser`
+        if (chatUser && remindersLoadedFor.current === chatUser.username) {
+            const userKey = `hap_reminders_${chatUser.username}`;
+            localStorage.setItem(userKey, JSON.stringify(reminders));
+
+            // Mark migration as done if we saved successfully
+            localStorage.setItem(`migrated_${chatUser.username}`, 'true');
+        }
+    }, [reminders, chatUser]);
 
     const saveReminders = setReminders; // Alias for backward compatibility in prop drilling, or just pass setReminders directly
 
@@ -246,20 +382,29 @@ function App() {
             setDownloadProgress(0);
 
             // Failsafe: Reset to idle if no response after 15 seconds (prevents infinite loop)
+            // Failsafe: Reset to idle if no response after 15 seconds (prevents infinite loop)
             const timeoutId = setTimeout(() => {
-                if (updateStatus === 'checking') {
-                    console.warn("Update check timed out.");
-                    setUpdateStatus('idle'); // Or 'up-to-date' if we want to be optimistic, but 'idle' is safer?
-                    // Let's show a toast saying "Check timed out" or just silent fail?
-                    // User complained about "Infinite", so better to finish.
-                    // If manual, maybe 'up-to-date' style?
-                    window.dispatchEvent(new CustomEvent('update-timeout')); // Optional custom handling
-                }
+                setUpdateStatus(prev => {
+                    if (prev === 'checking') {
+                        console.warn("Update check timed out.");
+                        return 'idle';
+                    }
+                    return prev;
+                });
             }, 15000);
 
             // Trigger native check
             try {
-                await window.electronAPI.invoke('manual-check-update');
+                const result = await window.electronAPI.invoke('manual-check-update');
+                // If update check returns explicitly (e.g. skipped or immediate result), handling it here creates race conditions with events.
+                // But if it's null/undefined (Dev mode skipped), we should reset.
+                if (!result) {
+                    console.log("Update check returned no result (likely Dev mode).");
+                    // Delay slightly to allow events to fire if they exist
+                    setTimeout(() => {
+                        setUpdateStatus(prev => prev === 'checking' ? 'up-to-date' : prev); // Assume up-to-date if no result
+                    }, 2000);
+                }
             } catch (error) {
                 console.error("Update invoke error:", error);
                 setUpdateStatus('error');
@@ -528,46 +673,120 @@ function App() {
                             </label>
                         </div>
 
-                        <ErrorBoundary>
-                            <UpdateManager
-                                status={updateStatus}
-                                updateInfo={updateInfo}
-                                progress={downloadProgress}
-                                onCheck={() => checkForUpdates(true)}
-                                onRestart={() => window.electronAPI.invoke('restart_app')}
-                                onDismiss={() => setUpdateStatus('idle')}
-                            />
-                        </ErrorBoundary>
+
 
                         {/* Global Connection Badge - Responsive & Interactive */}
                         {connection && (
-                            <div
-                                onClick={() => setConnectionBadgeExpanded(!connectionBadgeExpanded)}
-                                className={`
-                                    flex items-center gap-2 px-2 py-1.5 rounded-full text-xs font-bold border shadow-sm transition-all duration-300 cursor-pointer select-none
-                                    ${connectionBadgeExpanded
-                                        ? 'bg-indigo-600 text-white border-indigo-500 pr-4'
-                                        : 'bg-white text-indigo-600 border-indigo-100 hover:bg-indigo-50'
-                                    }
-                                `}
-                                title={`Conexão: ${connection.connectionName || 'N/A'}\nUsuário: ${connection.user}\nHost: ${connection.connectString}`}
-                            >
-                                <div className={`p-0.5 rounded-full transition-colors ${connectionBadgeExpanded ? 'bg-indigo-500 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
-                                    <Database size={14} className={`shrink-0`} />
+                            <div className="relative z-50">
+                                <div
+                                    onClick={() => setConnectionBadgeExpanded(!connectionBadgeExpanded)}
+                                    className={`
+                                        flex items-center gap-2 px-2 py-1.5 rounded-full text-xs font-bold border shadow-sm transition-all duration-300 cursor-pointer select-none
+                                        ${connectionBadgeExpanded
+                                            ? 'bg-indigo-600 text-white border-indigo-500 pr-4'
+                                            : 'bg-white text-indigo-600 border-indigo-100 hover:bg-indigo-50'
+                                        }
+                                    `}
+                                    title={`Conexão: ${connection.connectionName || 'N/A'}\nUsuário: ${connection.user}\nHost: ${connection.connectString}`}
+                                >
+                                    <div className={`p-0.5 rounded-full transition-colors ${connectionBadgeExpanded ? 'bg-indigo-500 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
+                                        <Database size={14} className={`shrink-0`} />
+                                    </div>
+
+                                    <div className={`
+                                        overflow-hidden whitespace-nowrap transition-all duration-500 ease-in-out flex flex-col items-start
+                                        ${connectionBadgeExpanded ? 'max-w-[200px] opacity-100 ml-1' : 'max-w-0 opacity-0'}
+                                    `}>
+                                        <span className="truncate leading-tight block">
+                                            {connection.connectionName || connection.user}
+                                        </span>
+                                        {connectionBadgeExpanded && <span className="text-[9px] font-normal opacity-80 block truncate w-full">{connection.user} @ {connection.connectString}</span>}
+                                    </div>
+
+                                    {/* Status Dot */}
+                                    <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${connectionBadgeExpanded ? 'bg-green-300' : 'bg-green-500'}`}></span>
                                 </div>
 
-                                <div className={`
-                                    overflow-hidden whitespace-nowrap transition-all duration-500 ease-in-out flex flex-col items-start
-                                    ${connectionBadgeExpanded ? 'max-w-[200px] opacity-100 ml-1' : 'max-w-0 opacity-0'}
-                                `}>
-                                    <span className="truncate leading-tight block">
-                                        {connection.connectionName || connection.user}
-                                    </span>
-                                    {connectionBadgeExpanded && <span className="text-[9px] font-normal opacity-80 block truncate w-full">{connection.user} @ {connection.connectString}</span>}
-                                </div>
+                                {/* Unified Connection Switcher Dropdown */}
+                                {connectionBadgeExpanded && (
+                                    <div ref={dropdownRef} className="absolute top-full mt-2 right-0 bg-white rounded-xl shadow-xl border border-gray-100 p-2 w-[240px] flex flex-col gap-1 z-50 animate-in fade-in slide-in-from-top-2 origin-top-right">
 
-                                {/* Status Dot */}
-                                <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${connectionBadgeExpanded ? 'bg-green-300' : 'bg-green-500'}`}></span>
+                                        {!showConnectionSwitcher ? (
+                                            // VIEW 1: Actions
+                                            <>
+                                                <div className="px-2 py-1.5 text-xs text-gray-500 font-bold border-b border-gray-100 mb-1">
+                                                    Conexão Atual
+                                                </div>
+
+                                                {/* Switch Trigger */}
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setShowConnectionSwitcher(true);
+                                                    }}
+                                                    className="flex items-center gap-2 w-full px-2 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 rounded-lg text-left transition-colors"
+                                                >
+                                                    <span className="text-gray-400">⇄</span> Trocar Conexão
+                                                </button>
+
+                                                {/* Disconnect */}
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleDisconnect();
+                                                    }}
+                                                    className="flex items-center gap-2 w-full px-2 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-lg text-left transition-colors"
+                                                >
+                                                    <span className="text-red-400">✕</span> Desconectar
+                                                </button>
+                                            </>
+                                        ) : (
+                                            // VIEW 2: Saved Connections List
+                                            <>
+                                                <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-gray-500 font-bold border-b border-gray-100 mb-1">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setShowConnectionSwitcher(false);
+                                                        }}
+                                                        className="hover:text-blue-600 hover:bg-blue-50 p-1 -ml-1 rounded transition-colors"
+                                                        title="Voltar"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+                                                    </button>
+                                                    <span>Conexões Salvas</span>
+                                                </div>
+
+                                                <div className="max-h-[200px] overflow-y-auto custom-scrollbar">
+                                                    {savedConnections.length === 0 && <div className="text-center p-2 text-xs text-gray-400">Nenhuma salva</div>}
+                                                    {savedConnections.map((conn, i) => (
+                                                        <button
+                                                            key={i}
+                                                            onClick={(e) => { e.stopPropagation(); handleQuickSwitch(conn); }}
+                                                            className="w-full text-left px-2 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-lg truncate flex items-center justify-between group"
+                                                        >
+                                                            <span>{conn.connectionName || 'Sem nome'}</span>
+                                                            {conn.id === connection.id && <span className="text-green-500">●</span>}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                <div className="border-t border-gray-100 mt-1 pt-1">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDisconnect();
+                                                            setConnectionBadgeExpanded(false);
+                                                        }}
+                                                        className="w-full text-left px-2 py-2 text-xs text-blue-600 font-bold hover:bg-blue-50 rounded-lg"
+                                                    >
+                                                        + Nova Conexão
+                                                    </button>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -598,7 +817,7 @@ function App() {
                             <select
                                 value={currentThemeName}
                                 onChange={(e) => changeTheme(e.target.value)}
-                                className={`text-xs py-1 px-1 rounded-lg bg-gray-50 border border-gray-200 outline-none cursor-pointer hover:bg-white hover:border-blue-300 transition-colors text-gray-600 font-medium max-w-[80px] truncate`}
+                                className={`text-xs py-1 px-2 rounded-lg bg-gray-50 border border-gray-200 outline-none cursor-pointer hover:bg-white hover:border-blue-300 transition-colors text-gray-600 font-medium`}
                                 title="Mudar Tema"
                             >
                                 {Object.entries(THEMES).map(([key, val]) => (
@@ -630,7 +849,7 @@ function App() {
                         <div className="h-full flex flex-col relative w-full">
 
                             {/* Team Chat (Always Visible if Active) */}
-                            <div key={activeTab} className={`${activeTab === 'team-chat' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                            <div key="view-team-chat" className={`${activeTab === 'team-chat' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                 <ErrorBoundary>
                                     <TeamChat
                                         isVisible={activeTab === 'team-chat'}
@@ -645,7 +864,7 @@ function App() {
                             </div>
 
                             {/* SQL Runner (Gated by Oracle Connection) */}
-                            <div key={activeTab + '-sql'} className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                            <div key="view-sql-runner" className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                 <ErrorBoundary>
                                     {!connection ? (
                                         <ConnectionForm onConnect={handleConnect} />
@@ -667,19 +886,18 @@ function App() {
                                 </ErrorBoundary>
                             </div>
                             {/* AI Builder (Gated by Oracle Connection) */}
-                            {/* AI Builder (Gated by Oracle Connection) */}
-                            <div key={activeTab + '-builder'} className={`${activeTab === 'query-builder' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                            <div key="view-query-builder" className={`${activeTab === 'query-builder' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                 <ErrorBoundary>
                                     {!connection ? (
                                         <ConnectionForm onConnect={handleConnect} />
                                     ) : (
-                                        <AiBuilder isVisible={activeTab === 'query-builder'} />
+                                        <AiBuilder isVisible={activeTab === 'query-builder'} connection={connection} />
                                     )}
                                 </ErrorBoundary>
                             </div>
 
                             {/* CSV Importer (Gated by Oracle Connection) */}
-                            <div key={activeTab + '-csv'} className={`${activeTab === 'csv-importer' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                            <div key="view-csv-importer" className={`${activeTab === 'csv-importer' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                 <ErrorBoundary>
                                     {!connection ? (
                                         <ConnectionForm onConnect={handleConnect} />
@@ -690,7 +908,7 @@ function App() {
                             </div>
 
                             {/* Reminders (Not Gated) */}
-                            <div key={activeTab + '-reminders'} className={`${activeTab === 'reminders' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                            <div key="view-reminders" className={`${activeTab === 'reminders' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                 <ErrorBoundary>
                                     <Reminders
                                         isVisible={activeTab === 'reminders'}
@@ -703,7 +921,7 @@ function App() {
                             </div>
 
                             {/* Docs (Not Gated) */}
-                            <div key={activeTab + '-docs'} className={`${activeTab === 'docs' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                            <div key="view-docs" className={`${activeTab === 'docs' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                 <ErrorBoundary>
                                     <DocsModule
                                         pendingDoc={pendingDoc}
@@ -716,6 +934,14 @@ function App() {
                     </div>
                 </main>
             </div>
+
+            {/* Toast Notification */}
+            {toast && (
+                <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg shadow-xl text-white text-sm font-bold flex items-center gap-2 animate-in slide-in-from-bottom-5 fade-in z-[100] ${toast.type === 'error' ? 'bg-red-500' : 'bg-green-600'}`}>
+                    <span>{toast.type === 'error' ? '⚠️' : '✅'}</span>
+                    <span>{toast.message}</span>
+                </div>
+            )}
         </ThemeContext.Provider>
     );
 }

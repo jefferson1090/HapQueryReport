@@ -260,13 +260,50 @@ function QueryBuilder({ isVisible }) {
         }
 
         setIsExporting(true);
-        // Use setTimeout to allow the UI to update with the spinner before the heavy sync operation
+        // Helper tokens
+        const getFormattedTimestamp = () => {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
+        };
+
+        const formatValueForExport = (val) => {
+            if (val === null || val === undefined) return '';
+            if (typeof val !== 'string') return val;
+            const isoDateRegex = /^\d{4}-\d{2}-\d{2}/;
+            if (isoDateRegex.test(val)) {
+                const date = new Date(val);
+                if (!isNaN(date.getTime())) {
+                    const day = String(date.getDate()).padStart(2, '0');
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const year = date.getFullYear();
+                    const hours = String(date.getHours()).padStart(2, '0');
+                    const minutes = String(date.getMinutes()).padStart(2, '0');
+                    const seconds = String(date.getSeconds()).padStart(2, '0');
+                    if (hours === '00' && minutes === '00' && seconds === '00') {
+                        return `${day}/${month}/${year}`;
+                    }
+                    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+                }
+            }
+            return val;
+        };
+
         setTimeout(() => {
             try {
                 const header = results.metaData.map(m => m.name);
-                const data = [header, ...results.rows];
-                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-                const filename = `export_${timestamp}`;
+                // Format rows
+                const formattedRows = results.rows.map(row =>
+                    row.map(cell => formatValueForExport(cell))
+                );
+
+                const data = [header, ...formattedRows];
+                const filename = `exportacao_${getFormattedTimestamp()}`;
 
                 if (type === 'xlsx') {
                     const wb = XLSX.utils.book_new();

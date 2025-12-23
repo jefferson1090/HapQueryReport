@@ -899,3 +899,180 @@ connect ECONNREFUSED 127.0.0.1:1521
 [2025-12-18T18:51:56.044Z] Connection successful for user: c_stenio
 [2025-12-18T18:55:49.326Z] Connection successful for user: c_stenio
 [2025-12-18T19:03:12.697Z] Connection successful for user: c_stenio
+[2025-12-19T14:02:13.155Z] Connection successful for user: c_stenio
+[2025-12-19T14:03:30.955Z] Connection successful for user: c_stenio
+[2025-12-19T14:33:45.336Z] Connection successful for user: c_stenio
+[2025-12-19T14:43:57.700Z] Connection successful for user: c_stenio
+[2025-12-19T14:45:25.025Z] Executing Create Table: CREATE TABLE "TT_EXTRACAO_BATE_VIDAS_OPE" ("TP_BENEFICIARIO" VARCHAR2(255), "CD_OPERADORA" VARCHAR2(255), "CD_CREDENCIAL" NUMBER, "NM_USUARIO" VARCHAR2(255), "NU_CPF" NUMBER, "CD_USUARIO" VARCHAR2(255), "DT_CANCELAMENTO_OPE" DATE, "FL_STATUS_USUARIO_SIGO" NUMBER, "DT_CANCELAMENTO_SIGO" DATE)
+[2025-12-19T14:45:25.152Z] Table created successfully
+[2025-12-19T14:45:42.606Z] Executing Insert SQL (first 100 chars): INSERT INTO "TT_EXTRACAO_BATE_VIDAS_OPE" ("TP_BENEFICIARIO", "CD_OPERADORA", "CD_CREDENCIAL", "NM_US
+[2025-12-19T14:45:42.884Z] Inserted 261 rows.
+[2025-12-19T14:54:51.250Z] Connection successful for user: c_stenio
+[2025-12-19T14:55:36.201Z] Executing Create Table: CREATE TABLE "TT_EXTRACAO_BATE_VIDAS_OPE" ("TP_BENEFICIARIO" VARCHAR2(255), "CD_OPERADORA" VARCHAR2(255), "CD_CREDENCIAL" VARCHAR2(255), "NM_USUARIO" VARCHAR2(255), "NU_CPF" NUMBER, "CD_USUARIO" VARCHAR2(255), "DT_CANCELAMENTO_OPE" DATE, "FL_STATUS_USUARIO_SIGO" NUMBER, "DT_CANCELAMENTO_SIGO" DATE)
+[2025-12-19T14:55:36.329Z] Table created successfully
+[2025-12-19T14:55:52.616Z] Executing Insert SQL (first 100 chars): INSERT INTO "TT_EXTRACAO_BATE_VIDAS_OPE" ("TP_BENEFICIARIO", "CD_OPERADORA", "CD_CREDENCIAL", "NM_US
+[2025-12-19T14:55:52.825Z] Inserted 261 rows.
+[2025-12-19T18:10:26.705Z] Connection successful for user: c_stenio
+[2025-12-19T18:10:26.753Z] Connection successful for user: c_stenio
+[2025-12-19T18:26:49.864Z] Connection successful for user: c_stenio
+[2025-12-19T18:28:31.997Z] Connection successful for user: c_stenio
+[2025-12-19T18:28:54.169Z] Connection successful for user: c_stenio
+[2025-12-19T18:30:26.990Z] Connection successful for user: c_stenio
+[2025-12-19T18:45:43.643Z] Connection successful for user: c_stenio
+[2025-12-19T18:56:07.128Z] Connection successful for user: c_stenio
+[2025-12-19T19:01:35.389Z] Connection successful for user: c_stenio
+[2025-12-19T19:09:27.903Z] Connection successful for user: c_stenio
+[2025-12-19T19:16:51.005Z] Connection successful for user: c_stenio
+[2025-12-19T20:01:01.606Z] Connection successful for user: c_stenio
+[2025-12-19T20:10:47.596Z] Connection successful for user: c_stenio
+[2025-12-19T20:20:33.906Z] Connection successful for user: c_stenio
+[2025-12-21T12:36:09.173Z] Connection successful for user: c_stenio
+[2025-12-21T14:22:54.412Z] Connection successful for user: c_stenio
+[2025-12-21T14:28:00.859Z] Connection successful for user: c_stenio
+[2025-12-21T14:35:39.537Z] Connection successful for user: c_stenio
+[2025-12-21T14:35:57.651Z] Connection successful for user: c_stenio
+[2025-12-21T14:37:39.780Z] Connection successful for user: c_stenio
+[2025-12-21T14:56:58.405Z] Connection successful for user: c_stenio
+[2025-12-21T15:06:12.472Z] Connection successful for user: c_stenio
+[2025-12-21T15:23:44.709Z] Connection successful for user: c_stenio
+[2025-12-21T15:32:37.390Z] Connection successful for user: c_stenio
+[2025-12-21T15:44:32.636Z] Connection successful for user: c_stenio
+[2025-12-21T16:46:45.443Z] Connection successful for user: c_stenio
+[2025-12-21T17:02:25.978Z] Connection successful for user: c_stenio
+[2025-12-21T17:02:26.354Z] Connection successful for user: c_stenio
+[2025-12-21T20:19:00.480Z] Connection successful for user: c_stenio
+[2025-12-21T20:21:58.602Z] Connection successful for user: c_stenio
+[2025-12-21T20:57:30.011Z] Connection successful for user: c_stenio
+[2025-12-21T21:01:55.410Z] Connection successful for user: c_stenio
+[2025-12-21T21:03:18.873Z] Connection successful for user: c_stenio
+[2025-12-21T21:06:41.893Z] Connection successful for user: c_stenio
+[2025-12-21T21:06:42.757Z] Connection successful for user: c_stenio
+[2025-12-21T21:06:44.017Z] Connection successful for user: c_stenio
+[2025-12-21T21:06:44.078Z] Connection successful for user: c_stenio
+[2025-12-21T21:07:00.322Z] Connection successful for user: c_stenio
+[2025-12-21T21:07:27.979Z] Connection successful for user: c_stenio
+[2025-12-21T21:07:45.393Z] Connection successful for user: c_stenio
+[2025-12-21T21:07:46.143Z] Connection successful for user: c_stenio
+[2025-12-21T21:07:47.194Z] Connection successful for user: c_stenio
+[2025-12-21T21:14:10.416Z] Connection successful for user: c_stenio
+[2025-12-21T21:14:17.559Z] Connection successful for user: c_stenio
+[2025-12-21T21:15:56.568Z] Connection successful for user: c_stenio
+[2025-12-21T21:17:02.656Z] Connection successful for user: c_stenio
+[2025-12-21T21:17:10.127Z] Connection successful for user: c_stenio
+[2025-12-21T21:17:26.710Z] Connection successful for user: c_stenio
+[2025-12-21T22:04:30.998Z] Connection successful for user: c_stenio
+[2025-12-21T22:20:15.323Z] Connection successful for user: c_stenio
+[2025-12-21T22:35:18.969Z] Connection successful for user: c_stenio
+[2025-12-21T22:46:16.257Z] Connection successful for user: c_stenio
+[2025-12-21T23:11:00.833Z] Connection successful for user: c_stenio
+[2025-12-21T23:19:34.207Z] Connection successful for user: c_stenio
+[2025-12-21T23:20:26.778Z] Connection successful for user: c_stenio
+[2025-12-22T01:35:16.362Z] Connection successful for user: c_stenio
+[2025-12-22T01:59:49.972Z] Connection successful for user: c_stenio
+[2025-12-22T02:26:38.842Z] Connection failed: ORA-12154: TNS:could not resolve the connect identifier specified
+[2025-12-22T02:27:45.855Z] Connection successful for user: c_stenio
+[2025-12-22T02:56:15.458Z] Connection successful for user: c_stenio
+[2025-12-22T02:59:07.176Z] Connection successful for user: c_stenio
+[2025-12-22T03:00:37.972Z] Connection successful for user: c_stenio
+[2025-12-22T03:04:49.827Z] Connection successful for user: c_stenio
+[2025-12-22T11:58:23.835Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-22T11:58:25.529Z] [DB] Pool created successfully.
+[2025-12-22T11:58:25.532Z] Connection successful for user: c_stenio
+[2025-12-22T12:00:51.177Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-22T12:00:52.728Z] [DB] Pool created successfully.
+[2025-12-22T12:00:52.730Z] Connection successful for user: c_stenio
+[2025-12-22T12:50:43.477Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-22T12:50:45.012Z] [DB] Pool created successfully.
+[2025-12-22T12:50:45.014Z] Connection successful for user: c_stenio
+[2025-12-22T12:53:20.026Z] [DB] Creating new connection pool for: c_stenio_SRV-CLIENT.HAPVIDA.COM.BR:1521/CLIENT
+[2025-12-22T12:53:21.217Z] [DB] Pool created successfully.
+[2025-12-22T13:02:08.620Z] Connection successful for user: c_stenio
+[2025-12-22T13:02:43.516Z] Connection successful for user: c_stenio
+[2025-12-22T15:16:22.866Z] Connection successful for user: c_stenio
+[2025-12-22T15:21:00.186Z] Connection successful for user: c_stenio
+[2025-12-22T17:11:32.186Z] Connection successful for user: c_stenio
+[2025-12-22T17:18:34.922Z] Connection successful for user: c_stenio
+[2025-12-22T17:57:09.969Z] Connection successful for user: c_stenio
+[2025-12-22T18:07:26.098Z] Connection successful for user: c_stenio
+[2025-12-22T18:07:59.255Z] Connection successful for user: c_stenio
+[2025-12-22T18:32:07.613Z] Connection successful for user: c_stenio
+[2025-12-22T18:45:50.593Z] Connection successful for user: c_stenio
+[2025-12-22T19:23:48.837Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-22T19:23:50.518Z] [DB] Pool created successfully.
+[2025-12-22T19:23:50.520Z] Connection successful for user: c_stenio
+[2025-12-22T19:24:44.774Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-22T19:24:46.431Z] [DB] Pool created successfully.
+[2025-12-22T19:24:46.433Z] Connection successful for user: c_stenio
+[2025-12-22T20:10:15.478Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-22T20:10:17.054Z] [DB] Pool created successfully.
+[2025-12-22T20:10:17.056Z] Connection successful for user: c_stenio
+[2025-12-22T20:25:27.295Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-22T20:25:29.006Z] [DB] Pool created successfully.
+[2025-12-22T20:25:29.008Z] Connection successful for user: c_stenio
+[2025-12-22T20:30:51.612Z] Connection successful for user: c_stenio
+[2025-12-22T20:35:55.470Z] Connection successful for user: c_stenio
+[2025-12-22T21:02:12.360Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-22T21:02:13.925Z] [DB] Pool created successfully.
+[2025-12-22T21:02:13.927Z] Connection successful for user: c_stenio
+[2025-12-22T21:10:31.450Z] [DB] Creating new connection pool for: c_stenio_SRV-CLIENT.HAPVIDA.COM.BR:1521/CLIENT
+[2025-12-22T21:10:32.703Z] [DB] Pool created successfully.
+[2025-12-22T21:10:32.704Z] Connection successful for user: c_stenio
+[2025-12-22T22:07:42.376Z] Connection successful for user: c_stenio
+[2025-12-22T22:11:35.563Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-22T22:11:37.155Z] [DB] Pool created successfully.
+[2025-12-22T22:11:37.157Z] Connection successful for user: c_stenio
+[2025-12-23T01:24:57.342Z] [DB] Error getting connection from pool: ORA-12154: TNS:could not resolve the connect identifier specified
+[2025-12-23T01:24:57.343Z] Connection failed: ORA-12154: TNS:could not resolve the connect identifier specified
+[2025-12-23T01:27:14.491Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T01:27:16.007Z] [DB] Pool created successfully.
+[2025-12-23T01:27:16.008Z] Connection successful for user: c_stenio
+[2025-12-23T01:37:56.616Z] Connection successful for user: c_stenio
+[2025-12-23T02:20:08.298Z] Connection successful for user: c_stenio
+[2025-12-23T02:22:28.598Z] [DB] Creating new connection pool for: _localhost:1521/XEPDB1
+[2025-12-23T02:22:30.796Z] [DB] Failed to create pool: ORA-12541: TNS:no listener
+[2025-12-23T02:22:30.796Z] Connection failed: ORA-12541: TNS:no listener
+[2025-12-23T02:22:32.067Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T02:22:33.204Z] [DB] Pool created successfully.
+[2025-12-23T02:22:33.206Z] Connection successful for user: c_stenio
+[2025-12-23T02:28:43.194Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T02:28:44.376Z] [DB] Pool created successfully.
+[2025-12-23T02:28:44.379Z] Connection successful for user: c_stenio
+[2025-12-23T02:29:15.608Z] [DB] Creating new connection pool for: c_stenio_SRV-CLIENT.HAPVIDA.COM.BR:1521/CLIENT
+[2025-12-23T02:29:16.242Z] [DB] Pool created successfully.
+[2025-12-23T02:31:46.312Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T02:31:47.464Z] [DB] Pool created successfully.
+[2025-12-23T02:31:47.466Z] Connection successful for user: c_stenio
+[2025-12-23T02:33:26.487Z] [DB] Creating new connection pool for: c_stenio_SRV-CLIENT.HAPVIDA.COM.BR:1521/CLIENT
+[2025-12-23T02:33:27.061Z] [DB] Pool created successfully.
+[2025-12-23T02:37:53.314Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T02:37:54.455Z] [DB] Pool created successfully.
+[2025-12-23T02:37:54.456Z] Connection successful for user: c_stenio
+[2025-12-23T02:40:24.691Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T02:40:25.828Z] [DB] Pool created successfully.
+[2025-12-23T02:40:25.830Z] Connection successful for user: c_stenio
+[2025-12-23T02:40:43.919Z] [DB] Creating new connection pool for: c_stenio_SRV-CLIENT.HAPVIDA.COM.BR:1521/CLIENT
+[2025-12-23T02:40:45.143Z] [DB] Pool created successfully.
+[2025-12-23T02:44:29.212Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T02:44:30.372Z] [DB] Pool created successfully.
+[2025-12-23T02:44:30.374Z] Connection successful for user: c_stenio
+[2025-12-23T02:44:48.319Z] [DB] Creating new connection pool for: c_stenio_SRV-CLIENT.HAPVIDA.COM.BR:1521/CLIENT
+[2025-12-23T02:44:48.869Z] [DB] Pool created successfully.
+[2025-12-23T03:07:17.351Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T03:07:18.507Z] [DB] Pool created successfully.
+[2025-12-23T03:07:18.510Z] Connection successful for user: c_stenio
+[2025-12-23T03:09:13.660Z] [DB] Creating new connection pool for: c_stenio_SRV-CLIENT.HAPVIDA.COM.BR:1521/CLIENT
+[2025-12-23T03:09:14.242Z] [DB] Pool created successfully.
+[2025-12-23T03:11:06.027Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T03:11:07.426Z] [DB] Pool created successfully.
+[2025-12-23T03:11:07.428Z] Connection successful for user: c_stenio
+[2025-12-23T03:12:44.863Z] [DB] Creating new connection pool for: c_stenio_SRV-CLIENT.HAPVIDA.COM.BR:1521/CLIENT
+[2025-12-23T03:12:45.768Z] [DB] Pool created successfully.
+[2025-12-23T03:14:50.348Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T03:14:50.387Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T03:14:51.488Z] [DB] Pool created successfully.
+[2025-12-23T03:14:51.489Z] Connection successful for user: c_stenio
+[2025-12-23T03:14:51.533Z] [DB] Pool created successfully.
+[2025-12-23T03:14:51.534Z] Connection successful for user: c_stenio
+[2025-12-23T03:34:59.623Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2025-12-23T03:35:00.799Z] [DB] Pool created successfully.
+[2025-12-23T03:35:00.802Z] Connection successful for user: c_stenio

@@ -1,6 +1,6 @@
 {
   "name": "hap-query-report-server",
-  "version": "2.5.2",
+  "version": "2.5.7",
   "main": "electron-main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -12,7 +12,7 @@
   },
   "build": {
     "appId": "com.hap.queryreport",
-    "productName": "Hap Assistente de Dados",
+    "productName": "Hap-Assistente-de-Dados",
     "npmRebuild": false,
     "directories": {
       "output": "dist"
@@ -57,6 +57,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.88.0",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^17.2.3",

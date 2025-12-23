@@ -14,8 +14,29 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
     // Core State
     const [messages, setMessages] = useState([]);
     const [usersOnline, setUsersOnline] = useState([]);
-    const [selectedUser, setSelectedUser] = useState(null);
+
+    // Persist Active Conversation
+    const [selectedUser, setSelectedUser] = useState(() => {
+        if (!user) return null;
+        try {
+            const saved = localStorage.getItem(`hap_chat_last_user_${user.username}`);
+            return saved ? JSON.parse(saved) : null;
+        } catch (e) { return null; }
+    });
+
+    useEffect(() => {
+        if (user) {
+            if (selectedUser) {
+                localStorage.setItem(`hap_chat_last_user_${user.username}`, JSON.stringify(selectedUser));
+            } else {
+                localStorage.removeItem(`hap_chat_last_user_${user.username}`);
+            }
+        }
+    }, [selectedUser, user]);
+
     const [unreadCounts, setUnreadCounts] = useState({});
+    const [typingUsers, setTypingUsers] = useState(new Set());
+    const typingTimeoutRef = useRef(null);
 
     // UI State
     const [isSidebarOpen, setIsSidebarOpen] = useState(true); // For mobile responsibility
@@ -37,8 +58,19 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
     useEffect(() => {
         if (!user || !socket) return;
 
+        // JOIN THE CHAT (Crucial for server broadcast registration)
+        socket.emit('join', { username: user.username, team: user.team || 'Geral' });
+
         const handleMessage = (msg) => {
             if (msg.content === '[HEARTBEAT]') return;
+
+            // Clear typing for sender upon message receipt
+            setTypingUsers(prev => {
+                const next = new Set(prev);
+                next.delete(msg.sender);
+                return next;
+            });
+
             setMessages(prev => {
                 // Dedup & Merge (Optimistic -> Real)
                 const existingIdx = prev.findIndex(m => m.id === msg.id || (m.metadata?.client_id && m.metadata.client_id === msg.metadata?.client_id));
@@ -84,10 +116,44 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
             }));
         };
 
+        const handleTyping = ({ username }) => {
+            if (username !== user.username) {
+                setTypingUsers(prev => {
+                    const next = new Set(prev);
+                    next.add(username);
+                    return next;
+                });
+            }
+        };
+
+        const handleStopTyping = ({ username }) => {
+            setTypingUsers(prev => {
+                const next = new Set(prev);
+                next.delete(username);
+                return next;
+            });
+        };
+
         socket.on('message', handleMessage);
         socket.on('update_user_list', handleUserList);
         socket.on('message_reaction', handleReactionUpdate);
         socket.on('message_update', handleMessageUpdate);
+        socket.on('typing', handleTyping);
+        socket.on('stop_typing', handleStopTyping);
+
+        // Status Listeners
+        socket.on('connect', () => setConnectionStatus('CONNECTED'));
+        socket.on('disconnect', () => setConnectionStatus('DISCONNECTED'));
+
+        socket.on('backend_status', (status) => {
+            console.log("Backend Status:", status);
+            if (status === 'SUBSCRIBED') setConnectionStatus('CONNECTED');
+            else if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) setConnectionStatus('OFFLINE');
+        });
+
+        // Initial check
+        if (socket.connected) setConnectionStatus('CONNECTED');
+        else setConnectionStatus('DISCONNECTED');
 
         // Initial Load
         fetchHistory(selectedUser ? selectedUser.username : 'ALL');
@@ -110,8 +176,27 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
             socket.off('update_user_list', handleUserList);
             socket.off('message_reaction', handleReactionUpdate);
             socket.off('message_update', handleMessageUpdate);
+            socket.off('typing', handleTyping);
+            socket.off('stop_typing', handleStopTyping);
+            socket.off('connect');
+            socket.off('disconnect');
         };
     }, [user, socket, selectedUser]);
+
+    const emitTyping = () => {
+        if (!socket || !user) return;
+
+        if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+        } else {
+            socket.emit('typing', { username: user.username });
+        }
+
+        typingTimeoutRef.current = setTimeout(() => {
+            socket.emit('stop_typing', { username: user.username });
+            typingTimeoutRef.current = null;
+        }, 2000);
+    };
 
     // === Read Receipts Logic ===
     useEffect(() => {
@@ -295,9 +380,16 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                 {/* Header */}
                 <div className="h-16 border-b border-gray-200 bg-white px-4 flex justify-between items-center flex-shrink-0 shadow-sm z-10">
                     <div>
-                        <h3 className="font-bold text-gray-800 text-lg">
-                            {selectedUser ? selectedUser.username : '# Geral'}
-                        </h3>
+                        <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-gray-800 text-lg">
+                                {selectedUser ? selectedUser.username : '# Geral'}
+                            </h3>
+                            {/* Connection Status Badge */}
+                            <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 border ${connectionStatus === 'CONNECTED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`} title={connectionStatus === 'CONNECTED' ? 'Serviço de mensagens ativo' : 'Desconectado do servidor'}>
+                                <div className={`w-1.5 h-1.5 rounded-full ${connectionStatus === 'CONNECTED' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                                {connectionStatus === 'CONNECTED' ? 'ONLINE' : 'OFFLINE'}
+                            </div>
+                        </div>
                         <p className="text-xs text-gray-400">
                             {selectedUser ? selectedUser.team : ' Canal de comunicação de toda a equipe'}
                         </p>
@@ -514,9 +606,20 @@ const TeamChat = ({ isVisible, user, socket, savedQueries, setSavedQueries, remi
                     }}
                 />
 
+                {/* Typing Indicator */}
+                {typingUsers.size > 0 && (
+                    <div className="px-4 py-1 text-xs text-green-600 font-medium italic bg-[#F5F7FB] border-t border-gray-100 animate-pulse">
+                        {selectedUser
+                            ? (typingUsers.has(selectedUser.username) ? `${selectedUser.username} está digitando...` : null)
+                            : (Array.from(typingUsers).slice(0, 3).join(', ') + (typingUsers.size > 1 ? ' estão digitando...' : ' está digitando...'))
+                        }
+                    </div>
+                )}
+
                 {/* Input Area */}
                 <ChatInput
                     onSend={handleSend}
+                    onTyping={emitTyping}
                     replyTo={replyTo}
                     onCancelReply={() => setReplyTo(null)}
                 />
