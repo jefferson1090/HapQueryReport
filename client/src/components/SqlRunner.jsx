@@ -11,7 +11,7 @@ import CodeMirror from '@uiw/react-codemirror';
 import { sql, PLSQL } from '@codemirror/lang-sql';
 import { autocompletion } from '@codemirror/autocomplete';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
-import { PanelRightClose, PanelRightOpen, Share2, Play, Square, Download, FolderOpen, Save, Trash2, Plus, X, Search, Database, MessageSquare, Zap, LogOut } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen, Share2, Play, Square, Download, FolderOpen, Save, Trash2, Plus, X, Search, Database, MessageSquare, Zap, LogOut, Home, Maximize2, Minimize2 } from 'lucide-react';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeList as VirtualList } from 'react-window';
 import ErrorBoundary from './ErrorBoundary';
@@ -104,6 +104,7 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const [showSaveInput, setShowSaveInput] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [showSidebar, setShowSidebar] = useState(true);
+    const [isMaximized, setIsMaximized] = useState(false);
     const [activeSidebarTab, setActiveSidebarTab] = useState('saved');
     const [aiChatHistory, setAiChatHistory] = useState([]);
     const [aiChatInput, setAiChatInput] = useState('');
@@ -144,6 +145,7 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const headerContainerRef = useRef(null);
     const viewRef = useRef(null);
     const containerRef = useRef(null);
+    const wrapperRef = useRef(null); // Full Screen Wrapper Ref
     const [listOuterElement, setListOuterElement] = useState(null); // Changed to state-ref for reliable effect triggering
 
     const showToast = (message, type = 'success', duration = 3000) => {
@@ -298,12 +300,38 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
             const res = await fetch(`${apiUrl}/api/upload/sql`, { method: 'POST', body: formData });
             const data = await res.json();
             if (data.error) throw new Error(data.error);
-            updateActiveTab({ sqlContent: data.sql, loading: false });
-            setQueryName(file.name.replace(/\.sql$/i, ''));
+            updateActiveTab({ sqlContent: data.content, loading: false });
+            showToast('Arquivo carregado com sucesso!');
         } catch (err) {
             updateActiveTab({ error: err.message, loading: false });
+            showToast('Erro ao carregar arquivo: ' + err.message, 'error');
         }
     };
+
+    // Full Screen Toggle Logic
+    const toggleFullScreen = () => {
+        if (!document.fullscreenElement) {
+            wrapperRef.current.requestFullscreen().catch(err => {
+                console.error(`Error attempting to enable fullscreen: ${err.message}`);
+            });
+            setIsMaximized(true);
+        } else {
+            document.exitFullscreen();
+            setIsMaximized(false);
+        }
+    };
+
+    // Listen for Full Screen Exit (Esc key)
+    useEffect(() => {
+        const handleFullScreenChange = () => {
+            if (!document.fullscreenElement) {
+                setIsMaximized(false);
+            }
+        };
+        document.addEventListener('fullscreenchange', handleFullScreenChange);
+        return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
+    }, []);
+
 
     const abortControllerRef = useRef(null);
     const handleCancelQuery = () => {
@@ -795,553 +823,572 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                     </div>
                 )}
 
-                {/* Sidebar Toggle */}
-                <button
-                    onClick={() => setShowSidebar(!showSidebar)}
-                    className="absolute top-2 right-2 z-50 p-2 rounded-lg bg-white shadow-sm border border-gray-200 hover:bg-gray-50 text-gray-600 transition-all hover:scale-105"
-                    title={showSidebar ? "Ocultar Menu" : "Expandir Menu"}
-                >
-                    {showSidebar ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
-                </button>
+                <div ref={wrapperRef} className="flex flex-col h-full bg-gray-50 relative overflow-hidden">
 
-                <PanelGroup direction="horizontal" className="h-full">
-                    <Panel defaultSize={80} minSize={30} className="flex flex-col h-full overflow-hidden">
-                        <div className="flex flex-col h-full">
-                            {/* ---------- TABS ---------- */}
-                            <div className={`flex items-center w-full ${theme.border} border-b px-2 pt-2 gap-2`}>
-                                {/* Scrollable Tabs Section */}
-                                <div className="flex-1 flex items-center gap-1 overflow-x-auto no-scrollbar min-w-0">
-                                    {tabs.map(tab => (
-                                        <div
-                                            key={tab.id}
-                                            onClick={() => setActiveTabId(tab.id)}
-                                            onDoubleClick={() => handleTabDoubleClick(tab)}
-                                            title={`Query: ${tab.title}\nConexão: ${tab.connection?.connectionName || tab.connection?.user || 'Desconhecido'}`}
-                                            className={`
+                    {/* MAIN CONTENT WRAPPER */}
+                    <div className={`flex-1 overflow-hidden flex flex-col relative ${isMaximized ? 'p-0' : 'p-2'}`}>
+                        <div className={`bg-white shadow-sm border border-gray-200 flex-1 flex flex-col overflow-hidden relative ${isMaximized ? 'rounded-none border-0' : 'rounded-2xl'}`}>
+
+                            {/* Internal Sidebar Toggle (Legacy) */}
+
+                            {/* Original Sidebar Toggle for Internal Panel */}
+                            <button
+                                onClick={() => setShowSidebar(!showSidebar)}
+                                className="absolute top-2 right-2 z-50 p-1.5 rounded-lg bg-white shadow-sm border border-gray-200 hover:bg-gray-50 text-gray-600 transition-all hover:scale-105"
+                                title={showSidebar ? "Ocultar Menu Lateral" : "Expandir Menu Lateral"}
+                            >
+                                {showSidebar ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+                            </button>
+
+                            <PanelGroup direction="horizontal" className="h-full">
+                                <Panel defaultSize={80} minSize={30} className="flex flex-col h-full overflow-hidden">
+                                    <div className="flex flex-col h-full">
+                                        {/* ---------- TABS ---------- */}
+                                        <div className={`flex items-center w-full ${theme.border} border-b px-2 pt-2 gap-2`}>
+                                            {/* Scrollable Tabs Section */}
+                                            <div className="flex-1 flex items-center gap-1 overflow-x-auto no-scrollbar min-w-0">
+                                                {tabs.map(tab => (
+                                                    <div
+                                                        key={tab.id}
+                                                        onClick={() => setActiveTabId(tab.id)}
+                                                        onDoubleClick={() => handleTabDoubleClick(tab)}
+                                                        title={`Query: ${tab.title}\nConexão: ${tab.connection?.connectionName || tab.connection?.user || 'Desconhecido'}`}
+                                                        className={`
                                                 group relative flex-shrink-0 flex items-center px-4 py-2 text-xs font-semibold rounded-t-lg cursor-pointer transition-all select-none min-w-[120px] max-w-[200px] border-b-2
                                                 ${activeTabId === tab.id
-                                                    ? `${theme.tabActive} border-indigo-500`
-                                                    : `text-gray-500 hover:text-gray-700 border-transparent hover:border-gray-200`
-                                                }
+                                                                ? `${theme.tabActive} border-indigo-500`
+                                                                : `text-gray-500 hover:text-gray-700 border-transparent hover:border-gray-200`
+                                                            }
                                             `}
-                                        >
-                                            {/* Connection Indicator Icon - ENHANCED */}
-                                            <div className={`
+                                                    >
+                                                        {/* Connection Indicator Icon - ENHANCED */}
+                                                        <div className={`
                                                 mr-2 p-1 rounded-md transition-all flex items-center justify-center
                                                 ${activeTabId === tab.id
-                                                    ? 'bg-indigo-100 text-indigo-600 shadow-sm'
-                                                    : 'bg-transparent text-gray-400 group-hover:bg-gray-100 group-hover:text-gray-600'
-                                                }
+                                                                ? 'bg-indigo-100 text-indigo-600 shadow-sm'
+                                                                : 'bg-transparent text-gray-400 group-hover:bg-gray-100 group-hover:text-gray-600'
+                                                            }
                                             `} title={`Conexão: ${tab.connection?.connectionName || 'Padrão'}`}>
-                                                <Database size={14} className={activeTabId === tab.id ? "fill-indigo-600" : ""} />
-                                            </div>
-
-                                            {editingTabId === tab.id ? (
-                                                <input
-                                                    autoFocus
-                                                    value={editingTitle}
-                                                    onChange={e => setEditingTitle(e.target.value)}
-                                                    onKeyDown={e => handleRenameKeyDown(e, tab.id)}
-                                                    onBlur={() => saveTabRename(tab.id)}
-                                                    className="bg-transparent outline-none w-full border-b border-blue-500"
-                                                    onClick={e => e.stopPropagation()}
-                                                />
-                                            ) : (
-                                                <span className="truncate flex-1 mr-2">{tab.title}</span>
-                                            )}
-                                            <button
-                                                onClick={(e) => closeTab(e, tab.id)}
-                                                className={`p-0.5 rounded-full hover:bg-red-100 hover:text-red-500 transition-opacity ${activeTabId === tab.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                                            >
-                                                <X size={12} />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    <button
-                                        onClick={addTab}
-                                        className="p-1.5 ml-1 flex-shrink-0 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                        title="Nova Query"
-                                    >
-                                        <Plus size={16} />
-                                    </button>
-                                </div>
-
-                                {/* Fixed Controls Section (No Overflow) */}
-                                <div className="flex items-center gap-2 pl-2 border-l border-gray-100 flex-shrink-0 pb-1">
-                                    {/* Connection Button (Active Tab Context) - Popover Wrapper */}
-                                    <div className="relative group/conn">
-                                        <button
-                                            id="connection-trigger"
-                                            onClick={() => {
-                                                setTempConnection(activeTab.connection || globalConnection);
-                                                setShowConnectionMenu(!showConnectionMenu);
-                                            }}
-                                            className={`
-                                                flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg transition-all border
-                                                ${connectionStatus === 'error'
-                                                    ? 'text-red-600 bg-red-50 border-red-200 animate-pulse hover:bg-red-100'
-                                                    : showConnectionMenu
-                                                        ? 'text-indigo-700 bg-indigo-50 border-indigo-200'
-                                                        : 'text-gray-600 hover:text-indigo-600 hover:bg-gray-50 border-transparent hover:border-gray-200'
-                                                }
-                                            `}
-                                            title={connectionStatus === 'error' ? "Conexão perdida!" : "Trocar Conexão"}
-                                        >
-                                            <Database size={14} className={connectionStatus === 'error' ? 'text-red-500' : 'text-indigo-500'} />
-                                            <span className="truncate max-w-[150px]">
-                                                {activeTab.connection?.connectionName || activeTab.connection?.user || 'Sem Conexão'}
-                                            </span>
-                                            {connectionStatus === 'error' && <span className="flex h-2 w-2 rounded-full bg-red-500"></span>}
-                                        </button>
-
-                                        {/* Popover Menu */}
-                                        {/* Popover Menu */}
-                                        <AnimatePresence>
-                                            {showConnectionMenu && (
-                                                <>
-                                                    {/* Backdrop for easy closing */}
-                                                    <div className="fixed inset-0 z-[9998]" onClick={() => setShowConnectionMenu(false)}></div>
-
-                                                    <motion.div
-                                                        initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                                                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                                                        exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                                                        transition={{ duration: 0.2, ease: "easeOut" }}
-                                                        className="absolute top-full right-0 mt-2 z-[9999] bg-white/90 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/50 w-80 overflow-hidden ring-1 ring-black/5"
-                                                    >
-                                                        <div className="bg-gray-50/50 px-4 py-3 border-b border-gray-100/50 flex justify-between items-center backdrop-blur-sm">
-                                                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Minhas Conexões</span>
+                                                            <Database size={14} className={activeTabId === tab.id ? "fill-indigo-600" : ""} />
                                                         </div>
 
-                                                        <div className="max-h-64 overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                                                            {(() => {
-                                                                try {
-                                                                    const saved = JSON.parse(localStorage.getItem('oracle_connections') || '[]');
-                                                                    if (saved.length === 0) return <div className="p-6 text-center text-gray-400 text-xs italic">Nenhuma conexão salva.</div>;
+                                                        {editingTabId === tab.id ? (
+                                                            <input
+                                                                autoFocus
+                                                                value={editingTitle}
+                                                                onChange={e => setEditingTitle(e.target.value)}
+                                                                onKeyDown={e => handleRenameKeyDown(e, tab.id)}
+                                                                onBlur={() => saveTabRename(tab.id)}
+                                                                className="bg-transparent outline-none w-full border-b border-blue-500"
+                                                                onClick={e => e.stopPropagation()}
+                                                            />
+                                                        ) : (
+                                                            <span className="truncate flex-1 mr-2">{tab.title}</span>
+                                                        )}
+                                                        <button
+                                                            onClick={(e) => closeTab(e, tab.id)}
+                                                            className={`p-0.5 rounded-full hover:bg-red-100 hover:text-red-500 transition-opacity ${activeTabId === tab.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                                                        >
+                                                            <X size={12} />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                                <button
+                                                    onClick={addTab}
+                                                    className="p-1.5 ml-1 flex-shrink-0 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                    title="Nova Query"
+                                                >
+                                                    <Plus size={16} />
+                                                </button>
+                                            </div>
 
-                                                                    return saved.map((conn, idx) => (
-                                                                        <motion.button
-                                                                            key={conn.id || idx}
-                                                                            whileHover={{ scale: 1.02, backgroundColor: "rgba(99, 102, 241, 0.05)" }}
-                                                                            whileTap={{ scale: 0.98 }}
-                                                                            onClick={() => {
-                                                                                const decrypted = {
-                                                                                    ...conn,
-                                                                                    password: decryptPassword(conn.password),
-                                                                                    connectString: conn.isDefault ? decryptPassword(conn.connectString) : conn.connectString
-                                                                                };
-                                                                                updateActiveTab({ connection: decrypted });
-                                                                                setShowConnectionMenu(false);
-                                                                                setConnectionStatus('checking');
-                                                                                setTimeout(() => setConnectionStatus('connected'), 500);
-                                                                                showToast(`Conectado a ${conn.connectionName}`);
-                                                                            }}
-                                                                            className="w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 group/item border border-transparent hover:border-indigo-100 hover:shadow-sm bg-transparent"
-                                                                        >
-                                                                            <div className={`
+                                            {/* Fixed Controls Section (No Overflow) */}
+                                            <div className="flex items-center gap-2 pl-2 border-l border-gray-100 flex-shrink-0 pb-1">
+                                                {/* Connection Button (Active Tab Context) - Popover Wrapper */}
+                                                <div className="relative group/conn">
+                                                    <button
+                                                        id="connection-trigger"
+                                                        onClick={() => {
+                                                            setTempConnection(activeTab.connection || globalConnection);
+                                                            setShowConnectionMenu(!showConnectionMenu);
+                                                        }}
+                                                        className={`
+                                                flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg transition-all border
+                                                ${connectionStatus === 'error'
+                                                                ? 'text-red-600 bg-red-50 border-red-200 animate-pulse hover:bg-red-100'
+                                                                : showConnectionMenu
+                                                                    ? 'text-indigo-700 bg-indigo-50 border-indigo-200'
+                                                                    : 'text-gray-600 hover:text-indigo-600 hover:bg-gray-50 border-transparent hover:border-gray-200'
+                                                            }
+                                            `}
+                                                        title={connectionStatus === 'error' ? "Conexão perdida!" : "Trocar Conexão"}
+                                                    >
+                                                        <Database size={14} className={connectionStatus === 'error' ? 'text-red-500' : 'text-indigo-500'} />
+                                                        <span className="truncate max-w-[150px]">
+                                                            {activeTab.connection?.connectionName || activeTab.connection?.user || 'Sem Conexão'}
+                                                        </span>
+                                                        {connectionStatus === 'error' && <span className="flex h-2 w-2 rounded-full bg-red-500"></span>}
+                                                    </button>
+
+                                                    {/* Popover Menu */}
+                                                    {/* Popover Menu */}
+                                                    <AnimatePresence>
+                                                        {showConnectionMenu && (
+                                                            <>
+                                                                {/* Backdrop for easy closing */}
+                                                                <div className="fixed inset-0 z-[9998]" onClick={() => setShowConnectionMenu(false)}></div>
+
+                                                                <motion.div
+                                                                    initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                                                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                                    exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                                                                    transition={{ duration: 0.2, ease: "easeOut" }}
+                                                                    className="absolute top-full right-0 mt-2 z-[9999] bg-white/90 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/50 w-80 overflow-hidden ring-1 ring-black/5"
+                                                                >
+                                                                    <div className="bg-gray-50/50 px-4 py-3 border-b border-gray-100/50 flex justify-between items-center backdrop-blur-sm">
+                                                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Minhas Conexões</span>
+                                                                    </div>
+
+                                                                    <div className="max-h-64 overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                                                                        {(() => {
+                                                                            try {
+                                                                                const saved = JSON.parse(localStorage.getItem('oracle_connections') || '[]');
+                                                                                if (saved.length === 0) return <div className="p-6 text-center text-gray-400 text-xs italic">Nenhuma conexão salva.</div>;
+
+                                                                                return saved.map((conn, idx) => (
+                                                                                    <motion.button
+                                                                                        key={conn.id || idx}
+                                                                                        whileHover={{ scale: 1.02, backgroundColor: "rgba(99, 102, 241, 0.05)" }}
+                                                                                        whileTap={{ scale: 0.98 }}
+                                                                                        onClick={() => {
+                                                                                            const decrypted = {
+                                                                                                ...conn,
+                                                                                                password: decryptPassword(conn.password),
+                                                                                                connectString: conn.isDefault ? decryptPassword(conn.connectString) : conn.connectString
+                                                                                            };
+                                                                                            updateActiveTab({ connection: decrypted });
+                                                                                            setShowConnectionMenu(false);
+                                                                                            setConnectionStatus('checking');
+                                                                                            setTimeout(() => setConnectionStatus('connected'), 500);
+                                                                                            showToast(`Conectado a ${conn.connectionName}`);
+                                                                                        }}
+                                                                                        className="w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 group/item border border-transparent hover:border-indigo-100 hover:shadow-sm bg-transparent"
+                                                                                    >
+                                                                                        <div className={`
                                                                                 w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors shadow-sm
                                                                                 ${activeTab.connection?.id === conn.id ? 'bg-green-100 text-green-600' : 'bg-white text-gray-400 group-hover:bg-indigo-600 group-hover:text-white'}
                                                                             `}>
-                                                                                <Database size={18} />
-                                                                            </div>
-                                                                            <div className="min-w-0 flex-1">
-                                                                                <div className="text-sm font-bold text-gray-700 group-hover:text-indigo-700 truncate">{conn.connectionName}</div>
-                                                                                <div className="text-[10px] text-gray-400 group-hover:text-indigo-400 truncate font-mono">{conn.user}</div>
-                                                                            </div>
-                                                                            {activeTab.connection?.id === conn.id && (
-                                                                                <span className="h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
-                                                                            )}
+                                                                                            <Database size={18} />
+                                                                                        </div>
+                                                                                        <div className="min-w-0 flex-1">
+                                                                                            <div className="text-sm font-bold text-gray-700 group-hover:text-indigo-700 truncate">{conn.connectionName}</div>
+                                                                                            <div className="text-[10px] text-gray-400 group-hover:text-indigo-400 truncate font-mono">{conn.user}</div>
+                                                                                        </div>
+                                                                                        {activeTab.connection?.id === conn.id && (
+                                                                                            <span className="h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
+                                                                                        )}
+                                                                                    </motion.button>
+                                                                                ));
+                                                                            } catch (e) { return null; }
+                                                                        })()}
+                                                                    </div>
+
+                                                                    <div className="p-3 border-t border-gray-100/50 bg-gray-50/50 backdrop-blur-sm">
+                                                                        <motion.button
+                                                                            whileHover={{ scale: 1.02 }}
+                                                                            whileTap={{ scale: 0.98 }}
+                                                                            onClick={() => {
+                                                                                setShowConnectionMenu(false);
+                                                                                setTempConnection({ ...tempConnection, showFullForm: true });
+                                                                            }}
+                                                                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-xs font-bold hover:shadow-lg hover:shadow-indigo-500/30 transition-all"
+                                                                        >
+                                                                            <Plus size={16} />
+                                                                            Nova Conexão
                                                                         </motion.button>
-                                                                    ));
-                                                                } catch (e) { return null; }
-                                                            })()}
-                                                        </div>
+                                                                    </div>
+                                                                </motion.div>
+                                                            </>
+                                                        )}
+                                                    </AnimatePresence>
+                                                </div>
 
-                                                        <div className="p-3 border-t border-gray-100/50 bg-gray-50/50 backdrop-blur-sm">
-                                                            <motion.button
-                                                                whileHover={{ scale: 1.02 }}
-                                                                whileTap={{ scale: 0.98 }}
-                                                                onClick={() => {
-                                                                    setShowConnectionMenu(false);
-                                                                    setTempConnection({ ...tempConnection, showFullForm: true });
-                                                                }}
-                                                                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-xs font-bold hover:shadow-lg hover:shadow-indigo-500/30 transition-all"
-                                                            >
-                                                                <Plus size={16} />
-                                                                Nova Conexão
-                                                            </motion.button>
-                                                        </div>
-                                                    </motion.div>
-                                                </>
-                                            )}
-                                        </AnimatePresence>
-                                    </div>
+                                                {/* Maximize/Minimize Button - Relocated to Tab Controls */}
+                                                <button
+                                                    onClick={toggleFullScreen}
+                                                    className="p-1.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors border border-gray-100 flex items-center justify-center ml-1"
+                                                    title={isMaximized ? "Restaurar" : "Tela Cheia"}
+                                                >
+                                                    {isMaximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                                                </button>
+                                                <button
+                                                    onClick={onDisconnect}
+                                                    className="px-2 py-1 text-xs text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                                    title="Sair / Logout Geral"
+                                                >
+                                                    <LogOut size={14} />
+                                                </button>
+                                            </div>
+                                        </div>
 
-                                    <button
-                                        onClick={onDisconnect}
-                                        className="px-2 py-1 text-xs text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                                        title="Sair / Logout Geral"
-                                    >
-                                        <LogOut size={14} />
-                                    </button>
-                                </div>
-                            </div>
+                                        <PanelGroup direction="vertical" className="flex-1">
+                                            {/* ---------- EDITOR ---------- */}
+                                            <Panel defaultSize={45} minSize={20} className={`flex flex-col ${theme.panel}`}>
+                                                <div className="flex-1 relative font-mono text-sm min-h-0" onClick={() => viewRef.current?.focus()}>
+                                                    {isVisible && (
+                                                        <CodeMirror
+                                                            value={activeTab.sqlContent}
+                                                            height="100%"
+                                                            extensions={[
+                                                                sql({ schema: {}, dialect: PLSQL, upperCaseKeywords: true }),
+                                                                autocompletion({ override: [/* ... simplified for now, keep existing logic if needed ... */] })
+                                                            ]}
+                                                            onChange={(value) => updateActiveTab({ sqlContent: value })}
+                                                            theme="light"
+                                                            className="h-full"
+                                                            onCreateEditor={(view) => { viewRef.current = view; }}
+                                                        />
+                                                    )}
+                                                </div>
 
-                            <PanelGroup direction="vertical" className="flex-1">
-                                {/* ---------- EDITOR ---------- */}
-                                <Panel defaultSize={45} minSize={20} className={`flex flex-col ${theme.panel}`}>
-                                    <div className="flex-1 relative font-mono text-sm min-h-0" onClick={() => viewRef.current?.focus()}>
-                                        {isVisible && (
-                                            <CodeMirror
-                                                value={activeTab.sqlContent}
-                                                height="100%"
-                                                extensions={[
-                                                    sql({ schema: {}, dialect: PLSQL, upperCaseKeywords: true }),
-                                                    autocompletion({ override: [/* ... simplified for now, keep existing logic if needed ... */] })
-                                                ]}
-                                                onChange={(value) => updateActiveTab({ sqlContent: value })}
-                                                theme="light"
-                                                className="h-full"
-                                                onCreateEditor={(view) => { viewRef.current = view; }}
-                                            />
-                                        )}
-                                    </div>
-
-                                    {/* ---------- TOOLBAR ---------- */}
-                                    <div className={`flex-none px-4 py-3 ${theme.panel} border-t ${theme.border} flex items-center justify-between shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10`}>
-                                        <div className="flex items-center gap-3">
-                                            <button
-                                                onClick={executeQuery}
-                                                disabled={!activeTab.sqlContent || activeTab.loading}
-                                                className={`
+                                                {/* ---------- TOOLBAR ---------- */}
+                                                <div className={`flex-none px-4 py-3 ${theme.panel} border-t ${theme.border} flex items-center justify-between shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10`}>
+                                                    <div className="flex items-center gap-3">
+                                                        <button
+                                                            onClick={executeQuery}
+                                                            disabled={!activeTab.sqlContent || activeTab.loading}
+                                                            className={`
                                                     flex items-center px-5 py-2 rounded-lg font-bold text-white shadow-lg shadow-indigo-200 transform transition-all active:scale-95
                                                     ${activeTab.loading ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5'}
                                                 `}
-                                            >
-                                                {activeTab.loading ? (
-                                                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></span>
-                                                ) : (
-                                                    <Play size={16} className="mr-2 fill-current" />
-                                                )}
-                                                {activeTab.loading ? 'Executando...' : 'Executar'}
-                                            </button>
-
-                                            {activeTab.loading && (
-                                                <button onClick={handleCancelQuery} className="text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg font-medium text-xs flex items-center transition-colors">
-                                                    <Square size={12} className="mr-1 fill-current" /> Cancelar
-                                                </button>
-                                            )}
-
-                                            <div className="h-6 w-px bg-gray-200 mx-1"></div>
-
-                                            <select
-                                                value={limit}
-                                                onChange={(e) => setLimit(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                                                className={`${theme.input} text-xs rounded-lg px-2 py-2 outline-none focus:ring-2 focus:ring-indigo-100 font-medium`}
-                                            >
-                                                <option value={100}>100 linhas</option>
-                                                <option value={500}>500 linhas</option>
-                                                <option value={1000}>1000 linhas</option>
-                                                <option value="all">Todas</option>
-                                            </select>
-
-                                            {activeTab.totalRecords !== undefined && (
-                                                <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                                                    {activeTab.totalRecords.toLocaleString()} registros
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        <div className="flex items-center gap-2">
-                                            <div className="flex bg-gray-100 p-1 rounded-lg">
-                                                <button onClick={handleFormat} className="p-1.5 text-gray-500 hover:text-indigo-600 hover:bg-white rounded-md transition-all" title="Formatar SQL">
-                                                    <span className="font-mono text-xs font-bold">{'{}'}</span>
-                                                </button>
-                                                <button onClick={handleExplainSql} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-white rounded-md transition-all" title="Explicar (IA)">
-                                                    <MessageSquare size={14} />
-                                                </button>
-                                                <button onClick={handleOptimizeSql} className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-white rounded-md transition-all" title="Otimizar (IA)">
-                                                    <Zap size={14} />
-                                                </button>
-                                            </div>
-
-                                            <div className="h-6 w-px bg-gray-200 mx-1"></div>
-
-                                            {showSaveInput ? (
-                                                <div className="flex items-center bg-gray-50 rounded-lg p-1 border border-indigo-100 animate-in fade-in slide-in-from-right-4">
-                                                    <input
-                                                        autoFocus
-                                                        value={queryName}
-                                                        onChange={e => setQueryName(e.target.value)}
-                                                        placeholder="Nome..."
-                                                        className={`bg-transparent text-xs w-32 px-2 outline-none ${theme.text}`}
-                                                        onKeyDown={e => e.key === 'Enter' && saveQuery()}
-                                                    />
-                                                    <button onClick={saveQuery} className="text-green-600 hover:bg-green-100 p-1 rounded"><Save size={14} /></button>
-                                                    <button onClick={() => setShowSaveInput(false)} className="text-red-500 hover:bg-red-100 p-1 rounded"><X size={14} /></button>
-                                                </div>
-                                            ) : (
-                                                <button onClick={() => setShowSaveInput(true)} className="flex items-center px-3 py-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg text-xs font-bold transition-colors">
-                                                    <Save size={14} className="mr-1.5" /> Salvar
-                                                </button>
-                                            )}
-
-                                            <label className="flex items-center px-3 py-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg text-xs font-bold transition-colors cursor-pointer">
-                                                <FolderOpen size={14} className="mr-1.5" /> Abrir
-                                                <input type="file" accept=".sql" onChange={handleFileUpload} className="hidden" />
-                                            </label>
-                                        </div>
-                                    </div>
-                                </Panel>
-
-                                <PanelResizeHandle className="h-1.5 bg-gray-50 hover:bg-indigo-400 transition-colors cursor-row-resize border-y border-gray-200 flex justify-center items-center group">
-                                    <div className="w-10 h-1 rounded-full bg-gray-300 group-hover:bg-indigo-200"></div>
-                                </PanelResizeHandle>
-
-                                {/* ---------- RESULTS ---------- */}
-                                <Panel defaultSize={55} minSize={20} className={`flex flex-col ${theme.panel}`}>
-                                    {activeTab.error && (
-                                        <div className="bg-red-50 border-b border-red-100 p-4 flex items-start gap-3">
-                                            <div className="bg-red-100 text-red-600 p-2 rounded-lg flex-shrink-0"><X size={20} /></div>
-                                            <div className="flex-1">
-                                                <h4 className="font-bold text-red-800 text-sm">Erro na execução</h4>
-                                                <p className="text-red-700 text-xs font-mono mt-1 whitespace-pre-wrap leading-relaxed">{activeTab.error}</p>
-                                                {!activeTab.error.includes("cancelada") && (
-                                                    <button onClick={handleFixError} disabled={aiLoading} className="mt-3 text-xs bg-white border border-red-200 text-red-600 px-3 py-1.5 rounded-md font-bold hover:bg-red-50 transition-colors flex items-center w-fit shadow-sm">
-                                                        ✨ Corrigir com IA
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {activeTab.results ? (
-                                        <div className="flex-1 flex flex-col min-h-0">
-                                            {/* Results Header */}
-                                            <div className="px-4 py-2 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                                                <div className="flex items-center space-x-4">
-                                                    <h3 className="text-[10px] font-black tracking-widest text-gray-400 uppercase">Resultados</h3>
-                                                    <button onClick={() => setShowFilters(!showFilters)} className={`text-xs font-bold flex items-center px-2 py-1 rounded-md transition-colors ${showFilters ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-200'}`}>
-                                                        <Search size={12} className="mr-1" /> Filtros
-                                                    </button>
-                                                </div>
-                                                <div className="flex space-x-2">
-                                                    <button onClick={() => exportData('xlsx')} className="text-xs font-bold text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors flex items-center">
-                                                        <Download size={12} className="mr-1.5" /> Excel
-                                                    </button>
-                                                    <button onClick={() => exportData('csv')} className="text-xs font-bold text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors flex items-center">
-                                                        <Download size={12} className="mr-1.5" /> CSV
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            {/* Table Container */}
-                                            {activeTab.results.metaData.length === 0 ? (
-                                                <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-                                                    <div className="w-16 h-16 bg-green-50 text-green-500 rounded-full flex items-center justify-center mb-4"><span className="text-3xl">✓</span></div>
-                                                    <p className="font-medium text-gray-600">Comando Executado</p>
-                                                    <p className="text-xs mt-1">Nenhum dado retornado (DDL/Script)</p>
-                                                </div>
-                                            ) : (
-                                                <div className="flex-1 overflow-hidden relative flex flex-col">
-                                                    {/* SYNCED HEADER */}
-                                                    <div
-                                                        ref={headerContainerRef}
-                                                        className={`flex divide-x divide-gray-100 border-b ${theme.border} ${theme.bg} overflow-hidden select-none`}
-                                                        style={{ height: showFilters ? '65px' : '32px' }} // Fixed height
-                                                    >
-                                                        {columnOrder.map(colName => {
-                                                            if (!visibleColumns[colName]) return null;
-                                                            const width = columnWidths[colName] || 150;
-                                                            return (
-                                                                <div
-                                                                    key={colName}
-                                                                    className={`flex-shrink-0 px-3 py-1.5 text-xs font-bold ${theme.text} flex flex-col justify-center relative hover:bg-opacity-80 transition-colors group h-full`}
-                                                                    style={{ width: `${width}px` }}
-                                                                    draggable
-                                                                    onDragStart={(e) => handleDragStart(e, colName)}
-                                                                    onDragOver={(e) => handleDragOver(e, colName)}
-                                                                    onDragEnd={handleDragEnd}
-                                                                >
-                                                                    <div className="flex items-center justify-between mb-1">
-                                                                        <span className="truncate" title={colName}>{colName}</span>
-                                                                    </div>
-                                                                    {showFilters && (
-                                                                        <input
-                                                                            type="text"
-                                                                            placeholder="..."
-                                                                            className="w-full text-[10px] px-1.5 py-0.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-400 outline-none bg-white"
-                                                                            value={columnFilters[colName] || ''}
-                                                                            onChange={e => setColumnFilters({ ...columnFilters, [colName]: e.target.value })}
-                                                                        />
-                                                                    )}
-                                                                    {/* Resizer Handle */}
-                                                                    <div
-                                                                        className="absolute right-0 top-0 bottom-0 w-1 hover:bg-blue-400 cursor-col-resize z-10"
-                                                                        onDoubleClick={() => handleDoubleClickResizer(colName)}
-                                                                    ></div>
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-
-                                                    {/* Virtual List */}
-                                                    <div className="flex-1">
-                                                        <AutoSizer>
-                                                            {({ height, width }) => (
-                                                                <VirtualList
-                                                                    height={height}
-                                                                    width={width}
-                                                                    itemCount={filteredRows.length}
-                                                                    itemSize={36}
-                                                                    outerRef={setListOuterElement}
-                                                                    itemData={{
-                                                                        rows: filteredRows,
-                                                                        columnOrder,
-                                                                        visibleColumns,
-                                                                        theme,
-                                                                        metaData: activeTab.results.metaData,
-                                                                        columnWidths
-                                                                    }}
-                                                                >
-                                                                    {SqlRunnerRow}
-                                                                </VirtualList>
+                                                        >
+                                                            {activeTab.loading ? (
+                                                                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></span>
+                                                            ) : (
+                                                                <Play size={16} className="mr-2 fill-current" />
                                                             )}
-                                                        </AutoSizer>
+                                                            {activeTab.loading ? 'Executando...' : 'Executar'}
+                                                        </button>
+
+                                                        {activeTab.loading && (
+                                                            <button onClick={handleCancelQuery} className="text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg font-medium text-xs flex items-center transition-colors">
+                                                                <Square size={12} className="mr-1 fill-current" /> Cancelar
+                                                            </button>
+                                                        )}
+
+                                                        <div className="h-6 w-px bg-gray-200 mx-1"></div>
+
+                                                        <select
+                                                            value={limit}
+                                                            onChange={(e) => setLimit(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                                                            className={`${theme.input} text-xs rounded-lg px-2 py-2 outline-none focus:ring-2 focus:ring-indigo-100 font-medium`}
+                                                        >
+                                                            <option value={100}>100 linhas</option>
+                                                            <option value={500}>500 linhas</option>
+                                                            <option value={1000}>1000 linhas</option>
+                                                            <option value="all">Todas</option>
+                                                        </select>
+
+                                                        {activeTab.totalRecords !== undefined && (
+                                                            <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                                                                {activeTab.totalRecords.toLocaleString()} registros
+                                                            </span>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex bg-gray-100 p-1 rounded-lg">
+                                                            <button onClick={handleFormat} className="p-1.5 text-gray-500 hover:text-indigo-600 hover:bg-white rounded-md transition-all" title="Formatar SQL">
+                                                                <span className="font-mono text-xs font-bold">{'{}'}</span>
+                                                            </button>
+                                                            <button onClick={handleExplainSql} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-white rounded-md transition-all" title="Explicar (IA)">
+                                                                <MessageSquare size={14} />
+                                                            </button>
+                                                            <button onClick={handleOptimizeSql} className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-white rounded-md transition-all" title="Otimizar (IA)">
+                                                                <Zap size={14} />
+                                                            </button>
+                                                        </div>
+
+                                                        <div className="h-6 w-px bg-gray-200 mx-1"></div>
+
+                                                        {showSaveInput ? (
+                                                            <div className="flex items-center bg-gray-50 rounded-lg p-1 border border-indigo-100 animate-in fade-in slide-in-from-right-4">
+                                                                <input
+                                                                    autoFocus
+                                                                    value={queryName}
+                                                                    onChange={e => setQueryName(e.target.value)}
+                                                                    placeholder="Nome..."
+                                                                    className={`bg-transparent text-xs w-32 px-2 outline-none ${theme.text}`}
+                                                                    onKeyDown={e => e.key === 'Enter' && saveQuery()}
+                                                                />
+                                                                <button onClick={saveQuery} className="text-green-600 hover:bg-green-100 p-1 rounded"><Save size={14} /></button>
+                                                                <button onClick={() => setShowSaveInput(false)} className="text-red-500 hover:bg-red-100 p-1 rounded"><X size={14} /></button>
+                                                            </div>
+                                                        ) : (
+                                                            <button onClick={() => setShowSaveInput(true)} className="flex items-center px-3 py-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg text-xs font-bold transition-colors">
+                                                                <Save size={14} className="mr-1.5" /> Salvar
+                                                            </button>
+                                                        )}
+
+                                                        <label className="flex items-center px-3 py-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg text-xs font-bold transition-colors cursor-pointer">
+                                                            <FolderOpen size={14} className="mr-1.5" /> Abrir
+                                                            <input type="file" accept=".sql" onChange={handleFileUpload} className="hidden" />
+                                                        </label>
                                                     </div>
                                                 </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="flex-1 flex flex-col items-center justify-center text-gray-300 pointer-events-none select-none">
-                                            <Database size={64} className="mb-4 opacity-20" />
-                                            <p className="text-sm font-medium opacity-50">Execute uma query para ver resultados</p>
-                                        </div>
-                                    )}
-                                </Panel>
-                            </PanelGroup>
-                        </div>
-                    </Panel>
+                                            </Panel>
 
-                    {showSidebar && <PanelResizeHandle className="w-1 bg-gray-100 hover:bg-indigo-300 cursor-col-resize transition-colors" />}
+                                            <PanelResizeHandle className="h-1.5 bg-gray-50 hover:bg-indigo-400 transition-colors cursor-row-resize border-y border-gray-200 flex justify-center items-center group">
+                                                <div className="w-10 h-1 rounded-full bg-gray-300 group-hover:bg-indigo-200"></div>
+                                            </PanelResizeHandle>
 
-                    {/* ---------- SIDEBAR ---------- */}
-                    {showSidebar && (
-                        <Panel defaultSize={20} minSize={15} maxSize={40} className={`${theme.panel} border-l ${theme.border} flex flex-col`}>
-                            {/* Tabs */}
-                            <div className={`flex border-b ${theme.border}`}>
-                                {['saved', 'schema', 'chat'].map(tab => (
-                                    <button
-                                        key={tab}
-                                        onClick={() => setActiveSidebarTab(tab)}
-                                        className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${activeSidebarTab === tab ? 'text-indigo-600 border-b-2 border-indigo-500 bg-indigo-50/30' : 'text-gray-400 hover:bg-gray-50'}`}
-                                    >
-                                        {tab === 'saved' ? 'Salvos' : tab === 'schema' ? 'Tabelas' : 'IA Chat'}
-                                    </button>
-                                ))}
-                            </div>
-
-                            <div className={`flex-1 overflow-y-auto p-4 ${theme.bg}`}>
-                                {activeSidebarTab === 'saved' && (
-                                    <div className="space-y-3">
-                                        {savedQueries.map(q => (
-                                            <div key={q.id} onClick={() => loadQuery(q)} className="group bg-white p-3 rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-indigo-200 cursor-pointer transition-all">
-                                                <div className="flex justify-between items-start mb-1">
-                                                    <h5 className="font-bold text-gray-700 text-sm truncate flex-1 min-w-0 mr-2" title={q.name}>{q.name}</h5>
-                                                    <button onClick={e => { e.stopPropagation(); deleteQuery(q.id); }} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100">
-                                                        <Trash2 size={12} />
-                                                    </button>
-                                                </div>
-                                                <p className="text-xs text-gray-400 font-mono truncate">{q.sql}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                {activeSidebarTab === 'schema' && (
-                                    <div className="space-y-4">
-                                        <div className="relative">
-                                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                                            <input
-                                                className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-100 transition-shadow"
-                                                placeholder="Buscar tabelas..."
-                                                value={schemaSearch}
-                                                onChange={e => { setSchemaSearch(e.target.value); fetchSchemaTables(e.target.value); }}
-                                            />
-                                        </div>
-                                        <div className="space-y-1">
-                                            {schemaTables.map(t => (
-                                                <div key={t}>
-                                                    <button onClick={() => handleExpandTable(t)} className={`w-full text-left px-3 py-2 rounded-lg text-xs font-mono flex items-center justify-between transition-colors ${expandedTable === t ? 'bg-indigo-100 text-indigo-700 font-bold' : 'hover:bg-white text-gray-600'}`}>
-                                                        {t} <span className="text-gray-400 text-[10px]">{expandedTable === t ? '▼' : '▶'}</span>
-                                                    </button>
-                                                    {expandedTable === t && (
-                                                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pl-3 mt-1 space-y-0.5 border-l-2 border-indigo-100 ml-2">
-                                                            {tableColumns.map(c => (
-                                                                <div key={c.name} onClick={() => insertTextAtCursor(c.name)} className="flex justify-between items-center px-2 py-1 hover:bg-indigo-50 rounded cursor-pointer group text-[10px]">
-                                                                    <span className="text-gray-500 group-hover:text-indigo-600 font-medium">{c.name}</span>
-                                                                    <span className="text-gray-300 group-hover:text-indigo-400">{c.type}</span>
-                                                                </div>
-                                                            ))}
-                                                        </motion.div>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {activeSidebarTab === 'chat' && (
-                                    <div className="flex flex-col h-full">
-                                        <div className="flex-1 space-y-4 mb-4">
-                                            {aiChatHistory.map((msg, i) => (
-                                                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                                    <div className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm shadow-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-700 rounded-bl-none'}`}>
-                                                        <div className="prose prose-sm max-w-none dark:prose-invert">
-                                                            <ReactMarkdown
-                                                                components={{
-                                                                    code: ({ node, inline, className, children, ...props }) => {
-                                                                        return (
-                                                                            <code className={className} {...props}>
-                                                                                {children}
-                                                                            </code>
-                                                                        );
-                                                                    }
-                                                                }}
-                                                            >
-                                                                {msg.content}
-                                                            </ReactMarkdown>
+                                            {/* ---------- RESULTS ---------- */}
+                                            <Panel defaultSize={55} minSize={20} className={`flex flex-col ${theme.panel}`}>
+                                                {activeTab.error && (
+                                                    <div className="bg-red-50 border-b border-red-100 p-4 flex items-start gap-3">
+                                                        <div className="bg-red-100 text-red-600 p-2 rounded-lg flex-shrink-0"><X size={20} /></div>
+                                                        <div className="flex-1">
+                                                            <h4 className="font-bold text-red-800 text-sm">Erro na execução</h4>
+                                                            <p className="text-red-700 text-xs font-mono mt-1 whitespace-pre-wrap leading-relaxed">{activeTab.error}</p>
+                                                            {!activeTab.error.includes("cancelada") && (
+                                                                <button onClick={handleFixError} disabled={aiLoading} className="mt-3 text-xs bg-white border border-red-200 text-red-600 px-3 py-1.5 rounded-md font-bold hover:bg-red-50 transition-colors flex items-center w-fit shadow-sm">
+                                                                    ✨ Corrigir com IA
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     </div>
-                                                </div>
+                                                )}
+
+                                                {activeTab.results ? (
+                                                    <div className="flex-1 flex flex-col min-h-0">
+                                                        {/* Results Header */}
+                                                        <div className="px-4 py-2 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                                                            <div className="flex items-center space-x-4">
+                                                                <h3 className="text-[10px] font-black tracking-widest text-gray-400 uppercase">Resultados</h3>
+                                                                <button onClick={() => setShowFilters(!showFilters)} className={`text-xs font-bold flex items-center px-2 py-1 rounded-md transition-colors ${showFilters ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-200'}`}>
+                                                                    <Search size={12} className="mr-1" /> Filtros
+                                                                </button>
+                                                            </div>
+                                                            <div className="flex space-x-2">
+                                                                <button onClick={() => exportData('xlsx')} className="text-xs font-bold text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors flex items-center">
+                                                                    <Download size={12} className="mr-1.5" /> Excel
+                                                                </button>
+                                                                <button onClick={() => exportData('csv')} className="text-xs font-bold text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors flex items-center">
+                                                                    <Download size={12} className="mr-1.5" /> CSV
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Table Container */}
+                                                        {activeTab.results.metaData.length === 0 ? (
+                                                            <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+                                                                <div className="w-16 h-16 bg-green-50 text-green-500 rounded-full flex items-center justify-center mb-4"><span className="text-3xl">✓</span></div>
+                                                                <p className="font-medium text-gray-600">Comando Executado</p>
+                                                                <p className="text-xs mt-1">Nenhum dado retornado (DDL/Script)</p>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex-1 overflow-hidden relative flex flex-col">
+                                                                {/* SYNCED HEADER */}
+                                                                <div
+                                                                    ref={headerContainerRef}
+                                                                    className={`flex divide-x divide-gray-100 border-b ${theme.border} ${theme.bg} overflow-hidden select-none`}
+                                                                    style={{ height: showFilters ? '65px' : '32px' }} // Fixed height
+                                                                >
+                                                                    {columnOrder.map(colName => {
+                                                                        if (!visibleColumns[colName]) return null;
+                                                                        const width = columnWidths[colName] || 150;
+                                                                        return (
+                                                                            <div
+                                                                                key={colName}
+                                                                                className={`flex-shrink-0 px-3 py-1.5 text-xs font-bold ${theme.text} flex flex-col justify-center relative hover:bg-opacity-80 transition-colors group h-full`}
+                                                                                style={{ width: `${width}px` }}
+                                                                                draggable
+                                                                                onDragStart={(e) => handleDragStart(e, colName)}
+                                                                                onDragOver={(e) => handleDragOver(e, colName)}
+                                                                                onDragEnd={handleDragEnd}
+                                                                            >
+                                                                                <div className="flex items-center justify-between mb-1">
+                                                                                    <span className="truncate" title={colName}>{colName}</span>
+                                                                                </div>
+                                                                                {showFilters && (
+                                                                                    <input
+                                                                                        type="text"
+                                                                                        placeholder="..."
+                                                                                        className="w-full text-[10px] px-1.5 py-0.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-400 outline-none bg-white"
+                                                                                        value={columnFilters[colName] || ''}
+                                                                                        onChange={e => setColumnFilters({ ...columnFilters, [colName]: e.target.value })}
+                                                                                    />
+                                                                                )}
+                                                                                {/* Resizer Handle */}
+                                                                                <div
+                                                                                    className="absolute right-0 top-0 bottom-0 w-1 hover:bg-blue-400 cursor-col-resize z-10"
+                                                                                    onDoubleClick={() => handleDoubleClickResizer(colName)}
+                                                                                ></div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+
+                                                                {/* Virtual List */}
+                                                                <div className="flex-1">
+                                                                    <AutoSizer>
+                                                                        {({ height, width }) => (
+                                                                            <VirtualList
+                                                                                height={height}
+                                                                                width={width}
+                                                                                itemCount={filteredRows.length}
+                                                                                itemSize={36}
+                                                                                outerRef={setListOuterElement}
+                                                                                itemData={{
+                                                                                    rows: filteredRows,
+                                                                                    columnOrder,
+                                                                                    visibleColumns,
+                                                                                    theme,
+                                                                                    metaData: activeTab.results.metaData,
+                                                                                    columnWidths
+                                                                                }}
+                                                                            >
+                                                                                {SqlRunnerRow}
+                                                                            </VirtualList>
+                                                                        )}
+                                                                    </AutoSizer>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex-1 flex flex-col items-center justify-center text-gray-300 pointer-events-none select-none">
+                                                        <Database size={64} className="mb-4 opacity-20" />
+                                                        <p className="text-sm font-medium opacity-50">Execute uma query para ver resultados</p>
+                                                    </div>
+                                                )}
+                                            </Panel>
+                                        </PanelGroup>
+                                    </div>
+                                </Panel>
+
+                                {showSidebar && <PanelResizeHandle className="w-1 bg-gray-100 hover:bg-indigo-300 cursor-col-resize transition-colors" />}
+
+                                {/* ---------- SIDEBAR ---------- */}
+                                {showSidebar && (
+                                    <Panel defaultSize={20} minSize={15} maxSize={40} className={`${theme.panel} border-l ${theme.border} flex flex-col`}>
+                                        {/* Tabs */}
+                                        <div className={`flex border-b ${theme.border}`}>
+                                            {['saved', 'schema', 'chat'].map(tab => (
+                                                <button
+                                                    key={tab}
+                                                    onClick={() => setActiveSidebarTab(tab)}
+                                                    className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${activeSidebarTab === tab ? 'text-indigo-600 border-b-2 border-indigo-500 bg-indigo-50/30' : 'text-gray-400 hover:bg-gray-50'}`}
+                                                >
+                                                    {tab === 'saved' ? 'Salvos' : tab === 'schema' ? 'Tabelas' : 'IA Chat'}
+                                                </button>
                                             ))}
-                                            {aiLoading && (
-                                                <div className="flex justify-start">
-                                                    <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm flex items-center space-x-2">
-                                                        <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></span>
-                                                        <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-100"></span>
-                                                        <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-200"></span>
+                                        </div>
+
+                                        <div className={`flex-1 overflow-y-auto p-4 ${theme.bg}`}>
+                                            {activeSidebarTab === 'saved' && (
+                                                <div className="space-y-3">
+                                                    {savedQueries.map(q => (
+                                                        <div key={q.id} onClick={() => loadQuery(q)} className="group bg-white p-3 rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-indigo-200 cursor-pointer transition-all">
+                                                            <div className="flex justify-between items-start mb-1">
+                                                                <h5 className="font-bold text-gray-700 text-sm truncate flex-1 min-w-0 mr-2" title={q.name}>{q.name}</h5>
+                                                                <button onClick={e => { e.stopPropagation(); deleteQuery(q.id); }} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100">
+                                                                    <Trash2 size={12} />
+                                                                </button>
+                                                            </div>
+                                                            <p className="text-xs text-gray-400 font-mono truncate">{q.sql}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {activeSidebarTab === 'schema' && (
+                                                <div className="space-y-4">
+                                                    <div className="relative">
+                                                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                                        <input
+                                                            className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-100 transition-shadow"
+                                                            placeholder="Buscar tabelas..."
+                                                            value={schemaSearch}
+                                                            onChange={e => { setSchemaSearch(e.target.value); fetchSchemaTables(e.target.value); }}
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        {schemaTables.map(t => (
+                                                            <div key={t}>
+                                                                <button onClick={() => handleExpandTable(t)} className={`w-full text-left px-3 py-2 rounded-lg text-xs font-mono flex items-center justify-between transition-colors ${expandedTable === t ? 'bg-indigo-100 text-indigo-700 font-bold' : 'hover:bg-white text-gray-600'}`}>
+                                                                    {t} <span className="text-gray-400 text-[10px]">{expandedTable === t ? '▼' : '▶'}</span>
+                                                                </button>
+                                                                {expandedTable === t && (
+                                                                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pl-3 mt-1 space-y-0.5 border-l-2 border-indigo-100 ml-2">
+                                                                        {tableColumns.map(c => (
+                                                                            <div key={c.name} onClick={() => insertTextAtCursor(c.name)} className="flex justify-between items-center px-2 py-1 hover:bg-indigo-50 rounded cursor-pointer group text-[10px]">
+                                                                                <span className="text-gray-500 group-hover:text-indigo-600 font-medium">{c.name}</span>
+                                                                                <span className="text-gray-300 group-hover:text-indigo-400">{c.type}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </motion.div>
+                                                                )}
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 </div>
                                             )}
+
+                                            {activeSidebarTab === 'chat' && (
+                                                <div className="flex flex-col h-full">
+                                                    <div className="flex-1 space-y-4 mb-4">
+                                                        {aiChatHistory.map((msg, i) => (
+                                                            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                                                <div className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm shadow-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-700 rounded-bl-none'}`}>
+                                                                    <div className="prose prose-sm max-w-none dark:prose-invert">
+                                                                        <ReactMarkdown
+                                                                            components={{
+                                                                                code: ({ node, inline, className, children, ...props }) => {
+                                                                                    return (
+                                                                                        <code className={className} {...props}>
+                                                                                            {children}
+                                                                                        </code>
+                                                                                    );
+                                                                                }
+                                                                            }}
+                                                                        >
+                                                                            {msg.content}
+                                                                        </ReactMarkdown>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                        {aiLoading && (
+                                                            <div className="flex justify-start">
+                                                                <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm flex items-center space-x-2">
+                                                                    <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></span>
+                                                                    <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-100"></span>
+                                                                    <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-200"></span>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <form onSubmit={handleAiChatSubmit} className="relative">
+                                                        <input
+                                                            className="w-full bg-white border border-gray-200 shadow-sm rounded-xl px-4 py-3 pr-10 text-sm outline-none focus:ring-2 focus:ring-indigo-100 transition-all"
+                                                            placeholder="Pergunte à IA..."
+                                                            value={aiChatInput}
+                                                            onChange={e => setAiChatInput(e.target.value)}
+                                                        />
+                                                        <button type="submit" disabled={!aiChatInput.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                                                            <Share2 size={12} className="rotate-90" />
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            )}
                                         </div>
-                                        <form onSubmit={handleAiChatSubmit} className="relative">
-                                            <input
-                                                className="w-full bg-white border border-gray-200 shadow-sm rounded-xl px-4 py-3 pr-10 text-sm outline-none focus:ring-2 focus:ring-indigo-100 transition-all"
-                                                placeholder="Pergunte à IA..."
-                                                value={aiChatInput}
-                                                onChange={e => setAiChatInput(e.target.value)}
-                                            />
-                                            <button type="submit" disabled={!aiChatInput.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                                                <Share2 size={12} className="rotate-90" />
-                                            </button>
-                                        </form>
-                                    </div>
+                                    </Panel>
                                 )}
-                            </div>
-                        </Panel>
-                    )}
-                </PanelGroup>
+                            </PanelGroup>
+                        </div>
+                    </div>
+                </div>
             </div>
         </ErrorBoundary >
     );

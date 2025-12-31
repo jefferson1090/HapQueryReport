@@ -1,7 +1,8 @@
 ﻿import React, { useState, useEffect, useRef, useContext, useMemo, useCallback } from 'react';
+// CACHE BUSTER: FORCE REBUILD 123456789
 import ReactMarkdown from 'react-markdown';
 import RemarkGfm from 'remark-gfm';
-import { ThumbsUp, ThumbsDown, Check, X, AlertTriangle, Lightbulb } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Check, X, AlertTriangle, Lightbulb, BarChart3, Search, Table, PlusCircle, Database, Download, Rocket, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ThemeContext } from '../context/ThemeContext';
 import { useApi } from '../context/ApiContext';
@@ -9,12 +10,18 @@ import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import ColumnSelection from './ColumnSelection';
 
 import AdminModule from './AdminModule';
+import DashboardBuilder from './DashboardBuilder';
 import ConnectionForm from './ConnectionForm';
 import { FixedSizeList as List } from 'react-window';
 
 import AutoSizer from 'react-virtualized-auto-sizer';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+
+// DATA SOURCES CONFIGURATION
+const CARGA_OPTS = [
+    { id: 'contrato_coletivo', title: 'Contrato Coletivo', icon: '👥', target: 'carga_input', tableName: 'incorpora.tb_ope_contrato_coletivo' },
+];
 
 const VirtualRow = React.memo(({ index, style, data }) => {
     const { rows, columnOrder, colWidths, metaData, formatDate, dateColumnIndices, setViewingContent } = data;
@@ -68,6 +75,261 @@ const VirtualRow = React.memo(({ index, style, data }) => {
     );
 });
 
+
+const DataView = ({ viewData, dataFilters, setDataFilters, dataSort, setDataSort, onSend, setInput }) => {
+    if (!viewData && !Array.isArray(viewData)) return <div className="p-4 text-gray-500">Nenhum dado para exibir.</div>;
+
+    let rows = [];
+    let columns = [];
+
+    if (viewData.metaData && viewData.rows) {
+        columns = viewData.metaData.map(m => m.name);
+        rows = viewData.rows;
+    } else if (Array.isArray(viewData) && viewData.length > 0) {
+        rows = viewData;
+        columns = Object.keys(rows[0]);
+    } else {
+        return <div className="p-4 text-gray-500">Nenhum dado encontrado.</div>;
+    }
+
+    // --- FILTER & SORT LOGIC (Memoized) ---
+    const processedRows = useMemo(() => {
+        if (!viewData) return [];
+        let rows = [];
+        let columns = [];
+
+        if (viewData.metaData && viewData.rows) {
+            columns = viewData.metaData.map(m => m.name);
+            rows = viewData.rows;
+        } else if (Array.isArray(viewData) && viewData.length > 0) {
+            rows = viewData;
+            columns = Object.keys(rows[0]);
+        } else {
+            return [];
+        }
+
+        // 1. Filter
+        let filtered = rows.filter(row => {
+            return columns.every((col, colIdx) => {
+                const filterVal = dataFilters[col] ? dataFilters[col].toLowerCase() : '';
+                if (!filterVal) return true;
+
+                const cellVal = Array.isArray(row) ? row[colIdx] : row[col];
+                const strVal = cellVal === null || cellVal === undefined ? '' : String(cellVal).toLowerCase();
+                return strVal.includes(filterVal);
+            });
+        });
+
+        // 2. Sort
+        if (dataSort.key) {
+            const colIdx = columns.indexOf(dataSort.key);
+            filtered.sort((a, b) => {
+                const valA = Array.isArray(a) ? a[colIdx] : a[dataSort.key];
+                const valB = Array.isArray(b) ? b[colIdx] : b[dataSort.key];
+
+                if (valA === valB) return 0;
+                if (valA === null || valA === undefined) return 1;
+                if (valB === null || valB === undefined) return -1;
+
+                // Try numeric sort
+                const numA = Number(valA);
+                const numB = Number(valB);
+                if (!isNaN(numA) && !isNaN(numB)) {
+                    return dataSort.direction === 'asc' ? numA - numB : numB - numA;
+                }
+
+                // String sort
+                return dataSort.direction === 'asc'
+                    ? String(valA).localeCompare(String(valB))
+                    : String(valB).localeCompare(String(valA));
+            });
+        }
+
+        return filtered;
+    }, [viewData, dataFilters, dataSort]);
+
+    const handleSort = (col) => {
+        setDataSort(prev => ({
+            key: col,
+            direction: prev.key === col && prev.direction === 'asc' ? 'desc' : 'asc'
+        }));
+    };
+
+    const handleFilterChange = (col, val) => {
+        setDataFilters(prev => ({ ...prev, [col]: val }));
+    };
+
+    const formatCell = (val) => {
+        if (val === null || val === undefined) return <span className="text-gray-300 italic">null</span>;
+        if (typeof val === 'object') return JSON.stringify(val);
+        if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val)) {
+            const date = new Date(val);
+            if (!isNaN(date.getTime())) {
+                const hasTime = date.getHours() !== 0 || date.getMinutes() !== 0 || date.getSeconds() !== 0;
+                return date.toLocaleString('pt-BR', {
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: hasTime ? '2-digit' : undefined,
+                    minute: hasTime ? '2-digit' : undefined,
+                    second: hasTime ? '2-digit' : undefined
+                });
+            }
+        }
+        return val;
+    };
+
+    const handleRemoteFilter = async (e) => {
+        if (e.key === 'Enter') {
+            // Synthesize a prompt for the AI based on active filters
+            const activeFilters = Object.entries(dataFilters)
+                .filter(([_, val]) => val && val.trim() !== '')
+                .map(([col, val]) => `${col} = "${val}"`)
+                .join(", ");
+
+            if (activeFilters.length > 0) {
+                const prompt = `Filtre a tabela ${viewData.tableName} onde: ${activeFilters}`;
+                setInput(prompt); // Show in chat box
+                await onSend(prompt); // Send to AI
+            } else {
+                // If all cleared, maybe reload default?
+                // For now, let user manually ask to clear or "Show Data" again
+            }
+        }
+    };
+
+    if (!viewData || !viewData.rows) return <div className="p-4 text-gray-400">Nenhum dado para exibir.</div>;
+
+    const isTruncated = viewData.rows.length >= 500;
+
+    return (
+        <div className="flex flex-col h-full bg-white relative">
+            {/* TRUNCATION BANNER */}
+            {isTruncated && (
+                <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex justify-between items-center animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-2 text-amber-800 text-xs font-semibold">
+                        <span className="bg-amber-100 p-1 rounded">⚠️</span>
+                        <span>Exibindo os primeiros 500 registros (Limite de Segurança)</span>
+                    </div>
+                    <button
+                        onClick={() => {
+                            if (viewData.sql) {
+                                window.dispatchEvent(new CustomEvent('hap-run-sql', { detail: { query: viewData.sql } }));
+                            } else {
+                                alert("SQL original não disponível.");
+                            }
+                        }}
+                        className="bg-amber-100 hover:bg-amber-200 text-amber-900 px-3 py-1 rounded text-xs font-bold transition-colors flex items-center gap-1 border border-amber-200"
+                    >
+                        <span>⚡ Ver Tudo no Editor SQL</span>
+                    </button>
+                </div>
+            )}
+
+            <div className="flex-1 overflow-auto custom-scroll relative">
+                <table className="min-w-full divide-y divide-gray-200 border-collapse">
+                    <thead className="bg-gray-50 sticky top-0 z-20 shadow-sm">
+                        <tr>
+                            {columns.map(col => (
+                                <th key={col} className="px-6 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider border-b border-gray-200 bg-gray-50 min-w-[150px]">
+                                    <div className="flex flex-col gap-2">
+                                        {/* Sortable Header */}
+                                        <div
+                                            className="flex items-center cursor-pointer hover:text-blue-600 transition-colors"
+                                            onClick={() => handleSort(col)}
+                                        >
+                                            <span>{col}</span>
+                                            <span className="ml-2 text-gray-400">
+                                                {dataSort.key === col ? (dataSort.direction === 'asc' ? '▲' : '▼') : '⇅'}
+                                            </span>
+                                        </div>
+                                        {/* Filter Input */}
+                                        <input
+                                            type="text"
+                                            placeholder={`Filtrar ${col}...`}
+                                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-2 focus:ring-blue-400 outline-none font-normal"
+                                            value={dataFilters[col] || ''}
+                                            onChange={(e) => handleFilterChange(col, e.target.value)}
+                                            onKeyDown={handleRemoteFilter}
+                                            title="Pressione Enter para filtrar no banco"
+                                        />
+                                    </div>
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                        {processedRows.length === 0 ? (
+                            <tr>
+                                <td colSpan={columns.length} className="px-6 py-10 text-center text-gray-500">
+                                    Nenhum registro encontrado com os filtros atuais.
+                                </td>
+                            </tr>
+                        ) : (
+                            processedRows.map((row, i) => (
+                                <tr key={i} className="hover:bg-blue-50 transition-colors group">
+                                    {columns.map((col, colIdx) => {
+                                        const cellVal = Array.isArray(row) ? row[colIdx] : row[col];
+                                        return (
+                                            <td key={colIdx} className="px-6 py-3 whitespace-nowrap text-sm text-gray-700 border-r border-transparent group-hover:border-gray-100 last:border-r-0">
+                                                {formatCell(cellVal)}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
+            </div>
+            <div className="bg-gray-50 px-4 py-3 border-t border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
+                <span className="text-xs text-gray-500 font-medium">
+                    Mostrando {processedRows.length} registros
+                    {isTruncated && <span className="text-amber-600 ml-1">(Parcial)</span>}
+                </span>
+
+                <div className="flex items-center gap-2">
+                    {/* Open SQL Button */}
+                    <button
+                        onClick={() => {
+                            if (viewData.sql) {
+                                window.dispatchEvent(new CustomEvent('hap-run-sql', { detail: { query: viewData.sql } }));
+                            } else {
+                                alert("SQL original indisponível.");
+                            }
+                        }}
+                        className="bg-white hover:bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border border-gray-300 shadow-sm flex items-center gap-1.5"
+                        title="Abrir no Editor SQL para análise avançada"
+                    >
+                        <span>⚡ Abrir SQL</span>
+                    </button>
+
+                    {/* Load More Button */}
+                    {processedRows.length >= 50 && (
+                        <button
+                            onClick={() => onSend(`Carregar mais 500 registros a partir do registro ${rows.length}`)}
+                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border border-blue-200 shadow-sm flex items-center gap-1.5"
+                        >
+                            <span>⬇️ Carregar +500</span>
+                        </button>
+                    )}
+
+                    {/* Load ALL Button */}
+                    <button
+                        onClick={() => {
+                            if (confirm("Isso pode travar sua tela se a tabela for muito grande. Deseja carregar SEM LIMITES?")) {
+                                onSend(`Executar a query original SEM LIMITES (limit: 'all') para trazer todos os dados.`);
+                            }
+                        }}
+                        className="bg-red-50 hover:bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border border-red-200 shadow-sm flex items-center gap-1.5"
+                        title="Cuidado: Pode ser lento"
+                    >
+                        <span>⚠️ Carregar TUDO</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
     const { theme } = useContext(ThemeContext);
     const { apiUrl } = useApi();
@@ -101,14 +363,27 @@ const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
     const [mode, setMode] = useState('ai');
     const [showSkillsModal, setShowSkillsModal] = useState(false);
     const [tableFilter, setTableFilter] = useState('');
-    const [menuState, setMenuState] = useState('root');
+    const [menuState, setMenuState] = useState('root'); // root, extraction, extraction_carga, sigo_menu, carga_input, carga_result, connection_required, dashboard_selection
+    const [dashboardType, setDashboardType] = useState('CARGA'); // CARGA, SIGO - forced update
     const [paginationParams, setPaginationParams] = useState({ offset: 0, hasMore: true });
     const [isLoadingMore, setIsLoadingMore] = useState(false);
 
     // Data Grid State (Filter & Sort)
     const [dataSort, setDataSort] = useState({ key: null, direction: 'asc' });
-    const [dataFilters, setDataFilters] = useState({});
 
+    const [dataFilters, setDataFilters] = useState({});
+    const [isCreationDashboardFlow, setIsCreationDashboardFlow] = useState(false);
+    const [customCargaCards, setCustomCargaCards] = useState([]);
+    const [isLoadingTableColumns, setIsLoadingTableColumns] = useState(false);
+
+
+    // REF PROXY REMOVED - Direct Access Restored
+    useEffect(() => {
+        window.debugSetDashboardFlow = setIsCreationDashboardFlow;
+        return () => { delete window.debugSetDashboardFlow; };
+    }, []);
+
+    console.log('[AiBuilder] State Init - isCreationDashboardFlow:', isCreationDashboardFlow);
     // Missing Items State
     const [missingItems, setMissingItems] = useState({});
     const [isMissingItemsModalOpen, setIsMissingItemsModalOpen] = useState(false);
@@ -181,6 +456,18 @@ const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
         }
     }, [connection]);
 
+    // Load Custom Cards
+    useEffect(() => {
+        const savedCards = localStorage.getItem('custom_carga_cards');
+        if (savedCards) {
+            try {
+                setCustomCargaCards(JSON.parse(savedCards));
+            } catch (e) {
+                console.error("Failed to parse saved cards", e);
+            }
+        }
+    }, []);
+
     const fetchSkills = async () => {
         try {
             const res = await fetch(`${apiUrl}/api/ai/skills`);
@@ -196,6 +483,44 @@ const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
         setFlowParams({});
         setMessages(prev => [...prev, { id: Date.now(), sender: 'ai', text: promptText, isSystem: true }]);
     };
+
+    const fetchTableColumns = async (tableName) => {
+        if (!tableName) return [];
+        // setIsLoadingTableColumns(true); // Moved to DashboardBuilder
+        setTableColumns([]);
+        try {
+            const res = await fetch(`${apiUrl}/api/columns/${tableName}`);
+            const rawData = await res.json();
+            let cols = [];
+
+            if (Array.isArray(rawData)) {
+                // Direct array (likely from /api/columns endpoint)
+                cols = rawData.map(c => ({
+                    name: c.COLUMN_NAME || c.name,
+                    type: c.DATA_TYPE || c.type
+                }));
+            } else if (rawData.columns) {
+                // Wrapper object
+                cols = rawData.columns.map(c => ({
+                    name: c.COLUMN_NAME || c.name,
+                    type: c.DATA_TYPE || c.type
+                }));
+            }
+
+            if (cols.length > 0) {
+                setTableColumns(cols);
+                return cols;
+            }
+            return [];
+        } catch (e) {
+            console.error("Failed to fetch columns", e);
+            return [];
+        } finally {
+            // setIsLoadingTableColumns(false);
+        }
+    };
+
+    // Function logic inlined into onFetchValues prop to avoid ReferenceErrors
 
     const handleHeadlineClick = (headline) => {
         let text = headline.prompt;
@@ -294,11 +619,20 @@ const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
         setInput('');
         setLoading(true);
 
+        // --- CONTEXT INJECTION (Data View) ---
+        let apiMessage = textToSend;
+        if (activeView === 'data' && viewData && viewData.tableName && !textOverride) {
+            // Only inject if not already explicitly mentioned (naive check)
+            if (!textToSend.toLowerCase().includes(viewData.tableName.toLowerCase())) {
+                apiMessage = `[Contexto: O usuário está visualizando a tabela ${viewData.tableName}. Execute a ação solicitada sobre esta tabela.] ${textToSend}`;
+            }
+        }
+
         try {
             const res = await fetch(`${apiUrl}/api/ai/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: textToSend, mode: mode, userId: sessionId })
+                body: JSON.stringify({ message: apiMessage, mode: mode, userId: sessionId })
             });
             const data = await res.json();
             console.log("[DEBUG] AiBuilder Response:", JSON.stringify(data));
@@ -368,6 +702,17 @@ const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
                 } else if (data.action === 'agent_report') {
                     setActiveView('agent_report');
                     setViewData(data.data);
+                } else if (data.action === 'open_dashboard') {
+                    setActiveView('welcome');
+                    if (startScreenRef.current && startScreenRef.current.openDashboard) {
+                        startScreenRef.current.openDashboard(data.data?.card);
+                    }
+                } else if (data.action === 'open_extraction') {
+                    setActiveView('welcome');
+                    setMenuState('carga_input');
+                } else if (data.action === 'open_sigo') {
+                    setActiveView('welcome');
+                    setMenuState('extraction_carga'); // Use extraction menu for Sigo/Carga options
                 }
             }
 
@@ -887,259 +1232,7 @@ const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
         );
     };
 
-    const renderDataView = () => {
-        if (!viewData && !Array.isArray(viewData)) return <div className="p-4 text-gray-500">Nenhum dado para exibir.</div>;
 
-        let rows = [];
-        let columns = [];
-
-        if (viewData.metaData && viewData.rows) {
-            columns = viewData.metaData.map(m => m.name);
-            rows = viewData.rows;
-        } else if (Array.isArray(viewData) && viewData.length > 0) {
-            rows = viewData;
-            columns = Object.keys(rows[0]);
-        } else {
-            return <div className="p-4 text-gray-500">Nenhum dado encontrado.</div>;
-        }
-
-        // --- FILTER & SORT LOGIC (Memoized) ---
-        const processedRows = useMemo(() => {
-            if (!viewData) return [];
-            let rows = [];
-            let columns = [];
-
-            if (viewData.metaData && viewData.rows) {
-                columns = viewData.metaData.map(m => m.name);
-                rows = viewData.rows;
-            } else if (Array.isArray(viewData) && viewData.length > 0) {
-                rows = viewData;
-                columns = Object.keys(rows[0]);
-            } else {
-                return [];
-            }
-
-            // 1. Filter
-            let filtered = rows.filter(row => {
-                return columns.every((col, colIdx) => {
-                    const filterVal = dataFilters[col] ? dataFilters[col].toLowerCase() : '';
-                    if (!filterVal) return true;
-
-                    const cellVal = Array.isArray(row) ? row[colIdx] : row[col];
-                    const strVal = cellVal === null || cellVal === undefined ? '' : String(cellVal).toLowerCase();
-                    return strVal.includes(filterVal);
-                });
-            });
-
-            // 2. Sort
-            if (dataSort.key) {
-                const colIdx = columns.indexOf(dataSort.key);
-                filtered.sort((a, b) => {
-                    const valA = Array.isArray(a) ? a[colIdx] : a[dataSort.key];
-                    const valB = Array.isArray(b) ? b[colIdx] : b[dataSort.key];
-
-                    if (valA === valB) return 0;
-                    if (valA === null || valA === undefined) return 1;
-                    if (valB === null || valB === undefined) return -1;
-
-                    // Try numeric sort
-                    const numA = Number(valA);
-                    const numB = Number(valB);
-                    if (!isNaN(numA) && !isNaN(numB)) {
-                        return dataSort.direction === 'asc' ? numA - numB : numB - numA;
-                    }
-
-                    // String sort
-                    return dataSort.direction === 'asc'
-                        ? String(valA).localeCompare(String(valB))
-                        : String(valB).localeCompare(String(valA));
-                });
-            }
-
-            return filtered;
-        }, [viewData, dataFilters, dataSort]);
-
-        const handleSort = (col) => {
-            setDataSort(prev => ({
-                key: col,
-                direction: prev.key === col && prev.direction === 'asc' ? 'desc' : 'asc'
-            }));
-        };
-
-        const handleFilterChange = (col, val) => {
-            setDataFilters(prev => ({ ...prev, [col]: val }));
-        };
-
-        const formatCell = (val) => {
-            if (val === null || val === undefined) return <span className="text-gray-300 italic">null</span>;
-            if (typeof val === 'object') return JSON.stringify(val);
-            if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val)) {
-                const date = new Date(val);
-                if (!isNaN(date.getTime())) {
-                    const hasTime = date.getHours() !== 0 || date.getMinutes() !== 0 || date.getSeconds() !== 0;
-                    return date.toLocaleString('pt-BR', {
-                        day: '2-digit', month: '2-digit', year: 'numeric',
-                        hour: hasTime ? '2-digit' : undefined,
-                        minute: hasTime ? '2-digit' : undefined,
-                        second: hasTime ? '2-digit' : undefined
-                    });
-                }
-            }
-            return val;
-        };
-
-        const handleRemoteFilter = async (e) => {
-            if (e.key === 'Enter') {
-                // Synthesize a prompt for the AI based on active filters
-                const activeFilters = Object.entries(dataFilters)
-                    .filter(([_, val]) => val && val.trim() !== '')
-                    .map(([col, val]) => `${col} = "${val}"`)
-                    .join(", ");
-
-                if (activeFilters.length > 0) {
-                    const prompt = `Filtre a tabela ${viewData.tableName} onde: ${activeFilters}`;
-                    setInput(prompt); // Show in chat box
-                    await handleSend(prompt); // Send to AI
-                } else {
-                    // If all cleared, maybe reload default?
-                    // For now, let user manually ask to clear or "Show Data" again
-                }
-            }
-        };
-
-        if (!viewData || !viewData.rows) return <div className="p-4 text-gray-400">Nenhum dado para exibir.</div>;
-
-        const isTruncated = viewData.rows.length >= 500;
-
-        return (
-            <div className="flex flex-col h-full bg-white relative">
-                {/* TRUNCATION BANNER */}
-                {isTruncated && (
-                    <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex justify-between items-center animate-in fade-in slide-in-from-top-2">
-                        <div className="flex items-center gap-2 text-amber-800 text-xs font-semibold">
-                            <span className="bg-amber-100 p-1 rounded">⚠️</span>
-                            <span>Exibindo os primeiros 500 registros (Limite de Segurança)</span>
-                        </div>
-                        <button
-                            onClick={() => {
-                                if (viewData.sql) {
-                                    window.dispatchEvent(new CustomEvent('hap-run-sql', { detail: { query: viewData.sql } }));
-                                } else {
-                                    alert("SQL original não disponível.");
-                                }
-                            }}
-                            className="bg-amber-100 hover:bg-amber-200 text-amber-900 px-3 py-1 rounded text-xs font-bold transition-colors flex items-center gap-1 border border-amber-200"
-                        >
-                            <span>⚡ Ver Tudo no Editor SQL</span>
-                        </button>
-                    </div>
-                )}
-
-                <div className="flex-1 overflow-auto custom-scroll relative">
-                    <table className="min-w-full divide-y divide-gray-200 border-collapse">
-                        <thead className="bg-gray-50 sticky top-0 z-20 shadow-sm">
-                            <tr>
-                                {columns.map(col => (
-                                    <th key={col} className="px-6 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider border-b border-gray-200 bg-gray-50 min-w-[150px]">
-                                        <div className="flex flex-col gap-2">
-                                            {/* Sortable Header */}
-                                            <div
-                                                className="flex items-center cursor-pointer hover:text-blue-600 transition-colors"
-                                                onClick={() => handleSort(col)}
-                                            >
-                                                <span>{col}</span>
-                                                <span className="ml-2 text-gray-400">
-                                                    {dataSort.key === col ? (dataSort.direction === 'asc' ? '▲' : '▼') : '⇅'}
-                                                </span>
-                                            </div>
-                                            {/* Filter Input */}
-                                            <input
-                                                type="text"
-                                                placeholder={`Filtrar ${col}...`}
-                                                className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-2 focus:ring-blue-400 outline-none font-normal"
-                                                value={dataFilters[col] || ''}
-                                                onChange={(e) => handleFilterChange(col, e.target.value)}
-                                                onKeyDown={handleRemoteFilter}
-                                                title="Pressione Enter para filtrar no banco"
-                                            />
-                                        </div>
-                                    </th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {processedRows.length === 0 ? (
-                                <tr>
-                                    <td colSpan={columns.length} className="px-6 py-10 text-center text-gray-500">
-                                        Nenhum registro encontrado com os filtros atuais.
-                                    </td>
-                                </tr>
-                            ) : (
-                                processedRows.map((row, i) => (
-                                    <tr key={i} className="hover:bg-blue-50 transition-colors group">
-                                        {columns.map((col, colIdx) => {
-                                            const cellVal = Array.isArray(row) ? row[colIdx] : row[col];
-                                            return (
-                                                <td key={colIdx} className="px-6 py-3 whitespace-nowrap text-sm text-gray-700 border-r border-transparent group-hover:border-gray-100 last:border-r-0">
-                                                    {formatCell(cellVal)}
-                                                </td>
-                                            );
-                                        })}
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-                <div className="bg-gray-50 px-4 py-3 border-t border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
-                    <span className="text-xs text-gray-500 font-medium">
-                        Mostrando {processedRows.length} registros
-                        {isTruncated && <span className="text-amber-600 ml-1">(Parcial)</span>}
-                    </span>
-
-                    <div className="flex items-center gap-2">
-                        {/* Open SQL Button */}
-                        <button
-                            onClick={() => {
-                                if (viewData.sql) {
-                                    window.dispatchEvent(new CustomEvent('hap-run-sql', { detail: { query: viewData.sql } }));
-                                } else {
-                                    alert("SQL original indisponível.");
-                                }
-                            }}
-                            className="bg-white hover:bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border border-gray-300 shadow-sm flex items-center gap-1.5"
-                            title="Abrir no Editor SQL para análise avançada"
-                        >
-                            <span>⚡ Abrir SQL</span>
-                        </button>
-
-                        {/* Load More Button */}
-                        {processedRows.length >= 50 && (
-                            <button
-                                onClick={() => handleSend(`Carregar mais 500 registros a partir do registro ${rows.length}`)}
-                                className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border border-blue-200 shadow-sm flex items-center gap-1.5"
-                            >
-                                <span>⬇️ Carregar +500</span>
-                            </button>
-                        )}
-
-                        {/* Load ALL Button */}
-                        <button
-                            onClick={() => {
-                                if (confirm("Isso pode travar sua tela se a tabela for muito grande. Deseja carregar SEM LIMITES?")) {
-                                    handleSend(`Executar a query original SEM LIMITES (limit: 'all') para trazer todos os dados.`);
-                                }
-                            }}
-                            className="bg-red-50 hover:bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border border-red-200 shadow-sm flex items-center gap-1.5"
-                            title="Cuidado: Pode ser lento"
-                        >
-                            <span>⚠️ Carregar TUDO</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
-    };
 
     return (
         <div className={`h-full ${theme.bg} overflow-hidden font-sans`}>
@@ -1147,41 +1240,129 @@ const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
             {/* --- SKILLS MODAL --- */}
             {showSkillsModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl p-6 w-[500px] max-w-full m-4 border-2 border-blue-100">
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-xl font-bold text-gray-800">🧠 O que eu já aprendi</h2>
-                            <button onClick={() => setShowSkillsModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+                    <div className="bg-white rounded-2xl shadow-2xl overflow-hidden w-[600px] max-w-full m-4 flex flex-col max-h-[80vh]">
+                        {/* Header */}
+                        <div className="bg-blue-600 p-6 flex justify-between items-center text-white shrink-0">
+                            <h2 className="text-xl font-bold flex items-center gap-2">
+                                <span>🚀</span> Módulo de Inteligência
+                            </h2>
+                            <button onClick={() => setShowSkillsModal(false)} className="text-blue-200 hover:text-white text-2xl transition-colors">&times;</button>
                         </div>
-                        <div className="max-h-[60vh] overflow-y-auto space-y-3">
-                            {skills.length === 0 ? (
-                                <p className="text-center text-gray-500 py-8">Ainda estou aprendendo! Use o assistente para me ensinar novos truques.</p>
-                            ) : (
-                                skills.map(skill => (
-                                    <div key={skill.id} className="p-3 bg-blue-50 rounded-xl flex justify-between items-center group hover:bg-blue-100 transition-colors">
-                                        <div>
-                                            <h4 className="font-bold text-blue-800 text-sm">{skill.name}</h4>
-                                            <p className="text-xs text-blue-600 opacity-80">Usado {skill.frequency} vezes</p>
-                                        </div>
-                                        <button
-                                            onClick={() => {
-                                                setShowSkillsModal(false);
-                                                if (skill.id === 'draft_table') handleFlowStart('CREATE_NAME', 'Qual o nome da nova tabela?');
-                                                else if (skill.id === 'list_tables') setInput('Listar todas as tabelas');
-                                                else if (skill.id === 'describe_table') setInput('Descreva a tabela [NOME]');
-                                                else if (skill.id === 'list_triggers') setInput('Listar triggers da tabela [NOME]');
-                                                else setInput(`Executar ação: ${skill.id}`);
-                                            }}
-                                            className="px-3 py-1 bg-white text-blue-600 text-xs font-bold rounded-lg shadow-sm opacity-0 group-hover:opacity-100 transition-opacity transform active:scale-95"
-                                        >
-                                            Testar ⚡
-                                        </button>
-                                    </div>
-                                ))
-                            )}
+
+                        {/* Body */}
+                        <div className="p-6 overflow-y-auto custom-scroll space-y-6">
+
+                            {/* Category 1: Exploração e Busca */}
+                            <div className="bg-slate-50 rounded-xl p-5 border border-slate-200">
+                                <h3 className="font-bold text-slate-800 text-lg mb-3 flex items-center gap-2">
+                                    <span>🔍</span> Exploração e Busca
+                                </h3>
+                                <ul className="space-y-3">
+                                    <li className="flex items-start gap-2 text-sm text-slate-700">
+                                        <span className="font-bold text-slate-400">•</span>
+                                        <span>
+                                            <strong className="text-slate-900">Listar Tabelas:</strong> "Listar tabelas de vendas", "Buscar tabela de clientes"
+                                        </span>
+                                    </li>
+                                    <li className="flex items-start gap-2 text-sm text-slate-700">
+                                        <span className="font-bold text-slate-400">•</span>
+                                        <span>
+                                            <strong className="text-slate-900">Estrutura:</strong> "Descreva a tabela X", "Ver colunas da tabela Y"
+                                        </span>
+                                    </li>
+                                    <li className="flex items-start gap-2 text-sm text-slate-700">
+                                        <span className="font-bold text-slate-400">•</span>
+                                        <span>
+                                            <strong className="text-slate-900">Ver Dados:</strong> "Mostre os dados da tabela X", "Ver primeiros 50 registros"
+                                        </span>
+                                    </li>
+                                    <li className="flex items-start gap-2 text-sm text-slate-700">
+                                        <span className="font-bold text-slate-400">•</span>
+                                        <span>
+                                            <strong className="text-slate-900">Buscar Registro:</strong> "Encontre o contrato 123 na tabela X", "Busque o CPF Y"
+                                        </span>
+                                    </li>
+                                </ul>
+                            </div>
+
+                            {/* Category 2: Dashboards e Gráficos */}
+                            <div className="bg-blue-50 rounded-xl p-5 border border-blue-100">
+                                <h3 className="font-bold text-blue-800 text-lg mb-3 flex items-center gap-2">
+                                    <span>📊</span> Dashboards e Gráficos
+                                </h3>
+                                <p className="text-blue-700 text-sm mb-3">
+                                    Crie painéis visuais interativos a partir dos seus dados.
+                                </p>
+                                <ul className="space-y-2 text-sm text-blue-800">
+                                    <li className="bg-white/50 px-3 py-2 rounded-lg border border-blue-100">
+                                        "Crie um dashboard de vendas por estado..."
+                                    </li>
+                                    <li className="bg-white/50 px-3 py-2 rounded-lg border border-blue-100">
+                                        "Me mostre o dashboard criado"
+                                    </li>
+                                </ul>
+                            </div>
+
+                            {/* Category 3: Extração e Ferramentas */}
+                            <div className="bg-emerald-50 rounded-xl p-5 border border-emerald-100">
+                                <h3 className="font-bold text-emerald-800 text-lg mb-3 flex items-center gap-2">
+                                    <span>💾</span> Extração e Ferramentas
+                                </h3>
+                                <p className="text-emerald-700 text-sm mb-3">
+                                    Acesso rápido às ferramentas de carga e SIGO.
+                                </p>
+                                <ul className="space-y-2 text-sm text-emerald-800">
+                                    <li className="bg-white/50 px-3 py-2 rounded-lg border border-emerald-100">
+                                        "Quero fazer uma carga de dados..."
+                                    </li>
+                                    <li className="bg-white/50 px-3 py-2 rounded-lg border border-emerald-100">
+                                        "Importar SQL no SIGO", "Relatório T2212"
+                                    </li>
+                                </ul>
+                            </div>
+
+                            {/* Category 4: Criação e Manutenção */}
+                            <div className="bg-purple-50 rounded-xl p-5 border border-purple-100">
+                                <h3 className="font-bold text-purple-800 text-lg mb-3 flex items-center gap-2">
+                                    <span>🛠️</span> Criação e Manutenção
+                                </h3>
+                                <ul className="space-y-3">
+                                    <li className="flex items-start gap-2 text-sm text-purple-800">
+                                        <span className="font-bold text-purple-400">•</span>
+                                        <span>
+                                            <strong className="text-purple-900">Nova Tabela:</strong> "Criar tabela de logs com id e data"
+                                        </span>
+                                    </li>
+                                    <li className="flex items-start gap-2 text-sm text-purple-800">
+                                        <span className="font-bold text-purple-400">•</span>
+                                        <span>
+                                            <strong className="text-purple-900">Triggers e Rotinas:</strong> "Ver triggers", "Criar rotina de verificação"
+                                        </span>
+                                    </li>
+                                </ul>
+                            </div>
+
+                            {/* Category 5: Aprendizado */}
+                            <div className="bg-amber-50 rounded-xl p-5 border border-amber-100">
+                                <h3 className="font-bold text-amber-800 text-lg mb-3 flex items-center gap-2">
+                                    <span>🧠</span> Aprendizado Contínuo
+                                </h3>
+                                <p className="text-amber-800 text-sm mb-2">
+                                    Se eu errar um termo, você pode me ensinar!
+                                </p>
+                                <div className="text-xs text-amber-900 bg-amber-100/50 p-3 rounded-lg border border-amber-200">
+                                    Use os botões de "Joinha" (👍/👎) nas minhas mensagens para corrigir termos ou me ensinar apelidos de tabelas.
+                                </div>
+                            </div>
+
                         </div>
-                        <button onClick={() => setShowSkillsModal(false)} className="mt-6 w-full py-2 bg-gray-100 font-bold text-gray-600 rounded-xl hover:bg-gray-200">
-                            Fechar
-                        </button>
+
+                        {/* Footer */}
+                        <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end shrink-0">
+                            <button onClick={() => setShowSkillsModal(false)} className="px-6 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-md hover:shadow-lg transition-all">
+                                Entendi, vamos começar!
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
@@ -1405,8 +1586,8 @@ const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
 
                 <Panel className={`flex flex-col bg-white overflow-hidden relative min-w-0`}>
                     {/* Header */}
-                    <div className={`h-14 border-b ${theme.border} flex items-center justify-between px-6 bg-white overflow-hidden flex-shrink-0`}>
-                        <h3 className="font-bold text-gray-700 text-sm uppercase tracking-wider flex items-center">
+                    <div className={`h-14 border-b ${theme.border} flex items-center justify-between px-6 bg-blue-600 overflow-hidden flex-shrink-0`}>
+                        <h3 className="font-bold text-white text-sm uppercase tracking-wider flex items-center">
                             <span className="text-lg mr-2">{menuState !== 'carga_result' && '📄'}</span>
                             {activeView === 'welcome' && menuState !== 'carga_result' && 'Início'}
                             {menuState === 'carga_result' && 'Extração da Carga'}
@@ -1419,9 +1600,9 @@ const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
                         </h3>
                         <div className="flex space-x-2">
                             {activeView !== 'welcome' && (
-                                <button onClick={() => { setActiveView('welcome'); setDraftData(null); }} className="text-xs text-gray-400 hover:text-gray-600">Voltar ao Início</button>
+                                <button onClick={() => { setActiveView('welcome'); setDraftData(null); }} className="text-xs text-blue-200 hover:text-white transition-colors">Voltar ao Início</button>
                             )}
-                            <button onClick={() => setShowSkillsModal(true)} className="text-xs text-purple-600 font-bold bg-purple-50 px-2 py-1 rounded hover:bg-purple-100">
+                            <button onClick={() => setShowSkillsModal(true)} className="text-xs text-blue-600 font-bold bg-white px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors shadow-sm">
                                 Ajuda
                             </button>
                         </div>
@@ -1544,7 +1725,15 @@ const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
                                     </button>
                                 </div>
                                 <div className="flex-1 overflow-hidden relative">
-                                    {renderDataView()}
+                                    <DataView
+                                        viewData={viewData}
+                                        dataFilters={dataFilters}
+                                        setDataFilters={setDataFilters}
+                                        dataSort={dataSort}
+                                        setDataSort={setDataSort}
+                                        onSend={handleSend}
+                                        setInput={setInput}
+                                    />
                                 </div>
                             </div>
                         )}
@@ -1554,6 +1743,8 @@ const AiBuilder = React.forwardRef(({ isVisible, connection }, ref) => {
             </PanelGroup>
             {/* Admin Dashboard */}
             <AdminModule isVisible={showAdmin} onClose={() => setShowAdmin(false)} />
+
+
         </div >
     );
 });
@@ -1574,6 +1765,17 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
     const handleManualExecute = (e) => {
         if (e && e.preventDefault) e.preventDefault();
         console.log('[DEBUG] Button Clicked (StartScreen Scope)');
+
+        // VALIDATION: SIGO Mode Mandatory Operator
+        if (sqlMode) {
+            // Check if loaded SQL has the mandatory column
+            const hasOperatorColumn = parsedSqlData?.columns?.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO');
+
+            if (hasOperatorColumn && !cargaValue) {
+                alert('⚠️ Atenção: Para este relatório, o filtro de Operadora é OBRIGATÓRIO.');
+                return;
+            }
+        }
 
         if (!cargaValue && activeFilters.length === 0) {
             console.error('[DEBUG] CargaValue is empty and no filters!');
@@ -1600,6 +1802,11 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
             });
         }, 50);
     };
+
+    // --- NAVIGATION HANDLERS ---
+
+
+
 
     // --- STATE DECLARATIONS (Consolidated) ---
 
@@ -1697,7 +1904,11 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
     const [sqlMode, setSqlMode] = useState(false);
     const [parsedSqlData, setParsedSqlData] = useState(null); // { columns: [], originalSql: '' }
     const [isParsingSql, setIsParsingSql] = useState(false);
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+    const [importCardName, setImportCardName] = useState('');
+    const [isDashboardOpen, setIsDashboardOpen] = useState(false);
     const fileInputRef = useRef(null);
+    const [isCreationDashboardFlow, setIsCreationDashboardFlow] = useState(false);
 
     React.useImperativeHandle(ref, () => ({
         reset: () => {
@@ -1709,6 +1920,16 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
             setSqlMode(false);
             setParsedSqlData(null);
             // fetchOperatorList(); 
+        },
+        openDashboard: (card = null) => {
+            if (card) setSelectedCard(card);
+            setIsDashboardOpen(true);
+        },
+        closeDashboard: () => {
+            setIsDashboardOpen(false);
+        },
+        setSelectedCard: (card) => {
+            setSelectedCard(card);
         }
     }));
 
@@ -1718,9 +1939,26 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
         if (!file) return;
 
         setIsParsingSql(true); // Start loading immediately
+        const tempTitle = importCardName || file.name; // Use custom name or filename
+        setSelectedCard({ title: tempTitle, icon: '📤' });
 
         try {
             const text = await file.text();
+
+            // --- PERSISTENCE LOGIC START ---
+            if (importCardName) {
+                const newCard = {
+                    id: `sql_${Date.now()}`,
+                    title: importCardName,
+                    type: 'SQL', // Custom Type
+                    content: text,
+                    icon: '🚀', // Distinct icon
+                    isCustom: true,
+                    target: 'sigo_menu' // Target menu for these cards
+                };
+                setCustomCargaCards(prev => [...prev, newCard]);
+            }
+            // --- PERSISTENCE LOGIC END ---
 
             // Send to Backend Parser
             const response = await fetch(`${apiUrl}/api/parse-sql`, {
@@ -1735,6 +1973,7 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
             }
 
             const data = await response.json();
+            data.title = tempTitle; // Store Title
 
             // Artificial Delay for user experience
             setTimeout(() => {
@@ -1743,10 +1982,16 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
                 // --- APPLY EQUIVALENCES FROM PARSER ---
                 if (data && data.columns) {
                     const newEquivalences = { ...fieldEquivalences };
-                    const uiColumns = data.columns.map(c => ({
-                        name: c.name,
-                        type: 'VARCHAR2'
-                    }));
+                    const uiColumns = data.columns.map(c => {
+                        const n = c.name.toUpperCase();
+                        let t = c.dataType || 'VARCHAR2';
+                        if (!c.dataType || c.dataType === 'VARCHAR2') {
+                            if (n.startsWith('NU_') || n.startsWith('QT_') || n.startsWith('VL_') || n.startsWith('NR_')) t = 'NUMBER';
+                            else if (n.startsWith('DT_') || n.startsWith('DATA_') || n.endsWith('_DT') || n.endsWith('_DATA')) t = 'DATE';
+                        }
+                        if (n.startsWith('CD_') || n.startsWith('ID_')) t = 'VARCHAR2';
+                        return { name: c.name, type: t };
+                    });
                     setTableColumns(uiColumns);
 
                     data.columns.forEach(col => {
@@ -1764,6 +2009,10 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
                 setMenuState('carga_input');
                 setIsParsingSql(false); // Stop loading
 
+                // Reset Modal State
+                setIsImportModalOpen(false);
+                setImportCardName('');
+
             }, 2000); // 2 seconds delay for "Preparando..."
 
         } catch (err) {
@@ -1776,11 +2025,73 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
         }
     };
 
+    const handleSavedSqlClick = async (card) => {
+        setIsParsingSql(true);
+        setParsedSqlData(null);
+        setSqlMode(true);
+        setSelectedCard(card);
+
+        try {
+            const response = await fetch(`${apiUrl}/api/parse-sql`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sqlContent: card.content })
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Erro ao processar SQL');
+            }
+
+            const data = await response.json();
+            data.title = card.title; // Persist Title
+
+            setTimeout(() => {
+                setParsedSqlData(data);
+
+                // --- APPLY EQUIVALENCES ---
+                if (data && data.columns) {
+                    const newEquivalences = { ...fieldEquivalences };
+                    const uiColumns = data.columns.map(c => {
+                        const n = c.name.toUpperCase();
+                        let t = c.dataType || 'VARCHAR2';
+                        if (!c.dataType || c.dataType === 'VARCHAR2') {
+                            if (n.startsWith('NU_') || n.startsWith('QT_') || n.startsWith('VL_') || n.startsWith('NR_')) t = 'NUMBER';
+                            else if (n.startsWith('DT_') || n.startsWith('DATA_') || n.endsWith('_DT') || n.endsWith('_DATA')) t = 'DATE';
+                        }
+                        if (n.startsWith('CD_') || n.startsWith('ID_')) t = 'VARCHAR2';
+                        return { name: c.name, type: t };
+                    });
+                    setTableColumns(uiColumns);
+
+                    data.columns.forEach(col => {
+                        if (col.options && col.options.length > 0) {
+                            newEquivalences[col.name] = col.options;
+                        }
+                    });
+                    setFieldEquivalences(newEquivalences);
+                }
+
+                setIsParsingSql(false);
+                setMenuState('carga_input');
+                fetchSigoOperators();
+            }, 1000);
+
+        } catch (err) {
+            console.error('SQL Exec Error:', err);
+            alert('Erro ao executar Card SQL: ' + err.message);
+            setIsParsingSql(false);
+            setSqlMode(false);
+        }
+    };
+
+
 
     const handleSigoPresetClick = async () => {
         setIsParsingSql(true);
         setParsedSqlData(null);
         setSqlMode(true);
+        setSelectedCard({ title: 'Relatório T2212', icon: '📑' }); // Set Card Title
 
         try {
             // Use T2212_SQL directly
@@ -1796,6 +2107,8 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
             }
 
             const data = await response.json();
+            data.title = 'Relatório T2212'; // Store Fixed Title
+
 
             setTimeout(() => {
                 setParsedSqlData(data);
@@ -1805,10 +2118,16 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
                     const newEquivalences = { ...fieldEquivalences };
 
                     // Also populate tableColumns for the UI dropdowns
-                    const uiColumns = data.columns.map(c => ({
-                        name: c.name,
-                        type: 'VARCHAR2' // Default to string for SQL mode as we can't be sure
-                    }));
+                    const uiColumns = data.columns.filter(c => c && c.name).map(c => {
+                        const n = c.name.toUpperCase();
+                        let t = c.dataType || 'VARCHAR2';
+                        if (!c.dataType || c.dataType === 'VARCHAR2') {
+                            if (n.startsWith('NU_') || n.startsWith('QT_') || n.startsWith('VL_') || n.startsWith('NR_')) t = 'NUMBER';
+                            else if (n.startsWith('DT_') || n.startsWith('DATA_') || n.endsWith('_DT') || n.endsWith('_DATA')) t = 'DATE';
+                        }
+                        if (n.startsWith('CD_') || n.startsWith('ID_')) t = 'VARCHAR2';
+                        return { name: c.name, type: t };
+                    });
                     setTableColumns(uiColumns);
 
                     data.columns.forEach(col => {
@@ -1834,10 +2153,8 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
 
     const fetchSigoOperators = async () => {
         // Special query for SIGO operators
-        // "Select cd_empresa_plano, nm_operadora From incorpora.tb_ope_operadora order by cd_operadora desc"
-        // I'll reuse the generic query endpoint
         try {
-            const sql = "Select cd_empresa_plano as id, nm_operadora as name From incorpora.tb_ope_operadora order by cd_operadora desc";
+            const sql = "Select cd_empresa_plano, nm_empresa_plano From VW_EMPRESA_PLANO_OPER order by 1";
             const response = await fetch(`${apiUrl}/api/query`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1888,7 +2205,8 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
         if (!executionResult?.metaData) return new Set();
         const indices = new Set();
         executionResult.metaData.forEach((col, idx) => {
-            if (col.type === 'DATE' || col.type?.includes('TIMESTAMP')) {
+            if (!col) return;
+            if (col.type === 'DATE' || (col.type && col.type.includes('TIMESTAMP'))) {
                 indices.add(idx);
             }
         });
@@ -1928,6 +2246,7 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
     const getColumnWidths = (metaData, rows) => {
         if (!metaData || !rows) return [];
         const widths = metaData.map(col => {
+            if (!col || !col.name) return 100; // Safe fallback
             let maxLen = col.name.length;
             // Check first 50 rows
             const checkRows = rows.slice(0, 50);
@@ -2453,16 +2772,17 @@ const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState }, ref
     };
 
     const CARDS = [
-        { id: 'find_table', title: 'Localizar Tabela', icon: '🔍', prompt: 'Buscar tabela', type: 'chat', isNew: false },
-        { id: 'structure', title: 'Exibir Estrutura', icon: '🏗️', prompt: 'Estrutura da tabela [NOME]', type: 'chat', isNew: false },
-        { id: 'create', title: 'Criar Tabela', icon: '✨', prompt: '', type: 'flow', flow: 'create_table', isNew: false },
-        { id: 'find_records', title: 'Localizar Registros', icon: '📋', prompt: 'Localizar registros na tabela [NOME]', type: 'chat', isNew: false },
-        { id: 'extraction', title: 'Extração', icon: '📦', isActive: true, isNew: true, createdAt: 1766321562779 } // Timestamp roughly now
+        { id: 'dashboard', title: 'Dashboard', icon: <BarChart3 className="w-6 h-6" />, isActive: true, isNew: true, createdAt: 1766321562779 },
+        { id: 'find_table', title: 'Localizar Tabela', icon: <Search className="w-6 h-6" />, prompt: 'Buscar tabela', type: 'chat', isNew: false },
+        { id: 'structure', title: 'Exibir Estrutura', icon: <Table className="w-6 h-6" />, prompt: 'Estrutura da tabela [NOME]', type: 'chat', isNew: false },
+        { id: 'create', title: 'Criar Tabela', icon: <PlusCircle className="w-6 h-6" />, prompt: '', type: 'flow', flow: 'create_table', isNew: false },
+        { id: 'find_records', title: 'Localizar Registros', icon: <Database className="w-6 h-6" />, prompt: 'Localizar registros na tabela [NOME]', type: 'chat', isNew: false },
+        { id: 'extraction', title: 'Extração', icon: <Download className="w-6 h-6" />, isActive: true, isNew: false, createdAt: 1766321562779 }
     ];
 
     const EXTRACTION_OPTS = [
-        { id: 'ext_carga', title: 'CARGA', icon: '📥', prompt: 'Quero realizar uma carga de dados (Extração)', type: 'navigate', target: 'extraction_carga' },
-        { id: 'ext_sigo', title: 'SIGO', icon: '🚀', prompt: 'Extração SIGO', type: 'navigate', target: 'sigo_menu' }
+        { id: 'ext_carga', title: 'CARGA', icon: <Database className="w-10 h-10" />, prompt: 'Quero realizar uma carga de dados (Extração)', type: 'navigate', target: 'extraction_carga' },
+        { id: 'ext_sigo', title: 'SIGO', icon: <Rocket className="w-10 h-10" />, prompt: 'Extração SIGO', type: 'navigate', target: 'sigo_menu' }
     ];
 
     const T2212_SQL = `
@@ -2606,9 +2926,7 @@ nvl((Select l.dia_limite_acesso From tb_emp_limite_acesso_contra l Where e.cd_em
 From vw_empresa_conveniada_cad e
 `;
 
-    const CARGA_OPTS = [
-        { id: 'contrato_coletivo', title: 'Contrato Coletivo', icon: '👥', target: 'carga_input' },
-    ];
+
 
     const OPERATOR_LABELS = {
         'equals': 'Igual a',
@@ -2630,11 +2948,30 @@ From vw_empresa_conveniada_cad e
         return diff < (15 * 24 * 60 * 60 * 1000); // 15 days
     };
 
-    const handleCardClick = (card) => {
+    // --- DEFENSIVE STATE CLEANUP ---
+    // Ensure we never carry over SQL state when entering the Dashboard Selection screen
+    useEffect(() => {
+        if (menuState === 'dashboard_selection') {
+            console.log('[AiBuilder] Entering Dashboard Selection - Clearing SQL State');
+            setSqlMode(false);
+            setParsedSqlData(null);
+        }
+    }, [menuState]);
+
+    const handleMainCardClick = (card) => {
         if (card.id === 'extraction') {
+            setIsCreationDashboardFlow(false);
             setMenuState('extraction');
+        } else if (card.id === 'dashboard') {
+            // UNIFIED FLOW: Open DashboardBuilder directly
+            setIsDashboardOpen(true);
+            return;
         } else {
-            onAction(card);
+            console.log("Action clicked:", card);
+            setIsCreationDashboardFlow(false);
+            if (onAction) {
+                onAction(card);
+            }
         }
     };
 
@@ -2753,16 +3090,27 @@ From vw_empresa_conveniada_cad e
 
     useEffect(() => {
         // Prefetch operators
+        // Dynamically fetch based on mode
         fetchOperators();
-    }, []);
+    }, [sqlMode]);
 
     const fetchOperators = async () => {
         try {
+            // CONDITIONAL SOURCE:
+            // If in SQL Mode (SIGO), use the view VW_EMPRESA_PLANO_OPER
+            // Else (Standard Carga), use the table tb_ope_operadora
+
+            let query = "Select cd_operadora, nm_operadora From incorpora.tb_ope_operadora order by cd_operadora desc";
+
+            if (sqlMode) {
+                query = "Select cd_empresa_plano, nm_empresa_plano From VW_EMPRESA_PLANO_OPER order by 1";
+            }
+
             const response = await fetch('http://localhost:3001/api/query', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    sql: "Select cd_operadora, nm_operadora From incorpora.tb_ope_operadora order by cd_operadora desc"
+                    sql: query
                 })
             });
             const data = await response.json();
@@ -2782,35 +3130,63 @@ From vw_empresa_conveniada_cad e
     // { title, content }
 
 
-    const fetchTableColumns = async (specificTable) => {
+    const fetchTableColumns = async (sourceInput) => {
         // In SQL Mode (SIGO/Import), columns are static from the parser.
-        // Don't fetch unless we are explicitly switching tables for some reason.
-        if (sqlMode && !specificTable) {
+        // Don't fetch unless we are explicitly switching tables/sources for some reason.
+        if (sqlMode && !sourceInput) {
             console.log("Skipping column fetch in SQL Mode");
             return;
         }
 
-        const targetTable = specificTable || exportTableName || 'incorpora.tb_ope_contrato_coletivo';
-
-        // Always fetch if a specific table is requested, ignoring current cache if distinct? 
-        // For simplicity, just force fetch.
         setFiltersLoading(true);
-        // Clear previous columns potentially to avoid mix
         setTableColumns([]);
 
         try {
+            // Check if input is a Source Object with SQL content
+            if (sourceInput && typeof sourceInput === 'object' && sourceInput.content) {
+                console.log("[fetchTableColumns] Parsing SQL from source...");
+                const res = await fetch(`${apiUrl}/api/parse-sql`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sqlContent: sourceInput.content })
+                });
+                const data = await res.json();
+
+                if (data && data.columns) {
+                    const formatted = data.columns.filter(c => c && c.name).map(c => ({
+                        name: c.name,
+                        type: c.dataType || 'VARCHAR2' // Use inferred type or default
+                    }));
+                    setTableColumns(formatted);
+                    return formatted;
+                }
+                return [];
+            }
+
+            // Standard Table Fetch
+            let targetTable = sourceInput;
+            if (sourceInput && typeof sourceInput === 'object') {
+                targetTable = sourceInput.tableName;
+            }
+            targetTable = targetTable || exportTableName || 'incorpora.tb_ope_contrato_coletivo';
+
+            if (!targetTable) return [];
+
             const res = await fetch(`${apiUrl}/api/columns/${targetTable}`);
             const data = await res.json();
             if (Array.isArray(data)) {
                 // Normalize Oracle data ({ COLUMN_NAME, DATA_TYPE }) to frontend ({ name, type })
-                const formatted = data.map(c => ({
+                const formatted = data.filter(c => c && c.COLUMN_NAME).map(c => ({
                     name: c.COLUMN_NAME,
                     type: c.DATA_TYPE
                 }));
                 setTableColumns(formatted);
+                return formatted;
             }
+            return [];
         } catch (error) {
             console.error("Error fetching columns:", error);
+            return [];
         } finally {
             setFiltersLoading(false);
         }
@@ -2902,8 +3278,12 @@ From vw_empresa_conveniada_cad e
                 setSelectedCard(opt);
                 // Reset context for new card
                 setCargaValue('');
+                setSqlMode(false); // Explicitly disable SQL mode
                 setActiveFilters([]);
                 setExecutionResult(null);
+            }
+            if (opt.target === 'extraction_carga') {
+                setSqlMode(false); // Ensure we are in Carga mode when entering menu
             }
         } else {
             onAction(opt);
@@ -2928,7 +3308,8 @@ From vw_empresa_conveniada_cad e
                 { value: 'equals', label: 'Igual' },
                 { value: 'greater_than', label: 'Maior que' },
                 { value: 'less_equal', label: 'Menor ou igual' },
-                { value: 'between', label: 'Entre datas' }
+                { value: 'between', label: 'Entre datas' },
+                { value: 'list', label: 'Lista' }
             ];
         } else {
             return [
@@ -2941,20 +3322,28 @@ From vw_empresa_conveniada_cad e
         }
     };
 
-    const handleCargaExecute = async (isLoadMoreArg = false) => {
+    const handleCargaExecute = async (isLoadMoreArg = false, contextOverride = null) => {
         const isLoadMore = isLoadMoreArg === true;
+
+        // Resolve Context with Overrides (for Dashboard Loading)
+        const ctxCargaValue = contextOverride?.cargaValue !== undefined ? contextOverride.cargaValue : cargaValue;
+        const ctxActiveFilters = contextOverride?.activeFilters !== undefined ? contextOverride.activeFilters : activeFilters;
+        const ctxSqlMode = contextOverride?.sqlMode !== undefined ? contextOverride.sqlMode : sqlMode;
+        const ctxParsedSqlData = contextOverride?.parsedSqlData !== undefined ? contextOverride.parsedSqlData : parsedSqlData;
+        const ctxSelectedCard = contextOverride?.selectedCard !== undefined ? contextOverride.selectedCard : selectedCard;
+        const ctxGroupBy = contextOverride?.groupBy !== undefined ? contextOverride.groupBy : null;
+
         // Allow if we have value OR active filters (for SQL Mode mainly)
-        if (!cargaValue && activeFilters.length === 0) return;
+        if (!ctxCargaValue && ctxActiveFilters.length === 0) return;
 
         // Lock check using Ref to prevent double-firing from scroll events
         // Only enforce lock for "Load More" to prevent scroll bounce.
-        // Manual execution (button click) should always be allowed to proceed (and effectively reset/restart).
         if (isLoadMore && searchLockRef.current) return;
 
         searchLockRef.current = true;
 
         // Identify Context
-        const currentTable = selectedCard?.tableName || 'incorpora.tb_ope_contrato_coletivo';
+        const currentTable = ctxSelectedCard?.tableName || 'incorpora.tb_ope_contrato_coletivo';
         const isIncorpora = currentTable.toLowerCase().includes('incorpora');
 
         // Set table name for export context
@@ -2966,6 +3355,8 @@ From vw_empresa_conveniada_cad e
             setExecutionResult(null);
             setExecutionLoading(true);
             setTotalRecords(0);
+            // If in dashboard flow, we technically still go to result view as base, 
+            // but the dashboard modal will cover it.
             setMenuState('carga_result');
             setShowFilters(false);
             // Reset pagination
@@ -2976,27 +3367,41 @@ From vw_empresa_conveniada_cad e
 
         try {
             // 1. Build Base SQL
-            // Use DISTINCT to prevent duplicate rows from inflating the count, as requested by user.
-            let baseSql = `SELECT DISTINCT * FROM ${currentTable}`;
-            if (sqlMode && parsedSqlData?.originalSql) {
+            // REMOVED DISTINCT: Performance killer on large tables (>1M). 
+            // relying on RowID or natural uniqueness is better for Dashboards.
+            let baseSql = `SELECT * FROM ${currentTable}`;
+
+            if (ctxSqlMode && ctxParsedSqlData?.originalSql) {
                 // SIGO WORKFLOW: Use imported SQL as the "Table" (Subquery)
                 // We wrap it to apply Where clauses externally
                 // Remove semicolon if present
-                const cleanImported = (parsedSqlData.cleanedSql || parsedSqlData.originalSql).trim().replace(/;$/, '');
+                const cleanImported = (ctxParsedSqlData.cleanedSql || ctxParsedSqlData.originalSql).trim().replace(/;$/, '');
                 baseSql = `SELECT * FROM (\n${cleanImported}\n) ImportedTable`;
+            } else if (!ctxSqlMode) {
+                // Ensure we are strictly in Carga mode, ignoring any stale parsedSqlData
+                baseSql = `SELECT * FROM ${currentTable}`;
             }
+
+            // SERVER-SIDE AGGREGATION (Grouping)
+            // If user selected a Group By column, we aggregate BEFORE filtering? 
+            // Usually Filter -> Group -> Sort.
+            // But here we construct the baseSql. 
+            // If we group, we fundamentally change the dataset structure.
+            let isAggregated = false;
+
+            // We apply aggregation later? No, we need to wrap the whole thing usually.
+            // But let's verify if we should apply it to the base or the final.
+            // Aggregating *after* filters is better (e.g. Count "Status" where "Date" > X).
 
             let whereClauses = [];
 
             // Main Operator Filter (Legacy/Specific to Incorpora)
-            if ((isIncorpora || sqlMode) && cargaValue) { // Allow for SIGO too
+            if ((isIncorpora || ctxSqlMode) && ctxCargaValue && ctxCargaValue !== '%') { // Allow for SIGO too
                 // For SIGO, "cd_operadora" might not exist or be different.
-                // The user said: "Select cd_empresa_plano, nm_operadora..." and "use the value of cd_empresa_plano to filter by the field cd_empresa_plano"
+                const targetField = ctxSqlMode ? 'CD_EMPRESA_PLANO' : 'cd_operadora';
 
-                const targetField = sqlMode ? 'CD_EMPRESA_PLANO' : 'cd_operadora';
-
-                if (cargaValue.includes(',')) {
-                    const listVals = cargaValue.split(',').map(v => v.trim()).filter(v => v !== '');
+                if (ctxCargaValue.includes(',')) {
+                    const listVals = ctxCargaValue.split(',').map(v => v.trim()).filter(v => v !== '');
                     const uniqueList = [...new Set(listVals)];
 
                     if (uniqueList.length > 1000) {
@@ -3009,17 +3414,13 @@ From vw_empresa_conveniada_cad e
                         whereClauses.push(`${targetField} IN (${ops})`);
                     }
                 } else {
-                    whereClauses.push(`${targetField} = '${cargaValue.replace(/'/g, "''")}'`);
+                    whereClauses.push(`${targetField} = '${ctxCargaValue.replace(/'/g, "''")}'`);
                 }
             }
 
             // Additional Filters
-            if (activeFilters.length > 0) {
-                // ... (Keep existing filter builder logic - reused implicitly if copied or just referenced)
-                // Since I am replacing the whole function block, I need to include the filter logic.
-                // To keep it clean, I will assume the previous code block for filters was standard.
-                // RE-INSERTING FILTER LOGIC FOR CORRECTNESS:
-                activeFilters.forEach(filter => {
+            if (ctxActiveFilters.length > 0) {
+                ctxActiveFilters.forEach(filter => {
                     if (filter.column && filter.value) {
                         const col = filter.column;
                         const rawVal = filter.value;
@@ -3036,19 +3437,15 @@ From vw_empresa_conveniada_cad e
                                 const uniqueList = [...new Set(listVals)];
                                 if (uniqueList.length > 0) {
                                     if (uniqueList.length > 1000) {
-                                        // "Tuple IN" optimization for large lists (Single block, no ORs)
-                                        // Bypasses ORA-01795 by comparing tuples: (col, dummy) IN ((val, dummy)...)
+                                        // "Tuple IN" optimization for large lists
                                         if (isNum) {
-                                            // Numeric: (col, 0)
                                             const tuples = uniqueList.map(v => `(${v},0)`).join(',');
                                             whereClauses.push(`(${col}, 0) IN (${tuples})`);
                                         } else {
-                                            // Text: (col, '0') - Quotes required for values
                                             const tuples = uniqueList.map(v => `('${v.replace(/'/g, "''")}', '0')`).join(',');
                                             whereClauses.push(`(${col}, '0') IN (${tuples})`);
                                         }
                                     } else {
-                                        // Standard IN for smaller lists (Cleaner SQL)
                                         if (isNum) {
                                             whereClauses.push(`${col} IN (${uniqueList.join(',')})`);
                                         } else {
@@ -3099,19 +3496,13 @@ From vw_empresa_conveniada_cad e
                 baseSql += ` WHERE ${whereClauses.join(' AND ')}`;
             }
 
-            // --- OPTIMIZATION: PARALLEL EXECUTION ---
-
-            // 2. Launch Count Query (Async - Don't Await)
+            // 2. Launch Count Query
             // Only runs on first load (not "Load More")
-            // 2. Launch Count Query (Async - Don't Await)
-            // Only runs on first load (not "Load More")
+            let countPromise = Promise.resolve();
             if (!isLoadMore) {
-                // Reverting to standard COUNT(*) as requested by user.
-                // Since baseSql uses SELECT DISTINCT *, this counts unique rows.
                 const countSql = `SELECT COUNT(*) as TOTAL FROM (${baseSql})`;
 
-                // Fire and Forget (but handle state update)
-                fetch(`${apiUrl}/api/query`, {
+                countPromise = fetch(`${apiUrl}/api/query`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ sql: countSql })
@@ -3119,9 +3510,6 @@ From vw_empresa_conveniada_cad e
                     .then(res => res.json())
                     .then(countData => {
                         if (countData.rows && countData.rows[0]) {
-                            // Check if we are still on the same query context?
-                            // Ideally yes, but for now simple check: if we are viewing results.
-                            // Ideally we should use a ref to track cancellation, but this is a huge improvement already.
                             setTotalRecords(countData.rows[0][0]);
                         }
                     })
@@ -3132,21 +3520,37 @@ From vw_empresa_conveniada_cad e
             let orderClause = '';
 
             // Only force ORDER BY if user requested sort OR if we are paging deep
-            // If it's the first page (offset 0) and no sort, we want RAW speed (Heap Scan)
             const isFirstPage = (!isLoadMore && paginationParams.offset === 0) || (isLoadMore && paginationParams.offset === 0);
+
             // Actually paginationParams.offset is the *current* offset for the *request*. 
             // isLoadMore=false means offset reset to 0.
-            const effectiveOffset = isLoadMore ? paginationParams.offset : 0;
 
             if (sortConfig.key) {
                 orderClause = ` ORDER BY ${sortConfig.key} ${sortConfig.direction === 'asc' ? 'ASC' : 'DESC'}, 1 ASC`;
-                // orderClause += `, ROWID`; // Stability - REMOVED for DISTINCT compatibility
             } else {
                 // Default order required for stable pagination (DISTINCT compatible)
-                orderClause = ` ORDER BY 1 ASC`;
+                // BUT 'ORDER BY 1' causes errors if col 1 is LOB/XML. Warning: Unstable pagination without sort Key.
+                // orderClause = ` ORDER BY 1 ASC`; 
+                orderClause = '';
             }
 
-            baseSql += orderClause;
+            if (ctxGroupBy && ctxGroupBy.trim() !== '') {
+                // APPLY GROUP BY AGGREGATION
+                // 1. Construct Filtered Query First (Inner)
+                let innerSql = baseSql;
+
+
+                // 2. Aggregation
+                // SELECT Col, COUNT(*) FROM (Inner) GROUP BY Col ORDER BY 2 DESC
+                baseSql = `SELECT "${ctxGroupBy}" as CATEGORIA, COUNT(*) as TOTAL FROM (${innerSql}) GroupedTbl GROUP BY "${ctxGroupBy}" ORDER BY 2 DESC`;
+
+                // Clear previous order clause as we forced one
+                orderClause = '';
+                isAggregated = true;
+            } else {
+
+                baseSql += orderClause;
+            }
 
             // 4. Await Data Query with Pagination Params
             const PAGE_SIZE = 50;
@@ -3168,7 +3572,8 @@ From vw_empresa_conveniada_cad e
                 setTimeout(() => reject(new Error("Timeout: A consulta demorou muito para responder (> 30s). Verifique sua conexão ou tente filtros mais específicos.")), 30000)
             );
 
-            const response = await Promise.race([fetchPromise, timeoutPromise]);
+            const mainRequest = Promise.race([fetchPromise, timeoutPromise]);
+            const [response] = await Promise.all([mainRequest, countPromise]);
             const data = await response.json();
 
             // Handle connection errors
@@ -3182,7 +3587,13 @@ From vw_empresa_conveniada_cad e
 
             if (data.error) {
                 console.error("[CARGA] Server Error:", data.error);
-                setExecutionResult({ error: data.error });
+                if (data.error.includes('ORA-00997')) {
+                    setExecutionResult({
+                        error: "⚠️ Erro de Tipo de Dado (LONG)\n\nDetectamos uma coluna do tipo LONG neste relatório (ex: DS_OBSERVACAO, XML).\nO Oracle NÃO permite ordenar ou filtrar este tipo de coluna.\n\n✅ Sugestão: Remova a ordenação/filtros desta coluna ou converta-a usando TO_CHAR(coluna) no seu SQL."
+                    });
+                } else {
+                    setExecutionResult({ error: data.error });
+                }
             } else {
                 const rowsReturned = data.rows ? data.rows.length : 0;
                 const hasMore = rowsReturned === PAGE_SIZE;
@@ -3203,17 +3614,214 @@ From vw_empresa_conveniada_cad e
                     });
                 } else {
                     setExecutionResult(data);
+
+                    // IF we are loading a dashboard, we don't necessarily open the dashboard here,
+                    // because the modal is ALREADY open (or will be opened by handleLoadDashboard).
+                    // But if it was "Creation Flow", we did.
+                    // Let's keep existing logic for freshness:
+                    if (isCreationDashboardFlow && !isLoadMore) {
+                        setIsDashboardOpen(true);
+                    }
                 }
             }
 
         } catch (error) {
             console.error("[CARGA] Execution Exception (Catch):", error);
-            setExecutionResult({ error: error.message || "Erro desconhecido na execução." });
+            const errMsg = error.message || "Erro desconhecido na execução.";
+            setExecutionResult({ error: errMsg });
         } finally {
             console.log("[CARGA] Finally Block - Stopping Loading");
             setExecutionLoading(false);
             setIsLoadingMore(false);
             searchLockRef.current = false;
+        }
+    };
+
+    /**
+     * Handles Data Loading for a specific Dashboard
+     * 1. Restores Context (TableName, Filters)
+     * 2. Executes Query with Override
+     */
+    const handleLoadDashboard = async (dashboard, callback) => {
+        console.log("Loading Dashboard Context:", dashboard);
+        const ctx = dashboard.context;
+        if (!ctx) return;
+
+        // 1. Sync UI State with Dashboard (Visual Consistency)
+        if (ctx.tableName) {
+            const card = [...CARGA_OPTS, ...customCargaCards].find(c => c.tableName === ctx.tableName);
+            setSelectedCard(card || { tableName: ctx.tableName, title: ctx.tableName });
+            setExportTableName(ctx.tableName);
+        }
+        if (ctx.filters) setActiveFilters(ctx.filters);
+        if (ctx.cargaValue) setCargaValue(ctx.cargaValue);
+        if (ctx.sqlMode !== undefined) setSqlMode(ctx.sqlMode);
+
+        // 2. Execute with EXPLICIT Context (Don't wait for SetState)
+        await handleCargaExecute(false, {
+            cargaValue: ctx.cargaValue,
+            activeFilters: ctx.filters,
+            sqlMode: ctx.sqlMode,
+            parsedSqlData: ctx.parsedSqlData, // Assuming we will save this too
+            sqlMode: ctx.sqlMode,
+            parsedSqlData: ctx.parsedSqlData, // Assuming we will save this too
+            selectedCard: { tableName: ctx.tableName },
+            groupBy: ctx.groupBy
+        });
+
+        // 3. Callback
+        if (callback) callback();
+    };
+
+    // Memoize Current Context for Dashboard Saving
+    const currentContext = useMemo(() => ({
+        tableName: exportTableName,
+        filters: activeFilters,
+        sqlMode: sqlMode,
+        cargaValue: cargaValue,
+        parsedSqlData: parsedSqlData // Added so we can save it too!
+    }), [exportTableName, activeFilters, sqlMode, cargaValue, parsedSqlData]);
+
+    /**
+     * Dedicated Execution Handler
+     * Bypasses strict locks for manual triggers and ensures UI feedback.
+     */
+    const handleFetchAggregatedData = async (config, context) => {
+        console.log("[AggData] Fetching for:", config.title);
+        // 1. Build Base SQL (Reusing Logic from handleCargaExecute - ideally refactor common logic)
+        const currentTable = context.tableName || 'incorpora.tb_ope_contrato_coletivo';
+        const isIncorpora = currentTable.toLowerCase().includes('incorpora');
+        const ctxSqlMode = context.sqlMode;
+        const ctxParsedSqlData = context.parsedSqlData;
+        const ctxCargaValue = context.cargaValue;
+        const ctxActiveFilters = context.filters || [];
+
+        let baseSql = `SELECT * FROM ${currentTable}`;
+
+        if (ctxSqlMode && ctxParsedSqlData?.originalSql) {
+            const cleanImported = (ctxParsedSqlData.cleanedSql || ctxParsedSqlData.originalSql).trim().replace(/;$/, '');
+            baseSql = `SELECT * FROM (\n${cleanImported}\n) ImportedTable`;
+        }
+
+        let whereClauses = [];
+
+        // Main Operator Filter
+        if ((isIncorpora || ctxSqlMode) && ctxCargaValue && ctxCargaValue !== '%') {
+            const targetField = ctxSqlMode ? 'CD_EMPRESA_PLANO' : 'cd_operadora';
+            if (ctxCargaValue.includes(',')) {
+                const listVals = ctxCargaValue.split(',').map(v => v.trim()).filter(v => v !== '');
+                const uniqueList = [...new Set(listVals)];
+                const ops = uniqueList.map(v => `'${v.replace(/'/g, "''")}'`).join(',');
+                whereClauses.push(`${targetField} IN (${ops})`); // Simplified for Aggregation (assume reasonable list size)
+            } else {
+                whereClauses.push(`${targetField} = '${ctxCargaValue.replace(/'/g, "''")}'`);
+            }
+        }
+
+        // Additional Filters
+        if (ctxActiveFilters.length > 0) {
+            ctxActiveFilters.forEach(filter => {
+                if (filter.column && filter.value) {
+                    const col = filter.column;
+                    const rawVal = filter.value;
+                    const colObj = tableColumns.find(c => c.name === filter.column);
+                    const colType = colObj ? colObj.type : 'VARCHAR2';
+                    const isNum = ['NUMBER', 'FLOAT', 'INTEGER'].some(t => colType?.includes(t));
+                    const isDate = ['DATE', 'TIMESTAMP'].some(t => colType?.includes(t));
+
+                    switch (filter.operator) {
+                        case 'list':
+                            const listVals = rawVal.split(',').map(v => v.trim()).filter(v => v !== '');
+                            const uniqueList = [...new Set(listVals)];
+                            if (uniqueList.length > 0) {
+                                if (isNum) whereClauses.push(`${col} IN (${uniqueList.join(',')})`);
+                                else {
+                                    const quoted = uniqueList.map(v => `'${v.replace(/'/g, "''")}'`).join(',');
+                                    whereClauses.push(`${col} IN (${quoted})`);
+                                }
+                            }
+                            break;
+                        case 'equals':
+                            if (isNum) whereClauses.push(`${col} = ${rawVal}`);
+                            else if (isDate) whereClauses.push(`${col} = TO_DATE('${rawVal}', 'DD/MM/YYYY')`);
+                            else whereClauses.push(`${col} = '${rawVal.replace(/'/g, "''")}'`);
+                            break;
+                        case 'greater_than':
+                            if (isNum) whereClauses.push(`${col} > ${rawVal}`);
+                            else if (isDate) whereClauses.push(`${col} > TO_DATE('${rawVal}', 'DD/MM/YYYY')`);
+                            else whereClauses.push(`${col} > '${rawVal.replace(/'/g, "''")}'`);
+                            break;
+                        case 'less_equal':
+                            if (isNum) whereClauses.push(`${col} <= ${rawVal}`);
+                            else if (isDate) whereClauses.push(`${col} <= TO_DATE('${rawVal}', 'DD/MM/YYYY')`);
+                            else whereClauses.push(`${col} <= '${rawVal.replace(/'/g, "''")}'`);
+                            break;
+                        case 'between':
+                            const val2 = filter.value2 || '';
+                            if (isNum) whereClauses.push(`${col} BETWEEN ${rawVal} AND ${val2}`);
+                            else if (isDate) whereClauses.push(`${col} BETWEEN TO_DATE('${rawVal}', 'DD/MM/YYYY') AND TO_DATE('${val2}', 'DD/MM/YYYY')`);
+                            else whereClauses.push(`${col} BETWEEN '${rawVal.replace(/'/g, "''")}' AND '${val2.replace(/'/g, "''")}'`);
+                            break;
+                        case 'contains':
+                            whereClauses.push(`UPPER(${col}) LIKE UPPER('%${rawVal.replace(/'/g, "''")}%')`);
+                            break;
+                        default:
+                            whereClauses.push(`${col} = '${rawVal.replace(/'/g, "''")}'`);
+                    }
+                }
+            });
+        }
+
+        if (whereClauses.length > 0) {
+            baseSql += ` WHERE ${whereClauses.join(' AND ')}`;
+        }
+
+        // 2. Wrap and Aggregate
+        let finalSql = '';
+        if (config.type === 'kpi') {
+            if (config.aggType === 'count') {
+                finalSql = `SELECT COUNT(*) as VAL FROM (${baseSql})`;
+            } else {
+                const aggFn = config.aggType === 'avg' ? 'AVG' : 'SUM';
+                const col = config.yAxis || '1'; // Safety
+                finalSql = `SELECT ${aggFn}(${col}) as VAL FROM (${baseSql})`;
+            }
+        } else {
+            // Charts (Bar, Pie, Line, Area)
+            const groupCol = config.xAxis;
+            const valueCol = config.yAxis; // Optional if count
+            const aggFn = config.aggType === 'avg' ? 'AVG' : (config.aggType === 'sum' ? 'SUM' : 'COUNT');
+
+            // Value Expression
+            let valExpr = 'COUNT(*)';
+            if (config.aggType === 'sum' || config.aggType === 'avg') {
+                valExpr = `${aggFn}(${valueCol})`;
+            }
+
+            finalSql = `SELECT "${groupCol}" as NAME, ${valExpr} as VALUE FROM (${baseSql}) GROUP BY "${groupCol}" ORDER BY 2 DESC`;
+        }
+
+        // 3. Execute
+        try {
+            const res = await fetch(`${apiUrl}/api/query`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql: finalSql })
+            });
+            const data = await res.json();
+            if (data.rows) {
+                if (config.type === 'kpi') {
+                    // Single Value
+                    return { value: data.rows[0][0], label: config.title };
+                } else {
+                    // List
+                    return data.rows.map(r => ({ name: r[0], value: r[1] }));
+                }
+            }
+            return [];
+        } catch (e) {
+            console.error("Aggregation Failed", e);
+            return [];
         }
     };
 
@@ -3271,6 +3879,60 @@ From vw_empresa_conveniada_cad e
                 </div>
             )}
 
+            {/* IMPORT NAME MODAL */}
+            <AnimatePresence>
+                {isImportModalOpen && (
+                    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                            className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl relative"
+                        >
+                            <button
+                                onClick={() => setIsImportModalOpen(false)}
+                                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-2"
+                            >
+                                ✕
+                            </button>
+                            <div className="text-center mb-6">
+                                <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4 text-blue-600">
+                                    🏷️
+                                </div>
+                                <h3 className="text-2xl font-bold text-gray-800">Nomear Relatório</h3>
+                                <p className="text-sm text-gray-500 mt-2">Dê um nome para identificar esta importação futura.</p>
+                            </div>
+
+                            <input
+                                type="text"
+                                autoFocus
+                                placeholder="Ex: Relatório Mensal de Vendas"
+                                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-lg font-bold text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none mb-6"
+                                value={importCardName}
+                                onChange={(e) => setImportCardName(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && importCardName.trim()) {
+                                        if (fileInputRef.current) fileInputRef.current.click();
+                                    }
+                                }}
+                            />
+
+                            <button
+                                onClick={() => {
+                                    if (!importCardName.trim()) return alert('Por favor, digite um nome.');
+                                    if (fileInputRef.current) {
+                                        fileInputRef.current.click();
+                                    }
+                                }}
+                                className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-blue-500/30 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+                            >
+                                Selecionar Arquivo SQL
+                            </button>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
             {menuState !== 'carga_result' && (
                 <div className="text-center mb-10 mt-10 flex-shrink-0">
                     <h1 className="text-4xl font-extrabold text-gray-900 mb-2 tracking-tight">
@@ -3281,6 +3943,7 @@ From vw_empresa_conveniada_cad e
                         {menuState === 'extraction' && 'Selecione o tipo de extração.'}
                         {menuState === 'extraction_carga' && 'Qual tipo de carga deseja realizar?'}
                         {menuState === 'sigo_menu' && 'Selecione o relatório SIGO'}
+                        {menuState === 'dashboard_selection' && 'Escolha a fonte de dados para o Dashboard'}
                         {menuState === 'carga_input' && 'Informe os parâmetros para a carga.'}
                         {menuState === 'connection_required' && 'Conexão Necessária'}
                     </p>
@@ -3289,6 +3952,58 @@ From vw_empresa_conveniada_cad e
 
             <div className={`mx-auto w-full transition-all duration-300 ${menuState === 'carga_result' ? 'h-full max-w-full px-4' : 'max-w-[1200px] min-h-[400px] relative'}`}>
                 <AnimatePresence mode="wait">
+                    {/* DASHBOARD SELECTION VIEW */}
+                    {menuState === 'dashboard_selection' && (
+                        <motion.div
+                            key="dashboard-selection"
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            className="flex flex-col items-center"
+                        >
+                            <motion.button
+                                onClick={() => setMenuState('root')}
+                                className="mb-8 self-start text-gray-400 hover:text-gray-600 flex items-center gap-2 text-sm font-bold uppercase tracking-wider"
+                            >
+                                ← Voltar
+                            </motion.button>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-2xl">
+                                {/* Carga de Dados Dashboard */}
+                                <motion.div
+                                    onClick={() => {
+                                        console.log('DEBUG: Clicked Carga');
+                                        setDashboardType('CARGA');
+                                        setIsDashboardOpen(true);
+                                    }}
+                                    className="bg-white p-10 rounded-3xl shadow-lg border border-gray-100 cursor-pointer hover:shadow-2xl hover:border-blue-300 group text-center"
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                >
+                                    <div className="text-6xl mb-6">📊</div>
+                                    <h3 className="text-2xl font-bold text-gray-800 mb-2">Carga de Dados</h3>
+                                    <p className="text-gray-500">Dashboards baseados em Cargas e Tabelas</p>
+                                </motion.div>
+
+                                {/* SIGO Dashboard */}
+                                <motion.div
+                                    onClick={() => {
+                                        console.log('DEBUG: Clicked SIGO');
+                                        setDashboardType('SIGO');
+                                        setIsDashboardOpen(true);
+                                    }}
+                                    className="bg-white p-10 rounded-3xl shadow-lg border border-gray-100 cursor-pointer hover:shadow-2xl hover:border-purple-300 group text-center"
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                >
+                                    <div className="text-6xl mb-6">📈</div>
+                                    <h3 className="text-2xl font-bold text-gray-800 mb-2">Extração SIGO</h3>
+                                    <p className="text-gray-500">Dashboards baseados em SQL importado</p>
+                                </motion.div>
+                            </div>
+                        </motion.div>
+                    )}
+
                     {menuState === 'root' && (
                         <motion.div
                             key="root-grid"
@@ -3303,29 +4018,29 @@ From vw_empresa_conveniada_cad e
                                 <motion.div
                                     key={card.id}
                                     layoutId={`card-${card.id}`}
-                                    onClick={() => handleCardClick(card)}
-                                    className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-lg hover:border-blue-300 group flex flex-col justify-between h-[180px] relative overflow-hidden"
+                                    onClick={() => handleMainCardClick(card)}
+                                    className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all duration-200 group flex flex-col justify-between h-[180px] relative overflow-hidden"
                                     whileHover={{ scale: 1.02 }}
                                     whileTap={{ scale: 0.98 }}
                                 >
                                     {isRecent(card.createdAt) && (
-                                        <div className="absolute top-3 right-3 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full animate-pulse shadow-sm">
+                                        <div className="absolute top-3 right-3 bg-blue-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm">
                                             NOVO
                                         </div>
                                     )}
-                                    <div className="text-4xl mb-4 group-hover:scale-110 transition-transform duration-300 origin-left">
+                                    <div className="w-12 h-12 rounded-lg bg-blue-50/50 flex items-center justify-center text-blue-600 mb-4 group-hover:scale-110 transition-transform duration-300 origin-left group-hover:bg-blue-100">
                                         {card.icon}
                                     </div>
                                     <div>
-                                        <h3 className="font-bold text-gray-800 text-xl mb-1 group-hover:text-blue-600 transition-colors">
+                                        <h3 className="font-bold text-slate-800 text-lg mb-1 group-hover:text-blue-600 transition-colors tracking-tight">
                                             {card.title}
                                         </h3>
-                                        <p className="text-sm text-gray-400">
+                                        <p className="text-sm text-slate-400 font-medium">
                                             {card.prompt ? `"${card.prompt}"` : 'Ação rápida'}
                                         </p>
                                     </div>
                                     {/* Decorative bg element */}
-                                    <div className="absolute -bottom-4 -right-4 w-24 h-24 bg-gray-50 rounded-full group-hover:bg-blue-50 transition-colors z-[-1]"></div>
+                                    <div className="absolute -bottom-6 -right-6 w-32 h-32 bg-slate-50 rounded-full group-hover:bg-blue-50/30 transition-colors z-0 pointer-events-none"></div>
                                 </motion.div>
                             ))}
                         </motion.div>
@@ -3356,22 +4071,26 @@ From vw_empresa_conveniada_cad e
                                         animate={{ opacity: 1, y: 0 }}
                                         transition={{ delay: i * 0.1 }}
                                         onClick={() => handleExtractionClick(opt)}
-                                        className="bg-gradient-to-br from-white to-gray-50 p-8 rounded-3xl shadow-lg border border-gray-100 cursor-pointer hover:shadow-2xl hover:border-purple-300 group text-center relative overflow-hidden"
-                                        whileHover={{ scale: 1.05 }}
-                                        whileTap={{ scale: 0.95 }}
+                                        className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-lg hover:border-blue-200 group text-center relative overflow-hidden flex flex-col items-center justify-center transition-all duration-300"
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
                                     >
-                                        <div className="text-6xl mb-6 transform group-hover:scale-110 transition-transform duration-300">{opt.icon}</div>
-                                        <h3 className="text-2xl font-bold text-gray-800 mb-2 group-hover:text-purple-600">{opt.title}</h3>
-                                        <p className="text-gray-500 text-sm">Clique para iniciar</p>
+                                        <div className="w-20 h-20 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 mb-6 group-hover:scale-110 transition-transform duration-300 group-hover:bg-blue-100 group-hover:text-blue-700">
+                                            {opt.icon}
+                                        </div>
+                                        <h3 className="text-2xl font-bold text-slate-800 mb-2 group-hover:text-blue-600 transition-colors">{opt.title}</h3>
+                                        <p className="text-slate-400 text-sm font-medium">Clique para iniciar</p>
 
                                         {/* Animation effect for 'entering' */}
-                                        <div className="absolute inset-0 bg-blue-500 opacity-0 group-hover:opacity-5 transition-opacity duration-500"></div>
+                                        <div className="absolute inset-0 bg-gradient-to-tr from-blue-50/0 to-blue-50/0 group-hover:from-blue-50/50 group-hover:to-transparent transition-all duration-500 pointer-events-none"></div>
                                     </motion.div>
                                 ))}
                             </div>
                         </motion.div>
 
                     )}
+
+
 
                     {/* CARGA MENU (Contrato Coletivo etc) */}
 
@@ -3422,10 +4141,9 @@ From vw_empresa_conveniada_cad e
 
                                     {/* Import SQL Card - Standard Design */}
                                     <motion.div
-                                        onClick={(e) => {
-                                            if (fileInputRef.current) {
-                                                fileInputRef.current.click();
-                                            }
+                                        onClick={() => {
+                                            setImportCardName('');
+                                            setIsImportModalOpen(true);
                                         }}
                                         className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md hover:border-blue-400 group flex flex-col items-center justify-center h-[160px] relative overflow-hidden transition-all"
                                         whileHover={{ scale: 1.05 }}
@@ -3443,6 +4161,27 @@ From vw_empresa_conveniada_cad e
                                             onClick={(e) => e.stopPropagation()}
                                         />
                                     </motion.div>
+
+                                    {/* SAVED SQL CARDS */}
+                                    {customCargaCards.filter(c => c.type === 'SQL').map(card => (
+                                        <motion.div
+                                            key={card.id}
+                                            onClick={() => handleSavedSqlClick(card)}
+                                            className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md hover:border-purple-400 group flex flex-col items-center justify-center h-[160px] relative overflow-hidden transition-all"
+                                            whileHover={{ scale: 1.05 }}
+                                        >
+                                            {/* Delete Button */}
+                                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                                                <button onClick={() => handleDeleteCard(card.id)} className="p-1 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-full transition-colors" title="Excluir Relatório">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                                </button>
+                                            </div>
+
+                                            <div className="text-4xl mb-3">{card.icon || '🚀'}</div>
+                                            <h3 className="font-bold text-gray-700 text-lg text-center px-2">{card.title}</h3>
+                                            <p className="text-xs text-gray-400 mt-1 max-w-full truncate px-4">Relatório Salvo</p>
+                                        </motion.div>
+                                    ))}
 
                                 </div>
                             </div>
@@ -3469,7 +4208,7 @@ From vw_empresa_conveniada_cad e
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-4xl">
                                 {/* Hidden Input for SIGO moved to sigo_menu */}
 
-                                {[...CARGA_OPTS, ...customCargaCards].map((opt, i) => (
+                                {[...CARGA_OPTS, ...customCargaCards.filter(c => !c.type || c.type !== 'SQL')].map((opt, i) => (
                                     <motion.div
                                         key={opt.id}
                                         initial={{ opacity: 0, scale: 0.9 }}
@@ -3491,6 +4230,7 @@ From vw_empresa_conveniada_cad e
 
                                                 // Reset state for new entry
                                                 setCargaValue('');
+                                                setSqlMode(false); // <--- FORCE Carga Mode for Carga Cards
                                                 setExecutionResult(null);
                                                 setMenuState('carga_input');
                                             }
@@ -3596,7 +4336,7 @@ From vw_empresa_conveniada_cad e
                                         </motion.button>
                                         <div>
                                             <h2 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-gray-900 to-gray-600 tracking-tight flex items-center gap-3">
-                                                {sqlMode ? 'Filtro do SQL' : 'Filtro de Carga'}
+                                                {sqlMode ? 'Extração no SIGO' : 'Filtro de Carga'}
                                             </h2>
                                             <p className="text-sm text-gray-400 font-medium mt-1">Configure os parâmetros para processar sua carga</p>
                                         </div>
@@ -3616,7 +4356,35 @@ From vw_empresa_conveniada_cad e
                                 <div className="flex-1 p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 overflow-hidden">
 
                                     {/* LEFT COL: OPERATOR SELECTION */}
-                                    <div className="lg:col-span-4 flex flex-col h-full gap-4 min-h-0">
+                                    <div className="lg:col-span-4 flex flex-col h-full gap-4 min-h-0 relative">
+
+                                        {/* Validation Alert */}
+                                        {(() => {
+                                            const hasOperatorField = !sqlMode || (parsedSqlData?.columns?.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO'));
+                                            if (!hasOperatorField) {
+                                                return (
+                                                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3 shadow-sm mb-2">
+                                                        <span className="text-xl">⚠️</span>
+                                                        <div>
+                                                            <h4 className="font-bold text-amber-800 text-sm">Filtro de Operadora Desabilitado</h4>
+                                                            <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                                                                O SQL importado não possui o campo obrigatório <code className="font-mono bg-amber-100 px-1 rounded">CD_EMPRESA_PLANO</code>.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+                                            return null;
+                                        })()}
+
+                                        {/* Overlay for disabled state */}
+                                        {(() => {
+                                            const hasOperatorField = !sqlMode || (parsedSqlData?.columns?.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO'));
+                                            return !hasOperatorField && (
+                                                <div className="absolute inset-0 bg-gray-50/50 backdrop-blur-[1px] z-20 rounded-3xl cursor-not-allowed"></div>
+                                            );
+                                        })()}
+
 
                                         {/* Search Bar */}
                                         <div className="relative group flex-shrink-0">
@@ -3866,13 +4634,43 @@ From vw_empresa_conveniada_cad e
                                                                                 />
                                                                             </div>
                                                                         ) : (
-                                                                            <input
-                                                                                type="text"
-                                                                                placeholder="Valor..."
-                                                                                className="w-full bg-gray-50 border-none rounded-xl px-3 py-2 text-xs font-medium focus:bg-white focus:ring-2 focus:ring-blue-100 outline-none"
-                                                                                value={filter.value}
-                                                                                onChange={(e) => handleFilterValueChange(filter.id, 'value', e.target.value)}
-                                                                            />
+                                                                            // CHECK FOR PRE-DEFINED OPTIONS (DECODE/NVL)
+                                                                            (() => {
+                                                                                // Check fieldEquivalences for the column name
+                                                                                const opts = fieldEquivalences[filter.column];
+
+                                                                                if (opts && opts.length > 0 && filter.operator === 'equals') {
+                                                                                    return (
+                                                                                        <div className="relative">
+                                                                                            <select
+                                                                                                value={filter.value}
+                                                                                                onChange={(e) => handleFilterValueChange(filter.id, 'value', e.target.value)}
+                                                                                                className="w-full bg-gray-50 border-none rounded-xl px-3 py-2 text-xs font-bold text-gray-700 outline-none ring-1 ring-transparent focus:ring-blue-100 focus:bg-white transition-all cursor-pointer appearance-none"
+                                                                                            >
+                                                                                                <option value="">Selecione uma opção...</option>
+                                                                                                {opts.map((opt, idx) => (
+                                                                                                    // Use Label as Value because the wrapper query filters the RESULT of the text
+                                                                                                    <option key={idx} value={opt.label}>{opt.label}</option>
+                                                                                                ))}
+                                                                                            </select>
+                                                                                            <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-gray-400">
+                                                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7"></path></svg>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    );
+                                                                                }
+
+                                                                                // Default Text Input
+                                                                                return (
+                                                                                    <input
+                                                                                        type="text"
+                                                                                        placeholder="Valor..."
+                                                                                        className="w-full bg-gray-50 border-none rounded-xl px-3 py-2 text-xs font-medium focus:bg-white focus:ring-2 focus:ring-blue-100 outline-none"
+                                                                                        value={filter.value}
+                                                                                        onChange={(e) => handleFilterValueChange(filter.id, 'value', e.target.value)}
+                                                                                    />
+                                                                                );
+                                                                            })()
                                                                         )}
                                                                     </div>
                                                                 </div>
@@ -3945,10 +4743,12 @@ From vw_empresa_conveniada_cad e
 
                                     <div>
                                         <h2 className="text-lg font-black text-gray-800 tracking-tight flex items-center gap-2">
-                                            {selectedCard?.title || 'Resultado da Carga'}
+                                            {sqlMode ? 'Resultado da Extração' : (selectedCard?.title || 'Resultado da Carga')}
                                         </h2>
                                         <div className="flex items-center gap-3 text-xs">
-                                            <span className="text-gray-400 font-mono" title={exportTableName}>{exportTableName}</span>
+                                            <span className="text-gray-400 font-mono" title={exportTableName}>
+                                                {sqlMode ? (parsedSqlData?.title || selectedCard?.title || 'Script SQL') : exportTableName}
+                                            </span>
                                             {totalRecords > 0 && (
                                                 <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">
                                                     {totalRecords.toLocaleString()} registros
@@ -3980,6 +4780,18 @@ From vw_empresa_conveniada_cad e
                                     </button>
 
                                     <div className="h-6 w-px bg-gray-200 mx-1"></div>
+
+                                    <div className="h-6 w-px bg-gray-200 mx-1"></div>
+
+                                    {/* Dashboard Button */}
+                                    <button
+                                        onClick={() => setIsDashboardOpen(true)}
+                                        disabled={executionLoading || !executionResult || executionResult.error}
+                                        className="px-3 py-2 bg-white border border-gray-200 rounded-xl hover:border-purple-500 hover:text-purple-700 hover:bg-purple-50 transition-all shadow-sm flex items-center gap-2 text-xs font-bold text-gray-600 disabled:opacity-50 disabled:grayscale group"
+                                        title="Criar Dashboard"
+                                    >
+                                        <span className="text-sm group-hover:scale-110 transition-transform">📊</span> Dashboard
+                                    </button>
 
                                     {/* Export Buttons */}
                                     <button
@@ -4192,6 +5004,7 @@ From vw_empresa_conveniada_cad e
                                     >
                                         {columnOrder.map((colIdx) => {
                                             const col = executionResult.metaData[colIdx];
+                                            if (!col) return null; // Safe guard for stale columnOrder
                                             return (
                                                 <div
                                                     key={colIdx}
@@ -4226,21 +5039,26 @@ From vw_empresa_conveniada_cad e
                                         <div className="inline-block min-w-full">
                                             {executionResult.rows.map((row, rIdx) => (
                                                 <div key={rIdx} className="flex border-b border-gray-50 hover:bg-blue-50/30 transition-colors group">
-                                                    {columnOrder.map((colIdx) => (
-                                                        <div
-                                                            key={`${rIdx}-${colIdx}`}
-                                                            className="flex-shrink-0 p-2 text-xs text-gray-600 border-r border-gray-50 last:border-r-0 truncate"
-                                                            style={{ width: colWidths[colIdx] }}
-                                                            onClick={() => {
-                                                                const val = row[colIdx];
-                                                                if (val && String(val).length > 20) {
-                                                                    setViewingContent({ title: executionResult.metaData[colIdx].name, content: String(val) });
-                                                                }
-                                                            }}
-                                                        >
-                                                            {formatDate(row[colIdx])}
-                                                        </div>
-                                                    ))}
+                                                    {columnOrder.map((colIdx) => {
+                                                        const col = executionResult.metaData[colIdx];
+                                                        if (!col) return null; // Guard
+
+                                                        return (
+                                                            <div
+                                                                key={`${rIdx}-${colIdx}`}
+                                                                className="flex-shrink-0 p-2 text-xs text-gray-600 border-r border-gray-50 last:border-r-0 truncate"
+                                                                style={{ width: colWidths[colIdx] }}
+                                                                onClick={() => {
+                                                                    const val = row[colIdx];
+                                                                    if (val && String(val).length > 20 && col) {
+                                                                        setViewingContent({ title: col.name, content: String(val) });
+                                                                    }
+                                                                }}
+                                                            >
+                                                                {formatDate(row[colIdx])}
+                                                            </div>
+                                                        );
+                                                    })}
                                                 </div>
                                             ))}
 
@@ -4720,6 +5538,78 @@ From vw_empresa_conveniada_cad e
                                 )}
                             </div>
                         </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+            {/* Dashboard Builder Overlay */}
+            {isDashboardOpen && (
+                <DashboardBuilder
+                    data={executionResult?.rows ? executionResult.rows.map(r => {
+                        const obj = {};
+                        executionResult.metaData.forEach((col, i) => {
+                            if (col && col.name) {
+                                obj[col.name] = r[i];
+                            }
+                        });
+                        return obj;
+                    }) : []}
+                    columns={executionResult?.metaData || []}
+                    onClose={() => {
+                        setIsDashboardOpen(false);
+                        setExecutionResult(null);
+                        setMenuState('root');
+                    }}
+                    onRefresh={() => handleCargaExecute(false)}
+                    title={selectedCard?.title || 'Dashboard'}
+                    totalRecords={totalRecords}
+                    currentContext={currentContext}
+                    onLoadDashboard={handleLoadDashboard}
+                    onFetchAggregatedData={handleFetchAggregatedData}
+                    // UNIFIED SOURCES
+                    isLoading={executionLoading}
+                    allSources={{
+                        carga: [...CARGA_OPTS, ...(Array.isArray(customCargaCards) ? customCargaCards.filter(c => c && (!c.type || c.type !== 'SQL')) : [])],
+                        sigo: (Array.isArray(customCargaCards) ? customCargaCards.filter(c => c && c.type === 'SQL') : []),
+                    }}
+                    onFetchColumns={fetchTableColumns}
+                    isFetchingColumns={false /* DEBUG: WAS isLoadingTableColumns */}
+                    onFetchValues={async (tableName, columnName, callback) => {
+                        if (!tableName || !columnName) return;
+                        try {
+                            const query = `SELECT DISTINCT ${columnName} FROM ${tableName} WHERE ${columnName} IS NOT NULL ORDER BY ${columnName} ASC LIMIT 100`;
+                            const res = await fetch(`${apiUrl}/api/db/query`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ query })
+                            });
+                            const data = await res.json();
+                            if (data && data.rows) {
+                                const values = data.rows.map(r => r[0]);
+                                if (callback) callback(values);
+                            }
+                        } catch (e) {
+                            console.error("Failed to fetch distinct values", e);
+                            if (callback) callback([]);
+                        }
+                    }}
+                    tableColumns={tableColumns}
+                />
+            )}
+
+            {/* SQL Parsing Loading Modal */}
+            <AnimatePresence>
+                {isParsingSql && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[10001] flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm"
+                    >
+                        <div className="bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center animate-bounce-slight max-w-sm text-center">
+                            <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+                            <h3 className="text-xl font-bold text-gray-800 mb-2">Montando estrutura...</h3>
+                            <p className="text-gray-500 text-sm">Validando consultas e mapeando campos.</p>
+                        </div>
                     </motion.div>
                 )}
             </AnimatePresence>

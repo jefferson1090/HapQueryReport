@@ -7,7 +7,7 @@ import { ApiProvider } from './context/ApiContext'
 
 import ErrorBoundary from './components/ErrorBoundary'
 
-console.log('Frontend starting...');
+console.log('// Force Rebuild Timestamp: 1248rting...');
 createRoot(document.getElementById('root')).render(
     <StrictMode>
         <ErrorBoundary>

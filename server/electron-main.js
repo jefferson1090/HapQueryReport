@@ -176,6 +176,29 @@ ipcMain.handle('save-file', async (event, { filename, content, type }) => {
     return filePath;
 });
 
+// [NEW] Granular Save Handling for UI Flows
+ipcMain.handle('dialog:show-save', async (event, { defaultPath, filters }) => {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+        defaultPath,
+        filters
+    });
+    return canceled ? null : filePath;
+});
+
+ipcMain.handle('fs:write-file', async (event, { filePath, content, encoding }) => {
+    try {
+        if (encoding === 'base64') {
+            await fs.promises.writeFile(filePath, Buffer.from(content, 'base64'));
+        } else {
+            await fs.promises.writeFile(filePath, content, encoding || 'utf-8');
+        }
+        return true;
+    } catch (e) {
+        console.error("Write File Error:", e);
+        throw e;
+    }
+});
+
 // PDF Export Handler
 ipcMain.handle('export-pdf', async (event, htmlContent) => {
     if (!mainWindow) return false;

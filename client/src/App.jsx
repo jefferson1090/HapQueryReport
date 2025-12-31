@@ -902,7 +902,10 @@ function App() {
                                     {!connection ? (
                                         <ConnectionForm onConnect={handleConnect} />
                                     ) : (
-                                        <CsvImporter isVisible={activeTab === 'csv-importer'} />
+                                        <CsvImporter
+                                            isVisible={activeTab === 'csv-importer'}
+                                            connectionName={connection?.connectionName || connection?.user}
+                                        />
                                     )}
                                 </ErrorBoundary>
                             </div>

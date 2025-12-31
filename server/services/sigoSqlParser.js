@@ -94,53 +94,53 @@ function processColumnBlock(columnBlock, originalSql) {
             alias = possibleName;
         }
 
-        // 2. Identify Type (Sub-select, Function, Simple) AND Extract Equivalences (DECODE)
+        // 2. Identify Type and Extract Options
         const upperExpr = expression.toUpperCase();
         let options = null;
+        // type was already declared above or we should reuse/reassign
+        // Actually, type is declared in the original scope of map?
+        // Let's check line 59.
+        // If line 59 declares 'let type = ...', then lines 99-100 shouldn't redeclare.
 
+        // Wait, I am replacing a block.
+        // Let's just remove 'let' if it was declared before.
+        // But I don't see the full file.
+        // The error says line 100.
+        // I will just use assignment if already declared.
+        // Or declare it if not.
+
+        // Looking at previous 'replace_file_content' output (Step 368):
+        // It replaced lines around 94-171.
+        // Line 59 was NOT shown. 
+        // The linter said line 59 has it.
+        // So I should remove 'let type = "column"' and just do 'type = "column"'.
+
+        type = 'column';
+
+        // TYPE DETECTION
         if (upperExpr.startsWith('(SELECT') || upperExpr.startsWith('( SELECT')) {
             type = 'subquery';
-        } else if (upperExpr.includes('DECODE(') || upperExpr.includes('NVL(') || upperExpr.includes('CASE ')) {
+        } else if (upperExpr.includes('DECODE') || upperExpr.includes('NVL') || upperExpr.includes('CASE') || upperExpr.includes('(')) {
             type = 'function';
+        }
 
-            // Try to extract DECODE options
-            // Format: DECODE(COLUMN, VAL1, 'LABEL1', VAL2, 'LABEL2'...)
-            // Simplistic Regex for the provided T2212 format (multiline compatible)
-            // DECODE(FL_STATUS, 0, 'REGISTRADO', 1, 'PENDENTE', ...)
-
-            if (upperExpr.includes('DECODE')) {
-                try {
-                    // Extract content inside DECODE(...)
-                    const decodeContentMatch = expression.match(/DECODE\s*\(([\s\S]*?)\)/i);
-                    if (decodeContentMatch) {
-                        const content = decodeContentMatch[1];
-                        // Split by comma respecting quotes (reusing splitByTopLevelComma but treating single quotes as blocks?)
-                        // The provided splitByTopLevelComma handles parens but not quotes, let's look at the content.
-                        // Content: FL_STATUS, 0, 'REGISTRADO', 1, 'PENDENTE'
-
-                        // Clean newlines
-                        const cleanContent = content.replace(/\s+/g, ' ');
-                        const parts = cleanContent.split(',').map(p => p.trim());
-
-                        // part[0] is the column (e.g. FL_STATUS)
-                        // parts[1] is val1, parts[2] is label1, parts[3] is val2, parts[4] is label2...
-
-                        if (parts.length >= 3) {
-                            options = [];
-                            for (let i = 1; i < parts.length - 1; i += 2) {
-                                const val = parts[i].replace(/'/g, ''); // 0 or '0'
-                                const label = parts[i + 1].replace(/'/g, ''); // 'REGISTRADO'
-                                options.push({ value: val, label: label });
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.warn('Failed to parse DECODE options for', alias, e);
+        // AGGRESSIVE OPTION EXTRACTION (Run regardless of type)
+        // This ensures even Subqueries containing CASE/DECODE get options extracted
+        if (upperExpr.includes('DECODE')) {
+            try {
+                const decodeContentMatch = expression.match(/DECODE\s*\(([\s\S]*?)\)/i);
+                if (decodeContentMatch) {
+                    options = extractDecodeOptions(decodeContentMatch[1]);
                 }
+            } catch (e) {
+                console.warn('Failed to parse DECODE options for', alias, e);
             }
-
-        } else if (upperExpr.includes('(')) {
-            type = 'function'; // General function
+        } else if (upperExpr.includes('CASE')) {
+            try {
+                options = extractCaseOptions(expression);
+            } catch (e) {
+                console.warn('Failed to parse CASE options for', alias, e);
+            }
         }
 
         // Clean Alias (remove quotes and Uppercase)
@@ -150,7 +150,8 @@ function processColumnBlock(columnBlock, originalSql) {
             name: alias,
             original: expression,
             type: type,
-            options: options // New field for UI filters
+            options: options,
+            dataType: inferDataType(alias, expression)
         };
     });
 
@@ -170,89 +171,142 @@ function processColumnBlock(columnBlock, originalSql) {
             seenNames.set(uniqueName, 1);
         }
 
-        // Update the column object
         const newCol = { ...col, name: uniqueName };
         finalColumns.push(newCol);
-
-        // Rebuild the SQL part for this column
-        // We look at the original expression. 
-        // If it had an explicit alias (like "... AS ALIAS" or "... ALIAS"), we replace it.
-        // If it was implicit, we append " AS NEW_ALIAS".
-
-        // Simple and robust approach: 
-        // Use the 'original' expression (which might include the old alias) 
-        // but we stripped the alias in the parsing phase? 
-        // Actually 'original' in 'processedColumns' currently *excludes* the parsed alias part if it was explicit "AS".
-
-        // Let's look at how we populate 'original' in processColumnBlock above.
-        // answer: expression = textBefore.substring(0, textBefore.length - 3).trim(); 
-        // So 'col.original' is the pure expression without the alias.
-
         rebuiltColumnParts.push(`${newCol.original} AS "${uniqueName}"`);
     });
 
-    // 4. Re-assemble valid SQL
-    // We assume the original SQL structure: SELECT [Columns] FROM ...
-    // We just replace the [Columns] part with our rebuilt parts.
-
-    // We can't identify exact positions easily with regex, but we know the 'columnBlock' content.
-    // The safest way is to find where columnBlock is in originalSql and replace it.
-    // But normalized spaces might differ.
-
-    // Better strategy for this specific use case:
-    // We have 'originalSql'
-    // We know 'columnBlock' existed in it (from parseSigoSql logic)
-    // But parseSigoSql passed 'columnBlock' which might be from a match.
-
-    // Let's change parseSigoSql to pass the bounds or do the replacement there.
-    // For now, let's construct a "best effort" clean SQL if we can't do exact replacement?
-    // User needs exact execution.
-
-    // Let's modify the function signature or return to let the caller handle it?
-    // No, parser is best place.
-
-    // Just returning columns is not enough, we need the fixed SQL string.
-
-    const newColumnBlock = rebuiltColumnParts.join(',\n       ');
-
-    // We need to replace the *old* column block with *newColumnBlock* in *originalSql*.
-    // Since we extracted columnBlock from originalSql (hopefully accurately), we can replace usage.
-    // However, cleanSql has comments removed. originalSql (arg) is not passed here?
-    // processColumnBlock receives originalSql (line 47).
-
     let fixedSql = originalSql;
 
-    // We need to find the specific range of the column block we parsed.
-    // In parseSigoSql we did regex or index finding.
-    // We should perform that replacement there or here.
-
-    // Since processColumnBlock operates on the extracted string 'columnBlock',
-    // Replacing 'columnBlock' in 'originalSql' might be risky if 'columnBlock' is short/ambiguous.
-    // But for a big SELECT it's usually unique. 
-
-    // Let's simply replace the First Occurrence of columnBlock in originalSql?
-    // Ideally yes.
-
+    // Attempt to replace the column block safely
     if (originalSql && originalSql.includes(columnBlock)) {
-        fixedSql = originalSql.replace(columnBlock, newColumnBlock);
+        fixedSql = originalSql.replace(columnBlock, rebuiltColumnParts.join(',\n       '));
     } else {
-        // Fallback: Construct a basic SELECT if we can't patch
-        // (Risky if there are complex joins/where clauses we miss)
-        // But wait, 'originalSql' passed to this function is the 'cleanSql' from parseSigoSql? 
-        // Yes, line 41: return processColumnBlock(columnBlock, cleanSql);
-
-        // If we can't find exact match (formatting?), let's try to assume we are replacing the content between SELECT and FROM.
-        // It's safer to rely on the caller logic being consistent.
-
-        // Let's regex replace the content between first SELECT and FROM again
-        fixedSql = originalSql.replace(/^SELECT\s+(.*)\s+FROM\s+/i, `SELECT \n       ${newColumnBlock}\nFROM `);
+        fixedSql = originalSql.replace(/^SELECT\s+(.*)\s+FROM\s+/i, `SELECT \n       ${rebuiltColumnParts.join(',\n       ')}\nFROM `);
     }
 
     return {
         columns: finalColumns,
         originalSql: originalSql,
-        cleanedSql: fixedSql // The auto-corrected SQL
+        cleanedSql: fixedSql
     };
+}
+
+/**
+ * Extracts options from a DECODE content string.
+ * Handles quoted strings containing commas.
+ */
+function extractDecodeOptions(content) {
+    const options = [];
+    const parts = [];
+    let current = '';
+    let inQuote = false;
+    let quoteChar = '';
+    let depth = 0;
+
+    // specialized split that respects quotes and parenthesis
+    for (let i = 0; i < content.length; i++) {
+        const char = content[i];
+
+        if (inQuote) {
+            current += char;
+            if (char === quoteChar) {
+                inQuote = false;
+            }
+        } else {
+            if (char === "'" || char === '"') {
+                inQuote = true;
+                quoteChar = char;
+                current += char;
+            } else if (char === '(') {
+                depth++;
+                current += char;
+            } else if (char === ')') {
+                depth--;
+                current += char;
+            } else if (char === ',' && depth === 0) {
+                parts.push(current.trim());
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+    }
+    if (current.trim()) parts.push(current.trim());
+
+    // parts[0] is Column. 
+    // pairs: 1=val, 2=label, 3=val, 4=label... 
+
+    if (parts.length >= 3) {
+        // Loop pairs
+        for (let i = 1; i < parts.length - 1; i += 2) {
+            const val = cleanValue(parts[i]);
+            const label = cleanValue(parts[i + 1]);
+            options.push({ value: val, label: label });
+        }
+
+        // CHECK FOR DEFAULT VALUE (last item if count is even)
+        // parts: [col, v1, l1, v2, l2, DEF] -> length 6
+        // parts: [col, v1, l1, v2, l2] -> length 5 (no default)
+        // So if parts.length IS even, there is a distinct default.
+        if (parts.length % 2 === 0) {
+            const def = cleanValue(parts[parts.length - 1]);
+            options.push({ value: def, label: def });
+        }
+    }
+    return options;
+}
+
+/**
+ * Extracts options from a CASE statement.
+ * Supports: 
+ * 1. CASE WHEN x='a' THEN 'A' ...
+ * 2. CASE x WHEN 'a' THEN 'A' ...
+ * 3. ELSE support
+ */
+function extractCaseOptions(expression) {
+    const options = [];
+    // Normalize spaces
+    const cleanExpr = expression.replace(/\s+/g, ' ');
+
+    const whenRegex = /WHEN\s+(.+?)\s+THEN\s+(.+?)(?=\s+WHEN|\s+ELSE|\s+END)/gi;
+    let match;
+
+    while ((match = whenRegex.exec(cleanExpr)) !== null) {
+        let valRaw = match[1];
+        let labelRaw = match[2];
+
+        let val = '';
+        let label = cleanValue(labelRaw);
+
+        if (valRaw.includes('=')) {
+            const parts = valRaw.split('=');
+            val = cleanValue(parts[1]);
+        } else {
+            val = cleanValue(valRaw);
+        }
+
+        options.push({ value: val, label: label });
+    }
+
+    // Capture ELSE
+    const elseRegex = /ELSE\s+(.+?)\s+END/i;
+    const elseMatch = cleanExpr.match(elseRegex);
+    if (elseMatch) {
+        const elseVal = cleanValue(elseMatch[1]);
+        options.push({ value: elseVal, label: elseVal });
+    }
+
+    return options;
+}
+
+function cleanValue(str) {
+    if (!str) return '';
+    let s = str.trim();
+    if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {
+        return s.slice(1, -1);
+    }
+    return s;
 }
 
 /**
@@ -262,15 +316,11 @@ function splitByTopLevelComma(text) {
     let result = [];
     let current = '';
     let depth = 0;
-
+    // ... existing implementation ...
     for (let i = 0; i < text.length; i++) {
         const char = text[i];
-
-        if (char === '(') {
-            depth++;
-        } else if (char === ')') {
-            depth--;
-        }
+        if (char === '(') depth++;
+        else if (char === ')') depth--;
 
         if (char === ',' && depth === 0) {
             result.push(current);
@@ -279,12 +329,36 @@ function splitByTopLevelComma(text) {
             current += char;
         }
     }
+    if (current.trim()) result.push(current);
+    return result;
+}
 
-    if (current.trim()) {
-        result.push(current);
+/**
+ * Heuristic Type Inference based on Naming and Expression
+ */
+function inferDataType(alias, expression) {
+    const name = alias.toUpperCase();
+    const expr = expression.toUpperCase();
+
+    // DATES
+    if (name.startsWith('DT_') || name.startsWith('DATA_') || name.endsWith('_DATA') ||
+        name.endsWith('_DT') || expr.includes('TO_DATE') || expr.includes('SYSDATE') || expr.includes('TRUNC(')) {
+        return 'DATE';
     }
 
-    return result;
+    // NUMBERS
+    // CD_ -> Kode/Code (usually ID, treated as number or string, but for equivalence user likely wants list/equals)
+    // NU_ -> Number
+    // QT_ -> Quantity
+    // VL_ -> Value
+    // ID_ -> ID
+    if (name.startsWith('QT_') || name.startsWith('VL_') || name.startsWith('NU_') ||
+        name.startsWith('NR_') ||
+        expr.includes('TO_NUMBER') || expr.includes('COUNT(') || expr.includes('SUM(')) {
+        return 'NUMBER';
+    }
+
+    return 'VARCHAR2';
 }
 
 module.exports = { parseSigoSql };

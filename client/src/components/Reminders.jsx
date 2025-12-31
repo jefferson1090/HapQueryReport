@@ -40,11 +40,11 @@ import remarkGfm from 'remark-gfm';
 
 // --- Constants & Config ---
 const COLUMNS = {
-    PENDING: { id: 'PENDING', title: 'Em Definição', color: 'bg-gray-50/50', headerColor: 'border-l-4 border-gray-400', badgeInfo: { bg: 'bg-gray-100', text: 'text-gray-700' } },
-    IN_PROGRESS: { id: 'IN_PROGRESS', title: 'Homologação', color: 'bg-blue-50/30', headerColor: 'border-l-4 border-blue-500', badgeInfo: { bg: 'bg-blue-100', text: 'text-blue-700' } },
-    VALIDATION: { id: 'VALIDATION', title: 'Validação', color: 'bg-indigo-50/30', headerColor: 'border-l-4 border-indigo-500', badgeInfo: { bg: 'bg-indigo-100', text: 'text-indigo-700' } },
-    OVERDUE: { id: 'OVERDUE', title: 'Atrasado', color: 'bg-red-50/30', headerColor: 'border-l-4 border-red-500', badgeInfo: { bg: 'bg-red-100', text: 'text-red-700' } },
-    COMPLETED: { id: 'COMPLETED', title: 'Concluído', color: 'bg-green-50/30', headerColor: 'border-l-4 border-green-500', badgeInfo: { bg: 'bg-green-100', text: 'text-green-700' } }
+    PENDING: { id: 'PENDING', title: 'Em Definição', color: 'bg-slate-50', headerColor: 'border-l-4 border-slate-300', badgeInfo: { bg: 'bg-slate-100', text: 'text-slate-600' } },
+    IN_PROGRESS: { id: 'IN_PROGRESS', title: 'Homologação', color: 'bg-blue-50/50', headerColor: 'border-l-4 border-blue-400', badgeInfo: { bg: 'bg-blue-50', text: 'text-blue-600' } },
+    VALIDATION: { id: 'VALIDATION', title: 'Validação', color: 'bg-indigo-50/50', headerColor: 'border-l-4 border-indigo-400', badgeInfo: { bg: 'bg-indigo-50', text: 'text-indigo-600' } },
+    OVERDUE: { id: 'OVERDUE', title: 'Atrasado', color: 'bg-red-50/50', headerColor: 'border-l-4 border-red-400', badgeInfo: { bg: 'bg-red-50', text: 'text-red-600' } },
+    COMPLETED: { id: 'COMPLETED', title: 'Concluído', color: 'bg-emerald-50/50', headerColor: 'border-l-4 border-emerald-400', badgeInfo: { bg: 'bg-emerald-50', text: 'text-emerald-600' } }
 };
 
 // --- Helpers ---
@@ -124,21 +124,21 @@ const KanbanCard = ({ reminder, onClick, onEdit, onMove, onDelete, currentUser }
             <motion.div
                 layout
                 initial={{ borderRadius: 8 }}
-                className={`bg-white hover:shadow-md border border-gray-200 transition-shadow overflow-hidden ${isOverdue ? 'ring-1 ring-red-200' : ''}`}
+                className={`bg-white rounded-xl shadow-sm border border-slate-200 hover:shadow-md hover:border-blue-200 transition-all duration-200 overflow-hidden group ${isOverdue ? 'ring-1 ring-red-100 bg-red-50/10' : ''}`}
                 onClick={() => onClick(reminder)}
             >
                 {/* Header (Always Visible) */}
-                <div className="p-3">
-                    <div className="flex justify-between items-start mb-2">
+                <div className="p-4">
+                    <div className="flex justify-between items-start mb-3">
                         <StatusBadge status={reminder.status} />
-                        <div className="flex space-x-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                            <button onPointerDown={(e) => { e.stopPropagation(); }} onMouseDown={(e) => { e.stopPropagation(); }} onClick={(e) => handleAction(e, () => setIsExpanded(!isExpanded))} className="p-1 hover:bg-gray-100 rounded text-gray-500 relative z-50">
-                                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onPointerDown={(e) => { e.stopPropagation(); }} onMouseDown={(e) => { e.stopPropagation(); }} onClick={(e) => handleAction(e, () => setIsExpanded(!isExpanded))} className="p-1 hover:bg-blue-50 rounded text-slate-400 hover:text-blue-500 transition-colors">
+                                {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                             </button>
                         </div>
                     </div>
 
-                    <h4 className="font-semibold text-gray-800 text-sm leading-snug mb-2">{reminder.title}</h4>
+                    <h4 className="font-bold text-slate-800 text-sm leading-snug mb-3 tracking-tight">{reminder.title}</h4>
 
                     {/* Meta Row */}
                     <div className="flex items-center text-xs text-gray-400 space-x-3">

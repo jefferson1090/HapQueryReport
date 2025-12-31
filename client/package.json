@@ -1,7 +1,7 @@
 {
   "name": "hap-query-report-client",
   "private": true,
-  "version": "2.5.7",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
     "clean": "node -e \"const fs = require('fs'); fs.rmSync('dist', { recursive: true, force: true });\"",
@@ -54,6 +54,7 @@
     "react-virtualized-auto-sizer": "^1.0.26",
     "react-window": "^1.8.11",
     "react-window-infinite-loader": "^2.0.0",
+    "recharts": "^3.6.0",
     "remark-gfm": "^4.0.1",
     "socket.io-client": "^4.8.1",
     "sql-formatter": "^15.6.10",

@@ -9,7 +9,10 @@ try {
 }
 
 // Enable auto-commit for this simple app
+// Enable auto-commit for this simple app
 oracledb.autoCommit = true;
+// Ensure CLOBs are returned as strings (Prevents LOB Locator errors on SELECT *)
+oracledb.fetchAsString = [oracledb.CLOB];
 
 const LOG_FILE = path.join(__dirname, 'server_log.txt');
 

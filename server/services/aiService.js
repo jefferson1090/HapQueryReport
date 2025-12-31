@@ -395,6 +395,26 @@ class AiService {
         - Humor rápido quando couber, sem atrapalhar.
         - Não seja pretensioso: o objetivo é acertar e ser útil.
 
+
+        ## NOVOS COMPORTAMENTOS (DASHBOARDS, EXTRAÇÕES, SIGO)
+        
+        ### 1. CRIAÇÃO DE DASHBOARDS
+        Se o usuário solicitar "Criar Dashboard", "Montar Painel" ou similar:
+        - NÃO gere SQL imediatamente.
+        - Guie o usuário com perguntas: "Qual o objetivo do painel?", "Que tabela usaremos?", "Quais indicadores (KPIs) você quer?".
+        - Quando tiver informações suficientes, responda com JSON action: 'open_dashboard'.
+        - Exemplo de resposta final: { "text": "Entendi! Vamos criar um dashboard sobre [TEMA]. Abrindo o construtor...", "action": "open_dashboard" }
+
+        ### 2. EXTRAÇÃO / CARGA / SIGO
+        - Se o usuário pedir "Fazer uma Carga", "Extrair dados", "Gerar Planilha":
+          - Retorne ação 'open_extraction'.
+        - Se o usuário mencionar "SIGO", "Importar SQL", "Relatório T2212":
+          - Retorne ação 'open_sigo'.
+        
+        ### 3. EXIBIR GRÁFICO/PAINEL EXISTENTE
+        - Se o usuário pedir "Mostre o gráfico criado", "Exibir painel", "Ver dashboard":
+          - Retorne ação 'open_dashboard' (isso abrirá a última visualização ou o builder).
+
         ${knowledgeContext}
         ${neuralContext}
         
@@ -643,6 +663,11 @@ class AiService {
 
         if (!text && data) {
             text = data.text || data.message || data.response || data.answer || data.content;
+        }
+
+        // --- NEW ACTION PASS-THROUGH ---
+        if (['open_dashboard', 'open_extraction', 'open_sigo'].includes(action)) {
+            return { text: text || "Abrindo ferramenta...", action, data };
         }
 
         // Silent Bubble Fix: If we still don't have text, generate a generic waiting message

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Trash2, ArrowLeft, ArrowRight, BarChart2, Bell, Check, ChevronDown, Database, FileText, Filter, Layout, MessageSquare, PieChart, Play, Plus, RefreshCw, Save, Search, Settings, Share2, Sidebar, User, X, Zap, LogOut, PanelRightClose, PanelRightOpen, Home, FolderOpen, Download, Upload } from 'lucide-react';
 
 function CsvImporter({ isVisible, connectionName }) {
     if (!isVisible) return null;
@@ -203,6 +204,17 @@ function CsvImporter({ isVisible, connectionName }) {
         }
     };
 
+    const handleDeleteColumn = (index) => {
+        if (columns.length <= 1) {
+            alert("A tabela precisa ter pelo menos uma coluna.");
+            return;
+        }
+        if (!window.confirm(`Tem certeza que deseja remover a coluna "${columns[index].name}"?`)) return;
+
+        const newCols = columns.filter((_, i) => i !== index);
+        setColumns(newCols);
+    };
+
     const handleColumnChange = (index, field, value) => {
         const newCols = [...columns];
         newCols[index][field] = value;
@@ -307,322 +319,357 @@ function CsvImporter({ isVisible, connectionName }) {
     };
 
     return (
-        <div className="p-6 bg-white rounded-lg shadow-sm border border-gray-200 h-full flex flex-col">
-            <h2 className="text-2xl font-bold text-[#0054a6] mb-6">Importar Arquivo CSV</h2>
+        <div className="flex h-full bg-gray-50 relative overflow-hidden">
+            {/* UNIFIED SIDEBAR (Shared) */}
 
-            {/* Steps Indicator */}
-            <div className="flex items-center mb-8">
-                <div className={`flex items-center justify-center w-8 h-8 rounded-full ${step >= 1 ? 'bg-[#f37021] text-white' : 'bg-gray-200 text-gray-600'} font-bold`}>1</div>
-                <div className={`flex-1 h-1 mx-2 ${step >= 2 ? 'bg-[#f37021]' : 'bg-gray-200'}`}></div>
-                <div className={`flex items-center justify-center w-8 h-8 rounded-full ${step >= 2 ? 'bg-[#f37021] text-white' : 'bg-gray-200 text-gray-600'} font-bold`}>2</div>
-                <div className={`flex-1 h-1 mx-2 ${step >= 3 ? 'bg-[#f37021]' : 'bg-gray-200'}`}></div>
-                <div className={`flex items-center justify-center w-8 h-8 rounded-full ${step >= 3 ? 'bg-[#f37021] text-white' : 'bg-gray-200 text-gray-600'} font-bold`}>3</div>
-            </div>
 
-            {step === 1 && (
-                <div className="flex-1 flex flex-col space-y-6 overflow-y-auto">
-                    <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer min-h-[200px]"
-                        onClick={() => handleFileUpload()}
-                        onDragOver={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                        }}
-                        onDrop={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                                handleFileUpload({ target: { files: e.dataTransfer.files } });
-                            }
-                        }}
-                    >
-                        {/* Native Dialog - No Input Needed */}
-                        <div className="text-6xl mb-4">📄</div>
-                        <p className="text-lg text-gray-600 font-medium">Clique para selecionar um arquivo CSV</p>
-                        <p className="text-sm text-gray-400 mt-2">ou arraste e solte aqui</p>
-                        {importing && <p className="mt-4 text-blue-600">{importStatus}</p>}
-                        {importStatus && importStatus.startsWith('Erro') && <p className="mt-4 text-red-600">{importStatus}</p>}
-                    </div>
-
-                    {importHistory.length > 0 && (
-                        <div className="border-t border-gray-200 pt-4">
-                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Últimas Importações</h3>
-                            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden overflow-x-auto w-full max-w-[calc(100vw-80px)] md:max-w-full">
-                                <table className="min-w-full divide-y divide-gray-200">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Conexão</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Arquivo</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Tabela</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Data</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Registros</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Permissão</th>
-                                            <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Ações</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-200">
-                                        {importHistory.slice(0, historyLimit).map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-gray-50 group">
-                                                <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap font-medium">{item.connection || '-'}</td>
-                                                <td className="px-4 py-2 text-sm text-gray-900 whitespace-nowrap">{item.fileName}</td>
-                                                <td className="px-4 py-2 text-sm text-[#0054a6] font-medium whitespace-nowrap">{item.tableName}</td>
-                                                <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">{new Date(item.date).toLocaleDateString()} {new Date(item.date).toLocaleTimeString()}</td>
-                                                <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">{item.rowCount || '-'}</td>
-                                                <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">
-                                                    {editingHistoryIdx === idx ? (
-                                                        <div className="flex items-center space-x-2">
-                                                            <input
-                                                                type="text"
-                                                                value={editingGrantUser}
-                                                                onChange={(e) => setEditingGrantUser(e.target.value)}
-                                                                className="border rounded px-2 py-1 text-xs w-24 uppercase"
-                                                                placeholder="USUÁRIO"
-                                                            />
-                                                            <button onClick={() => handleSavePermission(item, idx)} className="text-green-600 hover:text-green-800" title="Salvar">✅</button>
-                                                            <button onClick={handleCancelEdit} className="text-red-600 hover:text-red-800" title="Cancelar">❌</button>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="flex items-center space-x-2">
-                                                            <span>{item.grantUser || '-'}</span>
-                                                            <button onClick={() => handleStartEdit(item, idx)} className="text-blue-600 hover:text-blue-800 opacity-0 group-hover:opacity-100 transition-opacity" title="Editar Permissão">
-                                                                ✏️
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-2 text-center whitespace-nowrap">
-                                                    <button
-                                                        onClick={() => handleDeleteHistory(item, idx)}
-                                                        className="text-red-600 hover:text-red-800 hover:bg-red-50 p-1 rounded transition-colors"
-                                                        title="Excluir Histórico e Tabela"
-                                                    >
-                                                        🗑️
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                            {importHistory.length > historyLimit && (
-                                <div className="mt-2 text-center">
-                                    <button
-                                        onClick={() => setHistoryLimit(prev => prev + 5)}
-                                        className="text-sm text-[#0054a6] hover:underline font-medium"
-                                    >
-                                        Ver mais...
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {step === 2 && (
-                <div className="flex-1 flex flex-col overflow-hidden">
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="flex items-center space-x-4">
-                            <h3 className="text-xl font-bold text-gray-800">Visualizar e Editar Colunas</h3>
-                            <div className="flex items-center space-x-2 bg-blue-50 px-3 py-1 rounded border border-blue-100">
-                                <span className="text-sm font-medium text-blue-700">Tabela:</span>
-                                <input
-                                    type="text"
-                                    value={tableName}
-                                    onChange={(e) => setTableName(e.target.value.toUpperCase())}
-                                    onBlur={() => checkTable(tableName)}
-                                    className="bg-white border border-blue-200 rounded px-2 py-0.5 text-sm font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 uppercase"
-                                    placeholder="NOME_DA_TABELA"
-                                />
-                            </div>
-                        </div>
-                        <div className="text-sm text-gray-500">
-                            Total estimado: <span className="font-bold">{totalRows}</span> linhas
+            {/* MAIN CONTENT AREA */}
+            <div className="flex-1 flex flex-col h-full relative overflow-hidden">
+                {/* PROFESSIONAL HEADER */}
+                <header className="bg-white border-b border-gray-200 h-16 px-8 flex items-center justify-between shadow-sm flex-shrink-0 z-10">
+                    <div className="flex items-center gap-4">
+                        <div>
+                            <h1 className="text-2xl font-bold text-gray-800">Importar Arquivo CSV</h1>
+                            <p className="text-sm text-gray-500">Transforme planilhas em tabelas do Oracle</p>
                         </div>
                     </div>
-
-                    <div className="flex-1 overflow-auto border border-gray-200 rounded-lg">
-                        <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50 sticky top-0">
-                                <tr>
-                                    {columns.map((col, idx) => (
-                                        <th key={idx} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            <div className="flex flex-col space-y-1">
-                                                <input
-                                                    type="text"
-                                                    value={col.name}
-                                                    onChange={(e) => {
-                                                        const newCols = [...columns];
-                                                        newCols[idx].name = e.target.value.toUpperCase();
-                                                        setColumns(newCols);
-                                                    }}
-                                                    className="bg-transparent border-b border-gray-300 focus:border-[#0054a6] outline-none text-xs font-bold"
-                                                />
-                                                <select
-                                                    value={col.type}
-                                                    onChange={(e) => {
-                                                        const newCols = [...columns];
-                                                        newCols[idx].type = e.target.value;
-                                                        setColumns(newCols);
-                                                    }}
-                                                    className="text-xs border-none bg-transparent focus:ring-0 p-0 text-gray-500"
-                                                >
-                                                    <option value="VARCHAR2(255)">VARCHAR2(255)</option>
-                                                    <option value="NUMBER">NUMBER</option>
-                                                    <option value="DATE">DATE</option>
-                                                    <option value="CLOB">CLOB</option>
-                                                </select>
-                                            </div>
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
-                                {previewData.slice(0, 5).map((row, rowIdx) => (
-                                    <tr key={rowIdx}>
-                                        {columns.map((col, colIdx) => (
-                                            <td key={colIdx} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                {row[Object.keys(row)[colIdx]]}
-                                            </td>
-                                        ))}
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div className="mt-4 flex justify-end space-x-3">
-                        <button
-                            onClick={() => setStep(1)}
-                            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-                        >
-                            Voltar
-                        </button>
-                        <button
-                            onClick={() => setStep(3)}
-                            className="px-4 py-2 bg-[#0054a6] text-white rounded-md hover:bg-blue-800"
-                        >
-                            Próximo
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {step === 3 && (
-                <div className="flex-1 flex flex-col items-center justify-center max-w-lg mx-auto w-full">
-                    <h3 className="text-xl font-bold text-gray-800 mb-6">Confirmar Importação</h3>
-
-                    <div className="bg-gray-50 p-6 rounded-lg w-full mb-6 border border-gray-200">
-                        <div className="flex justify-between mb-2">
-                            <span className="text-gray-600">Arquivo:</span>
-                            <span className="font-medium">{file?.name}</span>
-                        </div>
-                        <div className="flex justify-between mb-2">
-                            <span className="text-gray-600">Tabela Destino:</span>
-                            <span className="font-medium text-[#0054a6]">{tableName}</span>
-                        </div>
-                        <div className="flex justify-between mb-2">
-                            <span className="text-gray-600">Colunas:</span>
-                            <span className="font-medium">{columns.length}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-gray-600">Linhas Estimadas:</span>
-                            <span className="font-medium">{totalRows > 0 ? totalRows : 'Calculando...'}</span>
+                    <div className="flex items-center gap-3">
+                        <div className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold border border-blue-100 flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                            {connectionName || 'Conexão Ativa'}
                         </div>
                     </div>
+                </header>
 
-                    {tableExists && (
-                        <div className="w-full mb-6 bg-orange-50 border border-orange-200 p-4 rounded-lg">
-                            <h4 className="text-orange-800 font-bold mb-2 flex items-center">
-                                <span className="mr-2">⚠️</span> Tabela Existente
-                            </h4>
-                            <p className="text-sm text-orange-700 mb-3">
-                                A tabela <strong>{tableName}</strong> já existe no banco de dados. O que você deseja fazer?
-                            </p>
-                            <div className="flex space-x-3">
-                                <label className="flex items-center space-x-2 cursor-pointer">
-                                    <input
-                                        type="radio"
-                                        checked={!dropIfExists}
-                                        onChange={() => setDropIfExists(false)}
-                                        className="text-orange-600 focus:ring-orange-500"
-                                    />
-                                    <span className="text-sm text-gray-700">Cancelar e Renomear (Voltar)</span>
-                                </label>
-                                <label className="flex items-center space-x-2 cursor-pointer">
-                                    <input
-                                        type="radio"
-                                        checked={dropIfExists}
-                                        onChange={() => setDropIfExists(true)}
-                                        className="text-red-600 focus:ring-red-500"
-                                    />
-                                    <span className="text-sm text-red-700 font-medium">Recriar Tabela (Apagar dados antigos)</span>
-                                </label>
-                            </div>
+                <div className="flex-1 p-4 overflow-y-auto">
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 min-h-full flex flex-col">
+
+                        {/* Steps Indicator */}
+                        <div className="flex items-center mb-4">
+                            <div className={`flex items-center justify-center w-8 h-8 rounded-full ${step >= 1 ? 'bg-[#f37021] text-white' : 'bg-gray-200 text-gray-600'} font-bold`}>1</div>
+                            <div className={`flex-1 h-1 mx-2 ${step >= 2 ? 'bg-[#f37021]' : 'bg-gray-200'}`}></div>
+                            <div className={`flex items-center justify-center w-8 h-8 rounded-full ${step >= 2 ? 'bg-[#f37021] text-white' : 'bg-gray-200 text-gray-600'} font-bold`}>2</div>
+                            <div className={`flex-1 h-1 mx-2 ${step >= 3 ? 'bg-[#f37021]' : 'bg-gray-200'}`}></div>
+                            <div className={`flex items-center justify-center w-8 h-8 rounded-full ${step >= 3 ? 'bg-[#f37021] text-white' : 'bg-gray-200 text-gray-600'} font-bold`}>3</div>
                         </div>
-                    )}
 
-                    <div className="w-full mb-6">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Conceder Permissão de Acesso (GRANT ALL) para outro usuário (Opcional):
-                        </label>
-                        <input
-                            type="text"
-                            value={grantUser}
-                            onChange={(e) => setGrantUser(e.target.value.toUpperCase())}
-                            placeholder="Ex: OUTRO_USUARIO"
-                            className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0054a6] outline-none"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                            Se preenchido, executará: <code>GRANT ALL ON {tableName} TO {grantUser || 'USUARIO'}</code>
-                        </p>
-                    </div>
-
-                    {importing ? (
-                        <div className="w-full text-center">
-                            <div className="mb-2 flex justify-between text-sm font-medium text-gray-700">
-                                <span>{importStatus}</span>
-                                <span>{importProgress}%</span>
-                            </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2.5 mb-4">
-                                <div className="bg-[#0054a6] h-2.5 rounded-full transition-all duration-500" style={{ width: `${importProgress}%` }}></div>
-                            </div>
-                            <button
-                                onClick={handleCancel}
-                                className="px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm font-medium"
-                            >
-                                Cancelar Importação
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="flex flex-col w-full">
-                            <div className="flex space-x-3 w-full">
-                                <button
-                                    onClick={() => setStep(2)}
-                                    className="flex-1 px-4 py-3 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 font-medium"
-                                >
-                                    Voltar
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        if (tableExists && !dropIfExists) {
-                                            setStep(2); // Go back to rename
-                                            alert("Por favor, renomeie a tabela para continuar.");
-                                        } else {
-                                            handleImport();
+                        {step === 1 && (
+                            <div className="flex-1 flex flex-col space-y-6 overflow-y-auto">
+                                <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer min-h-[200px]"
+                                    onClick={() => handleFileUpload()}
+                                    onDragOver={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                    }}
+                                    onDrop={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                                            handleFileUpload({ target: { files: e.dataTransfer.files } });
                                         }
                                     }}
-                                    className={`flex-1 px-4 py-3 text-white rounded-md font-bold shadow-md ${tableExists && !dropIfExists ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#f37021] hover:bg-orange-600'}`}
-                                    disabled={tableExists && !dropIfExists}
                                 >
-                                    {tableExists && dropIfExists ? 'Recriar e Importar' : 'Iniciar Importação'}
-                                </button>
+                                    {/* Native Dialog - No Input Needed */}
+                                    <div className="text-6xl mb-4">📄</div>
+                                    <p className="text-lg text-gray-600 font-medium">Clique para selecionar um arquivo CSV</p>
+                                    <p className="text-sm text-gray-400 mt-2">ou arraste e solte aqui</p>
+                                    {importing && <p className="mt-4 text-blue-600">{importStatus}</p>}
+                                    {importStatus && importStatus.startsWith('Erro') && <p className="mt-4 text-red-600">{importStatus}</p>}
+                                </div>
+
+                                {importHistory.length > 0 && (
+                                    <div className="border-t border-gray-200 pt-4">
+                                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Últimas Importações</h3>
+                                        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden overflow-x-auto w-full max-w-[calc(100vw-80px)] md:max-w-full">
+                                            <table className="min-w-full divide-y divide-gray-200">
+                                                <thead className="bg-gray-50">
+                                                    <tr>
+                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Conexão</th>
+                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Arquivo</th>
+                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Tabela</th>
+                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Data</th>
+                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Registros</th>
+                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Permissão</th>
+                                                        <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Ações</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-200">
+                                                    {importHistory.slice(0, historyLimit).map((item, idx) => (
+                                                        <tr key={idx} className="hover:bg-gray-50 group">
+                                                            <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap font-medium">{item.connection || '-'}</td>
+                                                            <td className="px-4 py-2 text-sm text-gray-900 whitespace-nowrap">{item.fileName}</td>
+                                                            <td className="px-4 py-2 text-sm text-[#0054a6] font-medium whitespace-nowrap">{item.tableName}</td>
+                                                            <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">{new Date(item.date).toLocaleDateString()} {new Date(item.date).toLocaleTimeString()}</td>
+                                                            <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">{item.rowCount || '-'}</td>
+                                                            <td className="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">
+                                                                {editingHistoryIdx === idx ? (
+                                                                    <div className="flex items-center space-x-2">
+                                                                        <input
+                                                                            type="text"
+                                                                            value={editingGrantUser}
+                                                                            onChange={(e) => setEditingGrantUser(e.target.value)}
+                                                                            className="border rounded px-2 py-1 text-xs w-24 uppercase"
+                                                                            placeholder="USUÁRIO"
+                                                                        />
+                                                                        <button onClick={() => handleSavePermission(item, idx)} className="text-green-600 hover:text-green-800" title="Salvar">✅</button>
+                                                                        <button onClick={handleCancelEdit} className="text-red-600 hover:text-red-800" title="Cancelar">❌</button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex items-center space-x-2">
+                                                                        <span>{item.grantUser || '-'}</span>
+                                                                        <button onClick={() => handleStartEdit(item, idx)} className="text-blue-600 hover:text-blue-800 opacity-0 group-hover:opacity-100 transition-opacity" title="Editar Permissão">
+                                                                            ✏️
+                                                                        </button>
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-2 text-center whitespace-nowrap">
+                                                                <button
+                                                                    onClick={() => handleDeleteHistory(item, idx)}
+                                                                    className="text-red-600 hover:text-red-800 hover:bg-red-50 p-1 rounded transition-colors"
+                                                                    title="Excluir Histórico e Tabela"
+                                                                >
+                                                                    🗑️
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {importHistory.length > historyLimit && (
+                                            <div className="mt-2 text-center">
+                                                <button
+                                                    onClick={() => setHistoryLimit(prev => prev + 5)}
+                                                    className="text-sm text-[#0054a6] hover:underline font-medium"
+                                                >
+                                                    Ver mais...
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
-                            {importStatus && importStatus.startsWith('Erro') && (
-                                <p className="mt-4 text-red-600 text-center font-medium">{importStatus}</p>
-                            )}
-                        </div>
-                    )}
+                        )}
+
+                        {step === 2 && (
+                            <div className="flex-1 flex flex-col overflow-hidden">
+                                <div className="flex justify-between items-center mb-4">
+                                    <div className="flex items-center space-x-4">
+                                        <h3 className="text-xl font-bold text-gray-800">Visualizar e Editar Colunas</h3>
+                                        <div className="flex items-center space-x-2 bg-blue-50 px-3 py-1 rounded border border-blue-100">
+                                            <span className="text-sm font-medium text-blue-700">Tabela:</span>
+                                            <input
+                                                type="text"
+                                                value={tableName}
+                                                onChange={(e) => setTableName(e.target.value.toUpperCase())}
+                                                onBlur={() => checkTable(tableName)}
+                                                className="bg-white border border-blue-200 rounded px-2 py-0.5 text-sm font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 uppercase"
+                                                placeholder="NOME_DA_TABELA"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="text-sm text-gray-500">
+                                        Total estimado: <span className="font-bold">{totalRows}</span> linhas
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 overflow-auto border border-gray-200 rounded-lg">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                        <thead className="bg-gray-50 sticky top-0">
+                                            <tr>
+                                                {columns.map((col, idx) => (
+                                                    <th key={idx} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
+                                                        <div className="flex flex-col space-y-2 group">
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="text-[10px] text-gray-400 font-normal">Original: {col.originalName}</span>
+                                                                <button
+                                                                    onClick={() => handleDeleteColumn(idx)}
+                                                                    className="text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                                                                    title="Excluir Coluna"
+                                                                >
+                                                                    <Trash2 size={14} />
+                                                                </button>
+                                                            </div>
+                                                            <input
+                                                                type="text"
+                                                                value={col.name}
+                                                                onChange={(e) => {
+                                                                    const newCols = [...columns];
+                                                                    newCols[idx].name = e.target.value.toUpperCase();
+                                                                    setColumns(newCols);
+                                                                }}
+                                                                className="w-full bg-transparent border-b border-gray-300 focus:border-[#0054a6] outline-none text-xs font-bold py-1"
+                                                            />
+                                                            <select
+                                                                value={col.type}
+                                                                onChange={(e) => {
+                                                                    const newCols = [...columns];
+                                                                    newCols[idx].type = e.target.value;
+                                                                    setColumns(newCols);
+                                                                }}
+                                                                className="w-full text-xs border-none bg-transparent focus:ring-0 p-0 text-gray-500 cursor-pointer"
+                                                            >
+                                                                <option value="VARCHAR2(255)">VARCHAR2(255)</option>
+                                                                <option value="NUMBER">NUMBER</option>
+                                                                <option value="DATE">DATE</option>
+                                                                <option value="CLOB">CLOB</option>
+                                                            </select>
+                                                        </div>
+                                                    </th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-gray-200">
+                                            {previewData.slice(0, 5).map((row, rowIdx) => (
+                                                <tr key={rowIdx}>
+                                                    {columns.map((col, colIdx) => (
+                                                        <td key={colIdx} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                            {row[col.originalName] !== undefined ? row[col.originalName] : ''}
+                                                        </td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div className="mt-4 flex justify-end space-x-3">
+                                    <button
+                                        onClick={() => setStep(1)}
+                                        className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                                    >
+                                        Voltar
+                                    </button>
+                                    <button
+                                        onClick={() => setStep(3)}
+                                        className="px-4 py-2 bg-[#0054a6] text-white rounded-md hover:bg-blue-800"
+                                    >
+                                        Próximo
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 3 && (
+                            <div className="flex-1 flex flex-col items-center justify-center max-w-lg mx-auto w-full">
+                                <h3 className="text-xl font-bold text-gray-800 mb-6">Confirmar Importação</h3>
+
+                                <div className="bg-gray-50 p-6 rounded-lg w-full mb-6 border border-gray-200">
+                                    <div className="flex justify-between mb-2">
+                                        <span className="text-gray-600">Arquivo:</span>
+                                        <span className="font-medium">{file?.name}</span>
+                                    </div>
+                                    <div className="flex justify-between mb-2">
+                                        <span className="text-gray-600">Tabela Destino:</span>
+                                        <span className="font-medium text-[#0054a6]">{tableName}</span>
+                                    </div>
+                                    <div className="flex justify-between mb-2">
+                                        <span className="text-gray-600">Colunas:</span>
+                                        <span className="font-medium">{columns.length}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Linhas Estimadas:</span>
+                                        <span className="font-medium">{totalRows > 0 ? totalRows : 'Calculando...'}</span>
+                                    </div>
+                                </div>
+
+                                {tableExists && (
+                                    <div className="w-full mb-6 bg-orange-50 border border-orange-200 p-4 rounded-lg">
+                                        <h4 className="text-orange-800 font-bold mb-2 flex items-center">
+                                            <span className="mr-2">⚠️</span> Tabela Existente
+                                        </h4>
+                                        <p className="text-sm text-orange-700 mb-3">
+                                            A tabela <strong>{tableName}</strong> já existe no banco de dados. O que você deseja fazer?
+                                        </p>
+                                        <div className="flex space-x-3">
+                                            <label className="flex items-center space-x-2 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    checked={!dropIfExists}
+                                                    onChange={() => setDropIfExists(false)}
+                                                    className="text-orange-600 focus:ring-orange-500"
+                                                />
+                                                <span className="text-sm text-gray-700">Cancelar e Renomear (Voltar)</span>
+                                            </label>
+                                            <label className="flex items-center space-x-2 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    checked={dropIfExists}
+                                                    onChange={() => setDropIfExists(true)}
+                                                    className="text-red-600 focus:ring-red-500"
+                                                />
+                                                <span className="text-sm text-red-700 font-medium">Recriar Tabela (Apagar dados antigos)</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="w-full mb-6">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Conceder Permissão de Acesso (GRANT ALL) para outro usuário (Opcional):
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={grantUser}
+                                        onChange={(e) => setGrantUser(e.target.value.toUpperCase())}
+                                        placeholder="Ex: OUTRO_USUARIO"
+                                        className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0054a6] outline-none"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Se preenchido, executará: <code>GRANT ALL ON {tableName} TO {grantUser || 'USUARIO'}</code>
+                                    </p>
+                                </div>
+
+                                {importing ? (
+                                    <div className="w-full text-center">
+                                        <div className="mb-2 flex justify-between text-sm font-medium text-gray-700">
+                                            <span>{importStatus}</span>
+                                            <span>{importProgress}%</span>
+                                        </div>
+                                        <div className="w-full bg-gray-200 rounded-full h-2.5 mb-4">
+                                            <div className="bg-[#0054a6] h-2.5 rounded-full transition-all duration-500" style={{ width: `${importProgress}%` }}></div>
+                                        </div>
+                                        <button
+                                            onClick={handleCancel}
+                                            className="px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm font-medium"
+                                        >
+                                            Cancelar Importação
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col w-full">
+                                        <div className="flex space-x-3 w-full">
+                                            <button
+                                                onClick={() => setStep(2)}
+                                                className="flex-1 px-4 py-3 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 font-medium"
+                                            >
+                                                Voltar
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    if (tableExists && !dropIfExists) {
+                                                        setStep(2); // Go back to rename
+                                                        alert("Por favor, renomeie a tabela para continuar.");
+                                                    } else {
+                                                        handleImport();
+                                                    }
+                                                }}
+                                                className={`flex-1 px-4 py-3 text-white rounded-md font-bold shadow-md ${tableExists && !dropIfExists ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#f37021] hover:bg-orange-600'}`}
+                                                disabled={tableExists && !dropIfExists}
+                                            >
+                                                {tableExists && dropIfExists ? 'Recriar e Importar' : 'Iniciar Importação'}
+                                            </button>
+                                        </div>
+                                        {importStatus && importStatus.startsWith('Erro') && (
+                                            <p className="mt-4 text-red-600 text-center font-medium">{importStatus}</p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 }
