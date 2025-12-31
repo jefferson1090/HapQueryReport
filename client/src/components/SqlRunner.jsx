@@ -20,35 +20,282 @@ import { decryptPassword } from '../utils/security';
 import ConnectionForm from './ConnectionForm';
 
 // --- Standalone Row Component (Prevent Re-creation) ---
+// --- V3.0 Editor Theme ---
+import { createTheme } from '@uiw/codemirror-themes';
+import { tags as t } from '@lezer/highlight';
+
+const themeDefs = {
+    light: {
+        id: 'light',
+        name: 'Light V3',
+        type: 'light',
+        colors: {
+            bg: '#ffffff',
+            fg: '#334155',
+            caret: '#2563eb',
+            selection: '#dbeafe',
+            lineHighlight: '#f1f5f9',
+            gutterBg: '#ffffff',
+            gutterFg: '#94a3b8',
+        },
+        syntax: {
+            keyword: '#2563eb', // Blue
+            keywordWeight: 'bold',
+            comment: '#94a3b8', // Gray
+            string: '#059669', // Green
+            number: '#d97706', // Amber
+            variable: '#7c3aed', // Violet
+            function: '#db2777', // Pink
+            operator: '#64748b',
+        },
+        ui: {
+            '--bg-main': '#f9fafb', // gray-50
+            '--bg-panel': '#ffffff',
+            '--bg-content': '#ffffff',
+            '--bg-header': 'rgba(255,255,255,0.8)',
+            '--bg-hover': '#f8fafc', // slate-50
+            '--bg-active': '#eff6ff', // blue-50
+            '--text-primary': '#1e293b', // slate-800
+            '--text-secondary': '#64748b', // slate-500
+            '--text-muted': '#94a3b8', // slate-400
+            '--border-main': '#e2e8f0', // slate-200
+            '--border-sub': '#f1f5f9', // slate-100
+            '--accent-primary': '#2563eb', // blue-600
+            '--accent-secondary': '#4338ca', // indigo-700
+            '--selection-bg': '#dbeafe',
+            '--row-even': '#ffffff',
+            '--row-odd': '#fcfbfc',
+            '--row-hover': 'rgba(239, 246, 255, 0.5)',
+            '--shadow-color': 'rgba(0,0,0,0.05)',
+        }
+    },
+    obsidian: {
+        id: 'obsidian',
+        name: 'Obsidian',
+        type: 'dark',
+        colors: {
+            bg: '#0F111A', // Deep Dark
+            fg: '#E6E6E6',
+            caret: '#FF5252', // Red Accent
+            selection: '#402c2c', // Reddish selection
+            lineHighlight: '#1A1D29',
+            gutterBg: '#0F111A',
+            gutterFg: '#4B5563',
+        },
+        syntax: {
+            keyword: '#FF5252', // Red
+            keywordWeight: 'bold',
+            comment: '#6B7280', // Gray
+            string: '#a5d6ff', // Light Blue (Image 0ish)
+            number: '#FCD34D', // Yellow
+            variable: '#60A5FA', // Blue
+            function: '#FF5252', // Red
+            operator: '#9CA3AF',
+        },
+        ui: {
+            '--bg-main': '#090a10',
+            '--bg-panel': '#0F111A',
+            '--bg-content': '#0F111A',
+            '--bg-header': 'rgba(15, 17, 26, 0.8)',
+            '--bg-hover': '#1A1D29',
+            '--bg-active': 'rgba(255, 82, 82, 0.1)', // Red tint
+            '--text-primary': '#E6E6E6',
+            '--text-secondary': '#9CA3AF',
+            '--text-muted': '#6B7280',
+            '--border-main': '#1F2937', // gray-800
+            '--border-sub': '#1A1D29',
+            '--accent-primary': '#FF5252', // Red
+            '--accent-secondary': '#EF4444',
+            '--selection-bg': '#402c2c',
+            '--row-even': '#0F111A',
+            '--row-odd': '#131520',
+            '--row-hover': 'rgba(255, 82, 82, 0.05)',
+            '--shadow-color': 'rgba(0,0,0,0.4)',
+        }
+    },
+    vscode: {
+        id: 'vscode',
+        name: 'VS Dark',
+        type: 'dark',
+        colors: {
+            bg: '#1E1E1E',
+            fg: '#D4D4D4',
+            caret: '#007ACC',
+            selection: '#264F78',
+            lineHighlight: '#2D2D30',
+            gutterBg: '#1E1E1E',
+            gutterFg: '#858585',
+        },
+        syntax: {
+            keyword: '#569CD6', // Blue
+            keywordWeight: 'normal',
+            comment: '#6A9955', // Green
+            string: '#CE9178', // Orange
+            number: '#B5CEA8', // Light Green
+            variable: '#9CDCFE', // Light Blue
+            function: '#DCDCAA', // Yellow
+            operator: '#D4D4D4',
+        },
+        ui: {
+            '--bg-main': '#1e1e1e',
+            '--bg-panel': '#252526',
+            '--bg-content': '#1E1E1E',
+            '--bg-header': 'rgba(30, 30, 30, 0.8)',
+            '--bg-hover': '#2a2d2e',
+            '--bg-active': '#37373d',
+            '--text-primary': '#D4D4D4',
+            '--text-secondary': '#A6A6A6',
+            '--text-muted': '#606060',
+            '--border-main': '#333333',
+            '--border-sub': '#252526',
+            '--accent-primary': '#007ACC', // VS Blue
+            '--accent-secondary': '#005f9e',
+            '--selection-bg': '#264F78',
+            '--row-even': '#1E1E1E',
+            '--row-odd': '#252526',
+            '--row-hover': '#2a2d2e',
+            '--shadow-color': 'rgba(0,0,0,0.3)',
+        }
+    },
+    standard_light: {
+        id: 'standard_light',
+        name: 'Standard Light',
+        type: 'light',
+        colors: {
+            bg: '#FFFFFF',
+            fg: '#24292e',
+            caret: '#24292e',
+            selection: '#BBDFFF',
+            lineHighlight: '#F1F8FF',
+            gutterBg: '#FFFFFF',
+            gutterFg: '#D1D5DA',
+        },
+        syntax: {
+            keyword: '#005CC5', // Standard Blue
+            keywordWeight: 'bold',
+            comment: '#6A737D', // Grey
+            string: '#22863A', // Green
+            number: '#D73A49', // Standard Red/Pinkish
+            variable: '#24292e', // Black
+            function: '#6F42C1', // Purple
+            operator: '#5F6368',
+        },
+        ui: {
+            '--bg-main': '#F6F8FA',
+            '--bg-panel': '#FFFFFF',
+            '--bg-content': '#FFFFFF',
+            '--bg-header': 'rgba(255,255,255,0.9)',
+            '--bg-hover': '#F1F8FF',
+            '--bg-active': '#E1E4E8',
+            '--text-primary': '#24292e',
+            '--text-secondary': '#586069',
+            '--text-muted': '#6A737D',
+            '--border-main': '#e1e4e8',
+            '--border-sub': '#eaecef',
+            '--accent-primary': '#0366d6', // GitHub Blue
+            '--accent-secondary': '#005CC5',
+            '--selection-bg': '#BBDFFF',
+            '--row-even': '#FFFFFF',
+            '--row-odd': '#FAFBFC',
+            '--row-hover': '#F1F8FF',
+            '--shadow-color': 'rgba(0,0,0,0.05)',
+        }
+    },
+    dracula_plus: {
+        id: 'dracula_plus',
+        name: 'Dracula Plus',
+        type: 'dark',
+        colors: {
+            bg: '#282A36',
+            fg: '#F8F8F2',
+            caret: '#FF79C6',
+            selection: '#44475A',
+            lineHighlight: '#44475A',
+            gutterBg: '#282A36',
+            gutterFg: '#6272A4',
+        },
+        syntax: {
+            keyword: '#FF79C6', // Pink
+            keywordWeight: 'bold',
+            comment: '#6272A4', // Purple/Grey
+            string: '#F1FA8C', // Yellow
+            number: '#BD93F9', // Purple
+            variable: '#F8F8F2', // White
+            function: '#8BE9FD', // Cyan
+            operator: '#50FA7B', // Green
+        },
+        ui: {
+            '--bg-main': '#21222C',
+            '--bg-panel': '#282A36',
+            '--bg-content': '#282A36',
+            '--bg-header': 'rgba(40, 42, 54, 0.9)',
+            '--bg-hover': '#44475A',
+            '--bg-active': '#6272A4', // Purple tint
+            '--text-primary': '#F8F8F2',
+            '--text-secondary': '#BD93F9',
+            '--text-muted': '#6272A4',
+            '--border-main': '#44475A', // Dracula Selection
+            '--border-sub': '#21222C',
+            '--accent-primary': '#FF79C6', // Pink
+            '--accent-secondary': '#BD93F9', // Purple
+            '--selection-bg': '#44475A',
+            '--row-even': '#282A36',
+            '--row-odd': '#262831',
+            '--row-hover': '#44475A',
+            '--shadow-color': 'rgba(0,0,0,0.4)',
+        }
+    }
+};
+
+const createDynamicTheme = (themeDef) => {
+    return createTheme({
+        theme: themeDef.type,
+        settings: {
+            background: themeDef.colors.bg,
+            foreground: themeDef.colors.fg,
+            caret: themeDef.colors.caret,
+            selection: themeDef.colors.selection,
+            selectionMatch: themeDef.colors.selection,
+            lineHighlight: themeDef.colors.lineHighlight,
+            gutterBackground: themeDef.colors.gutterBg,
+            gutterForeground: themeDef.colors.gutterFg,
+        },
+        styles: [
+            { tag: t.keyword, color: themeDef.syntax.keyword, fontWeight: themeDef.syntax.keywordWeight },
+            { tag: t.comment, color: themeDef.syntax.comment, fontStyle: 'italic' },
+            { tag: t.string, color: themeDef.syntax.string },
+            { tag: t.number, color: themeDef.syntax.number },
+            { tag: t.definition(t.variableName), color: themeDef.syntax.variable },
+            { tag: t.function(t.variableName), color: themeDef.syntax.function, fontWeight: 'bold' },
+            { tag: t.operator, color: themeDef.syntax.operator },
+            { tag: t.punctuation, color: themeDef.syntax.operator },
+        ],
+    });
+};
+
+// --- Standalone Row Component (V3.0 Style) ---
 const SqlRunnerRow = ({ index, style, data }) => {
-    const { rows, columnOrder, visibleColumns, theme, metaData, columnWidths } = data;
+    const { rows, columnOrder, visibleColumns, columnWidths } = data;
     const row = rows[index];
 
     // Strict Guard
     if (!row) return <div style={style} />;
 
     const formatCellValue = (val) => {
-        if (val === null || val === undefined) return ''; // Null/Empty as blank
+        if (val === null || val === undefined) return '';
         if (typeof val !== 'string') return val;
-
-        // Date Handling (ISO or standard DB formats)
-        // Regex for typical dates: YYYY-MM-DD with optional time
+        // Date Check
         const isoDateRegex = /^\d{4}-\d{2}-\d{2}/;
         if (isoDateRegex.test(val)) {
             const date = new Date(val);
             if (!isNaN(date.getTime())) {
-                // Adjust for timezone offset if needed, but usually we render as is or local
-                // Using manual formatting to ensure DD/MM/YYYY HH:mm:ss without commas/AM/PM
                 const day = String(date.getDate()).padStart(2, '0');
                 const month = String(date.getMonth() + 1).padStart(2, '0');
                 const year = date.getFullYear();
                 const hours = String(date.getHours()).padStart(2, '0');
                 const minutes = String(date.getMinutes()).padStart(2, '0');
                 const seconds = String(date.getSeconds()).padStart(2, '0');
-
-                if (hours === '00' && minutes === '00' && seconds === '00') {
-                    return `${day}/${month}/${year}`;
-                }
+                if (hours === '00' && minutes === '00' && seconds === '00') return `${day}/${month}/${year}`;
                 return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
             }
         }
@@ -56,10 +303,17 @@ const SqlRunnerRow = ({ index, style, data }) => {
     };
 
     return (
-        <div style={style} className={`flex divide-x ${theme.border} ${index % 2 === 0 ? theme.panel : theme.bg} hover:bg-opacity-80 transition-colors group`}>
+        <div
+            style={{
+                ...style,
+                backgroundColor: index % 2 === 0 ? 'var(--row-even)' : 'var(--row-odd)',
+                borderColor: 'var(--border-sub)'
+            }}
+            className="flex border-b transition-colors group items-center hover:bg-[var(--row-hover)]"
+        >
             {columnOrder.map(colName => {
                 if (!visibleColumns[colName]) return null;
-                const originalIdx = metaData ? metaData.findIndex(m => m.name === colName) : -1;
+                const originalIdx = data.metaData ? data.metaData.findIndex(m => m.name === colName) : -1;
                 const width = (columnWidths && columnWidths[colName]) || 150;
                 const val = row[originalIdx];
                 const displayVal = formatCellValue(val);
@@ -67,11 +321,11 @@ const SqlRunnerRow = ({ index, style, data }) => {
                 return (
                     <div
                         key={colName}
-                        className={`px-3 py-2 text-sm ${theme.text} overflow-hidden text-ellipsis whitespace-nowrap transition-colors`}
+                        className="px-4 py-2 text-[13px] font-mono overflow-hidden text-ellipsis whitespace-nowrap border-r border-transparent group-hover:border-[var(--border-sub)] transition-colors text-[var(--text-secondary)]"
                         style={{ width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }}
                         title={String(val || '')}
                     >
-                        {val === null ? <span className="opacity-50 italic">null</span> : displayVal}
+                        {val === null ? <span className="opacity-40 text-xs select-none">null</span> : displayVal}
                     </div>
                 );
             })}
@@ -118,6 +372,23 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     // Connection Switching State
     const [showConnectionMenu, setShowConnectionMenu] = useState(false);
     const [tempConnection, setTempConnection] = useState({ user: '', password: '', connectString: 'localhost/XEPDB1' });
+
+    // --- Theme State (V3) ---
+    const [currentThemeId, setCurrentThemeId] = useState('light');
+    const [showThemeMenu, setShowThemeMenu] = useState(false);
+
+    // Apply Theme CSS Variables
+    useEffect(() => {
+        const theme = themeDefs[currentThemeId];
+        if (!theme) return;
+
+        const root = wrapperRef.current;
+        if (root) {
+            Object.entries(theme.ui).forEach(([key, value]) => {
+                root.style.setProperty(key, value);
+            });
+        }
+    }, [currentThemeId]);
 
     // --- Handlers for Tab Renaming ---
     const handleTabDoubleClick = (tab) => {
@@ -823,54 +1094,41 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                     </div>
                 )}
 
-                <div ref={wrapperRef} className="flex flex-col h-full bg-gray-50 relative overflow-hidden">
+                <div ref={wrapperRef} className="flex flex-col h-full bg-[var(--bg-main)] relative overflow-hidden">
 
                     {/* MAIN CONTENT WRAPPER */}
                     <div className={`flex-1 overflow-hidden flex flex-col relative ${isMaximized ? 'p-0' : 'p-2'}`}>
-                        <div className={`bg-white shadow-sm border border-gray-200 flex-1 flex flex-col overflow-hidden relative ${isMaximized ? 'rounded-none border-0' : 'rounded-2xl'}`}>
+                        <div className={`bg-[var(--bg-panel)] shadow-[0_0_0_1px_var(--border-main)] flex-1 flex flex-col overflow-hidden relative ${isMaximized ? 'rounded-none border-0' : 'rounded-2xl'}`}>
 
-                            {/* Internal Sidebar Toggle (Legacy) */}
-
-                            {/* Original Sidebar Toggle for Internal Panel */}
-                            <button
-                                onClick={() => setShowSidebar(!showSidebar)}
-                                className="absolute top-2 right-2 z-50 p-1.5 rounded-lg bg-white shadow-sm border border-gray-200 hover:bg-gray-50 text-gray-600 transition-all hover:scale-105"
-                                title={showSidebar ? "Ocultar Menu Lateral" : "Expandir Menu Lateral"}
-                            >
-                                {showSidebar ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-                            </button>
+                            {/* Sidebar Toggle Relocated to Header */}
 
                             <PanelGroup direction="horizontal" className="h-full">
                                 <Panel defaultSize={80} minSize={30} className="flex flex-col h-full overflow-hidden">
                                     <div className="flex flex-col h-full">
                                         {/* ---------- TABS ---------- */}
-                                        <div className={`flex items-center w-full ${theme.border} border-b px-2 pt-2 gap-2`}>
-                                            {/* Scrollable Tabs Section */}
-                                            <div className="flex-1 flex items-center gap-1 overflow-x-auto no-scrollbar min-w-0">
+                                        <div className={`flex items-center w-full border-b border-[var(--border-main)] px-2 pt-2 gap-2`}>
+                                            {/* Scrollable Tabs */}
+                                            <div className="flex-1 flex items-end gap-1 overflow-x-auto no-scrollbar px-2 mask-linear-fade">
                                                 {tabs.map(tab => (
                                                     <div
                                                         key={tab.id}
                                                         onClick={() => setActiveTabId(tab.id)}
                                                         onDoubleClick={() => handleTabDoubleClick(tab)}
-                                                        title={`Query: ${tab.title}\nConexão: ${tab.connection?.connectionName || tab.connection?.user || 'Desconhecido'}`}
                                                         className={`
-                                                group relative flex-shrink-0 flex items-center px-4 py-2 text-xs font-semibold rounded-t-lg cursor-pointer transition-all select-none min-w-[120px] max-w-[200px] border-b-2
-                                                ${activeTabId === tab.id
-                                                                ? `${theme.tabActive} border-indigo-500`
-                                                                : `text-gray-500 hover:text-gray-700 border-transparent hover:border-gray-200`
+                                                            group relative flex items-center gap-2 px-5 py-3 text-xs font-bold rounded-t-2xl cursor-pointer transition-all select-none min-w-[140px] max-w-[240px] border-t border-x
+                                                            ${activeTabId === tab.id
+                                                                ? 'bg-[var(--bg-panel)] text-[var(--text-primary)] border-[var(--border-main)] border-b-[var(--bg-panel)] z-10 shadow-[0_-2px_10px_var(--shadow-color)] pt-3.5'
+                                                                : 'bg-[var(--bg-hover)] text-[var(--text-muted)] border-transparent hover:bg-[var(--bg-panel)] hover:text-[var(--text-secondary)] mb-0.5'
                                                             }
-                                            `}
+                                                        `}
                                                     >
-                                                        {/* Connection Indicator Icon - ENHANCED */}
-                                                        <div className={`
-                                                mr-2 p-1 rounded-md transition-all flex items-center justify-center
-                                                ${activeTabId === tab.id
-                                                                ? 'bg-indigo-100 text-indigo-600 shadow-sm'
-                                                                : 'bg-transparent text-gray-400 group-hover:bg-gray-100 group-hover:text-gray-600'
-                                                            }
-                                            `} title={`Conexão: ${tab.connection?.connectionName || 'Padrão'}`}>
-                                                            <Database size={14} className={activeTabId === tab.id ? "fill-indigo-600" : ""} />
-                                                        </div>
+                                                        {activeTabId === tab.id && <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)] rounded-t-full"></div>}
+
+                                                        {tab.loading ? (
+                                                            <div className="w-2 h-2 rounded-full bg-[var(--accent-primary)] animate-pulse"></div>
+                                                        ) : (
+                                                            <div className={`w-2 h-2 rounded-full ${activeTabId === tab.id ? 'bg-[var(--accent-secondary)]' : 'bg-slate-300 group-hover:bg-slate-400'}`}></div>
+                                                        )}
 
                                                         {editingTabId === tab.id ? (
                                                             <input
@@ -879,133 +1137,101 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                                                 onChange={e => setEditingTitle(e.target.value)}
                                                                 onKeyDown={e => handleRenameKeyDown(e, tab.id)}
                                                                 onBlur={() => saveTabRename(tab.id)}
-                                                                className="bg-transparent outline-none w-full border-b border-blue-500"
+                                                                className="bg-transparent outline-none w-full border-b border-[var(--accent-primary)] text-[var(--text-primary)]"
                                                                 onClick={e => e.stopPropagation()}
                                                             />
                                                         ) : (
-                                                            <span className="truncate flex-1 mr-2">{tab.title}</span>
+                                                            <span className="truncate flex-1 font-medium">{tab.title}</span>
                                                         )}
+
                                                         <button
                                                             onClick={(e) => closeTab(e, tab.id)}
-                                                            className={`p-0.5 rounded-full hover:bg-red-100 hover:text-red-500 transition-opacity ${activeTabId === tab.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                                                            className={`p-1 rounded-md hover:bg-red-50 hover:text-red-500 transition-all ${activeTabId === tab.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                                                         >
-                                                            <X size={12} />
+                                                            <X size={12} strokeWidth={3} />
                                                         </button>
                                                     </div>
                                                 ))}
                                                 <button
                                                     onClick={addTab}
-                                                    className="p-1.5 ml-1 flex-shrink-0 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                                    title="Nova Query"
+                                                    className="p-2 mb-1.5 ml-1 text-[var(--text-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--bg-active)] rounded-xl transition-all"
+                                                    title="Nova Aba"
                                                 >
-                                                    <Plus size={16} />
+                                                    <Plus size={18} strokeWidth={2.5} />
                                                 </button>
                                             </div>
 
-                                            {/* Fixed Controls Section (No Overflow) */}
-                                            <div className="flex items-center gap-2 pl-2 border-l border-gray-100 flex-shrink-0 pb-1">
-                                                {/* Connection Button (Active Tab Context) - Popover Wrapper */}
+                                            {/* Top Right Controls */}
+                                            <div className="flex items-center gap-3 pr-4 pb-1.5 pt-1">
+                                                {/* Connection Selector (Pill Style) */}
                                                 <div className="relative group/conn">
                                                     <button
-                                                        id="connection-trigger"
                                                         onClick={() => {
                                                             setTempConnection(activeTab.connection || globalConnection);
                                                             setShowConnectionMenu(!showConnectionMenu);
                                                         }}
                                                         className={`
-                                                flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg transition-all border
-                                                ${connectionStatus === 'error'
-                                                                ? 'text-red-600 bg-red-50 border-red-200 animate-pulse hover:bg-red-100'
-                                                                : showConnectionMenu
-                                                                    ? 'text-indigo-700 bg-indigo-50 border-indigo-200'
-                                                                    : 'text-gray-600 hover:text-indigo-600 hover:bg-gray-50 border-transparent hover:border-gray-200'
+                                                            flex items-center gap-2.5 px-4 py-2 text-xs font-bold rounded-full transition-all border ring-2 ring-transparent
+                                                            ${connectionStatus === 'error'
+                                                                ? 'bg-red-50 text-red-600 border-red-100 hover:bg-red-100'
+                                                                : 'bg-slate-50 text-slate-600 border-slate-100 hover:border-blue-200 hover:text-blue-700 hover:bg-white hover:shadow-sm'
                                                             }
-                                            `}
-                                                        title={connectionStatus === 'error' ? "Conexão perdida!" : "Trocar Conexão"}
+                                                        `}
                                                     >
-                                                        <Database size={14} className={connectionStatus === 'error' ? 'text-red-500' : 'text-indigo-500'} />
-                                                        <span className="truncate max-w-[150px]">
-                                                            {activeTab.connection?.connectionName || activeTab.connection?.user || 'Sem Conexão'}
+                                                        <div className={`p-1 rounded-md ${connectionStatus === 'error' ? 'bg-red-200' : 'bg-white shadow-sm'}`}>
+                                                            <Database size={12} className={connectionStatus === 'error' ? 'text-red-600' : 'text-blue-600'} />
+                                                        </div>
+                                                        <span className="truncate max-w-[120px]">
+                                                            {activeTab.connection?.connectionName || 'Selecionar Banco'}
                                                         </span>
-                                                        {connectionStatus === 'error' && <span className="flex h-2 w-2 rounded-full bg-red-500"></span>}
                                                     </button>
 
-                                                    {/* Popover Menu */}
-                                                    {/* Popover Menu */}
+                                                    {/* Connection Dropdown (Glass) */}
                                                     <AnimatePresence>
                                                         {showConnectionMenu && (
                                                             <>
-                                                                {/* Backdrop for easy closing */}
-                                                                <div className="fixed inset-0 z-[9998]" onClick={() => setShowConnectionMenu(false)}></div>
-
+                                                                <div className="fixed inset-0 z-[90]" onClick={() => setShowConnectionMenu(false)}></div>
                                                                 <motion.div
-                                                                    initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                                                                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                                                                    exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                                                                    transition={{ duration: 0.2, ease: "easeOut" }}
-                                                                    className="absolute top-full right-0 mt-2 z-[9999] bg-white/90 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/50 w-80 overflow-hidden ring-1 ring-black/5"
+                                                                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                                    className="absolute top-12 right-0 z-[100] w-72 bg-[var(--bg-panel)] backdrop-blur-xl rounded-2xl shadow-[0_10px_40px_-10px_var(--shadow-color)] border border-[var(--border-main)] p-2"
                                                                 >
-                                                                    <div className="bg-gray-50/50 px-4 py-3 border-b border-gray-100/50 flex justify-between items-center backdrop-blur-sm">
-                                                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Minhas Conexões</span>
+                                                                    <div className="px-3 py-2 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1">Meus Bancos</div>
+                                                                    <div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1">
+                                                                        {(JSON.parse(localStorage.getItem('oracle_connections') || '[]')).map((conn, idx) => (
+                                                                            <button
+                                                                                key={conn.id || idx}
+                                                                                onClick={() => {
+                                                                                    const decrypted = {
+                                                                                        ...conn,
+                                                                                        password: decryptPassword(conn.password),
+                                                                                        connectString: conn.isDefault ? decryptPassword(conn.connectString) : conn.connectString
+                                                                                    };
+                                                                                    updateActiveTab({ connection: decrypted });
+                                                                                    setShowConnectionMenu(false);
+                                                                                    setConnectionStatus('connected');
+                                                                                    showToast(`Conectado a ${conn.connectionName}`);
+                                                                                }}
+                                                                                className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition-all text-left group
+                                                                                    ${activeTab.connection?.id === conn.id ? 'bg-[var(--bg-active)] text-[var(--accent-primary)]' : 'hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]'}
+                                                                                `}
+                                                                            >
+                                                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${activeTab.connection?.id === conn.id ? 'bg-[var(--bg-main)]' : 'bg-[var(--bg-main)] group-hover:bg-[var(--bg-panel)] group-hover:shadow-sm'}`}>
+                                                                                    <Database size={14} />
+                                                                                </div>
+                                                                                <div className="flex-1 min-w-0">
+                                                                                    <div className="font-bold text-xs truncate">{conn.connectionName}</div>
+                                                                                    <div className="text-[10px] opacity-70 truncate">{conn.user}</div>
+                                                                                </div>
+                                                                                {activeTab.connection?.id === conn.id && <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>}
+                                                                            </button>
+                                                                        ))}
                                                                     </div>
-
-                                                                    <div className="max-h-64 overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                                                                        {(() => {
-                                                                            try {
-                                                                                const saved = JSON.parse(localStorage.getItem('oracle_connections') || '[]');
-                                                                                if (saved.length === 0) return <div className="p-6 text-center text-gray-400 text-xs italic">Nenhuma conexão salva.</div>;
-
-                                                                                return saved.map((conn, idx) => (
-                                                                                    <motion.button
-                                                                                        key={conn.id || idx}
-                                                                                        whileHover={{ scale: 1.02, backgroundColor: "rgba(99, 102, 241, 0.05)" }}
-                                                                                        whileTap={{ scale: 0.98 }}
-                                                                                        onClick={() => {
-                                                                                            const decrypted = {
-                                                                                                ...conn,
-                                                                                                password: decryptPassword(conn.password),
-                                                                                                connectString: conn.isDefault ? decryptPassword(conn.connectString) : conn.connectString
-                                                                                            };
-                                                                                            updateActiveTab({ connection: decrypted });
-                                                                                            setShowConnectionMenu(false);
-                                                                                            setConnectionStatus('checking');
-                                                                                            setTimeout(() => setConnectionStatus('connected'), 500);
-                                                                                            showToast(`Conectado a ${conn.connectionName}`);
-                                                                                        }}
-                                                                                        className="w-full text-left p-3 rounded-xl transition-all flex items-center gap-3 group/item border border-transparent hover:border-indigo-100 hover:shadow-sm bg-transparent"
-                                                                                    >
-                                                                                        <div className={`
-                                                                                w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors shadow-sm
-                                                                                ${activeTab.connection?.id === conn.id ? 'bg-green-100 text-green-600' : 'bg-white text-gray-400 group-hover:bg-indigo-600 group-hover:text-white'}
-                                                                            `}>
-                                                                                            <Database size={18} />
-                                                                                        </div>
-                                                                                        <div className="min-w-0 flex-1">
-                                                                                            <div className="text-sm font-bold text-gray-700 group-hover:text-indigo-700 truncate">{conn.connectionName}</div>
-                                                                                            <div className="text-[10px] text-gray-400 group-hover:text-indigo-400 truncate font-mono">{conn.user}</div>
-                                                                                        </div>
-                                                                                        {activeTab.connection?.id === conn.id && (
-                                                                                            <span className="h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
-                                                                                        )}
-                                                                                    </motion.button>
-                                                                                ));
-                                                                            } catch (e) { return null; }
-                                                                        })()}
-                                                                    </div>
-
-                                                                    <div className="p-3 border-t border-gray-100/50 bg-gray-50/50 backdrop-blur-sm">
-                                                                        <motion.button
-                                                                            whileHover={{ scale: 1.02 }}
-                                                                            whileTap={{ scale: 0.98 }}
-                                                                            onClick={() => {
-                                                                                setShowConnectionMenu(false);
-                                                                                setTempConnection({ ...tempConnection, showFullForm: true });
-                                                                            }}
-                                                                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-xs font-bold hover:shadow-lg hover:shadow-indigo-500/30 transition-all"
-                                                                        >
-                                                                            <Plus size={16} />
-                                                                            Nova Conexão
-                                                                        </motion.button>
+                                                                    <div className="border-t border-[var(--border-sub)] mt-2 pt-2">
+                                                                        <button onClick={() => { setShowConnectionMenu(false); setTempConnection({ ...tempConnection, showFullForm: true }); }} className="w-full py-2.5 rounded-xl border border-dashed border-[var(--border-sub)] text-[var(--text-muted)] hover:text-[var(--accent-primary)] hover:border-[var(--accent-primary)] hover:bg-[var(--bg-active)] text-xs font-bold transition-all flex items-center justify-center gap-2">
+                                                                            <Plus size={14} /> Nova Conexão
+                                                                        </button>
                                                                     </div>
                                                                 </motion.div>
                                                             </>
@@ -1013,186 +1239,221 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                                     </AnimatePresence>
                                                 </div>
 
-                                                {/* Maximize/Minimize Button - Relocated to Tab Controls */}
                                                 <button
-                                                    onClick={toggleFullScreen}
-                                                    className="p-1.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors border border-gray-100 flex items-center justify-center ml-1"
-                                                    title={isMaximized ? "Restaurar" : "Tela Cheia"}
+                                                    onClick={() => setShowSidebar(!showSidebar)}
+                                                    className={`p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-main)] hover:bg-[var(--bg-hover)] border border-transparent hover:border-[var(--border-sub)] rounded-lg transition-all ${!showSidebar ? 'text-[var(--accent-primary)] bg-[var(--bg-active)] border-[var(--border-sub)]' : ''}`}
+                                                    title={showSidebar ? "Ocultar Menu" : "Mostrar Menu"}
                                                 >
+                                                    {showSidebar ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+                                                </button>
+                                                <button onClick={toggleFullScreen} className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-main)] hover:bg-[var(--bg-hover)] border border-transparent hover:border-[var(--border-main)] rounded-lg transition-all">
                                                     {isMaximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
                                                 </button>
-                                                <button
-                                                    onClick={onDisconnect}
-                                                    className="px-2 py-1 text-xs text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                                                    title="Sair / Logout Geral"
-                                                >
-                                                    <LogOut size={14} />
-                                                </button>
+
+                                                {/* Theme Switcher */}
+                                                <div className="relative">
+                                                    <button
+                                                        onClick={() => setShowThemeMenu(!showThemeMenu)}
+                                                        className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-main)] hover:bg-[var(--bg-hover)] border border-transparent hover:border-[var(--border-main)] rounded-lg transition-all"
+                                                        title="Alterar Tema"
+                                                    >
+                                                        <div className="w-4 h-4 rounded-full bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)]"></div>
+                                                    </button>
+                                                    <AnimatePresence>
+                                                        {showThemeMenu && (
+                                                            <>
+                                                                <div className="fixed inset-0 z-[90]" onClick={() => setShowThemeMenu(false)}></div>
+                                                                <motion.div
+                                                                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                                    className="absolute top-10 right-0 z-[100] w-40 bg-[var(--bg-panel)] rounded-xl shadow-xl border border-[var(--border-main)] p-1 overflow-hidden"
+                                                                >
+                                                                    {Object.values(themeDefs).map(t => (
+                                                                        <button
+                                                                            key={t.id}
+                                                                            onClick={() => { setCurrentThemeId(t.id); setShowThemeMenu(false); }}
+                                                                            className={`w-full text-left px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-2 transition-all ${currentThemeId === t.id ? 'bg-[var(--bg-active)] text-[var(--accent-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+                                                                        >
+                                                                            <div className="w-2 h-2 rounded-full" style={{ background: t.colors.caret }}></div>
+                                                                            {t.name}
+                                                                        </button>
+                                                                    ))}
+                                                                </motion.div>
+                                                            </>
+                                                        )}
+                                                    </AnimatePresence>
+                                                </div>
                                             </div>
                                         </div>
 
                                         <PanelGroup direction="vertical" className="flex-1">
-                                            {/* ---------- EDITOR ---------- */}
-                                            <Panel defaultSize={45} minSize={20} className={`flex flex-col ${theme.panel}`}>
-                                                <div className="flex-1 relative font-mono text-sm min-h-0" onClick={() => viewRef.current?.focus()}>
+                                            {/* ---------- EDITOR AREA ---------- */}
+                                            <Panel defaultSize={45} minSize={20} className="flex flex-col relative bg-[var(--bg-panel)] group/editor">
+                                                <div className="absolute inset-0 bg-grid-slate-50/[0.05] pointer-events-none"></div>
+                                                <div
+                                                    className="flex-1 relative font-mono text-[13px] overflow-hidden"
+                                                    onClick={() => viewRef.current?.focus()}
+                                                >
                                                     {isVisible && (
                                                         <CodeMirror
                                                             value={activeTab.sqlContent}
                                                             height="100%"
+                                                            theme={createDynamicTheme(themeDefs[currentThemeId])}
                                                             extensions={[
                                                                 sql({ schema: {}, dialect: PLSQL, upperCaseKeywords: true }),
-                                                                autocompletion({ override: [/* ... simplified for now, keep existing logic if needed ... */] })
+                                                                autocompletion({ override: [] }) // Add completion logic here if needed
                                                             ]}
-                                                            onChange={(value) => updateActiveTab({ sqlContent: value })}
-                                                            theme="light"
-                                                            className="h-full"
+                                                            onChange={(val) => updateActiveTab({ sqlContent: val })}
                                                             onCreateEditor={(view) => { viewRef.current = view; }}
+                                                            className="h-full focus:outline-none"
+                                                            basicSetup={{
+                                                                lineNumbers: true,
+                                                                highlightActiveLineGutter: true,
+                                                                highlightActiveLine: true,
+                                                                foldGutter: true,
+                                                                dropCursor: true,
+                                                                allowMultipleSelections: true,
+                                                                indentOnInput: true,
+                                                            }}
                                                         />
                                                     )}
                                                 </div>
 
-                                                {/* ---------- TOOLBAR ---------- */}
-                                                <div className={`flex-none px-4 py-3 ${theme.panel} border-t ${theme.border} flex items-center justify-between shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10`}>
-                                                    <div className="flex items-center gap-3">
+                                                {/* Floating Run Bar (Bottom of editor) */}
+                                                <div className="absolute bottom-4 right-6 flex items-center gap-3 z-30 pointer-events-none">
+                                                    <div className="bg-[var(--bg-header)] backdrop-blur-md shadow-[0_8px_30px_var(--shadow-color)] border border-[var(--border-sub)] p-1.5 rounded-2xl flex items-center gap-2 pointer-events-auto">
                                                         <button
                                                             onClick={executeQuery}
                                                             disabled={!activeTab.sqlContent || activeTab.loading}
                                                             className={`
-                                                    flex items-center px-5 py-2 rounded-lg font-bold text-white shadow-lg shadow-indigo-200 transform transition-all active:scale-95
-                                                    ${activeTab.loading ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5'}
-                                                `}
+                                                                px-6 py-2.5 rounded-xl font-bold text-white shadow-lg text-xs tracking-wide flex items-center gap-2 transition-all active:scale-95
+                                                                ${activeTab.loading
+                                                                    ? 'bg-[var(--bg-active)] cursor-wait opacity-70'
+                                                                    : 'bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)] hover:shadow-lg hover:-translate-y-0.5'
+                                                                }
+                                                            `}
                                                         >
                                                             {activeTab.loading ? (
-                                                                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></span>
+                                                                <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
                                                             ) : (
-                                                                <Play size={16} className="mr-2 fill-current" />
+                                                                <Play size={14} fill="currentColor" />
                                                             )}
-                                                            {activeTab.loading ? 'Executando...' : 'Executar'}
+                                                            <span className="mr-1">{activeTab.loading ? 'RODANDO...' : 'EXECUTAR'}</span>
                                                         </button>
 
-                                                        {activeTab.loading && (
-                                                            <button onClick={handleCancelQuery} className="text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg font-medium text-xs flex items-center transition-colors">
-                                                                <Square size={12} className="mr-1 fill-current" /> Cancelar
-                                                            </button>
-                                                        )}
+                                                        <div className="w-px h-6 bg-[var(--border-sub)] mx-1"></div>
 
-                                                        <div className="h-6 w-px bg-gray-200 mx-1"></div>
+                                                        <div className="flex items-center gap-1">
+                                                            <button onClick={handleFormat} className="p-2 text-[var(--text-muted)] hover:text-[#007acc] hover:bg-[var(--bg-active)] rounded-lg transition-colors" title="Formatar (Beautify)">
+                                                                <span className="font-mono text-[10px] font-bold">{'{}'}</span>
+                                                            </button>
+                                                            <button onClick={handleExplainSql} className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-secondary)] hover:bg-[var(--bg-active)] rounded-lg transition-colors" title="Explicar com IA">
+                                                                <MessageSquare size={16} />
+                                                            </button>
+                                                            <button onClick={handleOptimizeSql} className="p-2 text-[var(--text-muted)] hover:text-emerald-500 hover:bg-[var(--bg-active)] rounded-lg transition-colors" title="Otimizar Query">
+                                                                <Zap size={16} />
+                                                            </button>
+                                                        </div>
+
+                                                        <div className="w-px h-6 bg-[var(--border-sub)] mx-1"></div>
 
                                                         <select
                                                             value={limit}
                                                             onChange={(e) => setLimit(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                                                            className={`${theme.input} text-xs rounded-lg px-2 py-2 outline-none focus:ring-2 focus:ring-indigo-100 font-medium`}
+                                                            className="bg-transparent text-xs font-semibold text-[var(--text-secondary)] outline-none cursor-pointer hover:text-[var(--text-primary)] pr-2"
                                                         >
-                                                            <option value={100}>100 linhas</option>
-                                                            <option value={500}>500 linhas</option>
-                                                            <option value={1000}>1000 linhas</option>
-                                                            <option value="all">Todas</option>
+                                                            <option value={100} className="bg-[var(--bg-panel)]">100 linhas</option>
+                                                            <option value={500} className="bg-[var(--bg-panel)]">500 linhas</option>
+                                                            <option value={1000} className="bg-[var(--bg-panel)]">1k linhas</option>
+                                                            <option value="all" className="bg-[var(--bg-panel)]">Todas</option>
                                                         </select>
-
-                                                        {activeTab.totalRecords !== undefined && (
-                                                            <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                                                                {activeTab.totalRecords.toLocaleString()} registros
-                                                            </span>
-                                                        )}
-                                                    </div>
-
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="flex bg-gray-100 p-1 rounded-lg">
-                                                            <button onClick={handleFormat} className="p-1.5 text-gray-500 hover:text-indigo-600 hover:bg-white rounded-md transition-all" title="Formatar SQL">
-                                                                <span className="font-mono text-xs font-bold">{'{}'}</span>
-                                                            </button>
-                                                            <button onClick={handleExplainSql} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-white rounded-md transition-all" title="Explicar (IA)">
-                                                                <MessageSquare size={14} />
-                                                            </button>
-                                                            <button onClick={handleOptimizeSql} className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-white rounded-md transition-all" title="Otimizar (IA)">
-                                                                <Zap size={14} />
-                                                            </button>
-                                                        </div>
-
-                                                        <div className="h-6 w-px bg-gray-200 mx-1"></div>
-
-                                                        {showSaveInput ? (
-                                                            <div className="flex items-center bg-gray-50 rounded-lg p-1 border border-indigo-100 animate-in fade-in slide-in-from-right-4">
-                                                                <input
-                                                                    autoFocus
-                                                                    value={queryName}
-                                                                    onChange={e => setQueryName(e.target.value)}
-                                                                    placeholder="Nome..."
-                                                                    className={`bg-transparent text-xs w-32 px-2 outline-none ${theme.text}`}
-                                                                    onKeyDown={e => e.key === 'Enter' && saveQuery()}
-                                                                />
-                                                                <button onClick={saveQuery} className="text-green-600 hover:bg-green-100 p-1 rounded"><Save size={14} /></button>
-                                                                <button onClick={() => setShowSaveInput(false)} className="text-red-500 hover:bg-red-100 p-1 rounded"><X size={14} /></button>
-                                                            </div>
-                                                        ) : (
-                                                            <button onClick={() => setShowSaveInput(true)} className="flex items-center px-3 py-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg text-xs font-bold transition-colors">
-                                                                <Save size={14} className="mr-1.5" /> Salvar
-                                                            </button>
-                                                        )}
-
-                                                        <label className="flex items-center px-3 py-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg text-xs font-bold transition-colors cursor-pointer">
-                                                            <FolderOpen size={14} className="mr-1.5" /> Abrir
-                                                            <input type="file" accept=".sql" onChange={handleFileUpload} className="hidden" />
-                                                        </label>
                                                     </div>
                                                 </div>
                                             </Panel>
 
-                                            <PanelResizeHandle className="h-1.5 bg-gray-50 hover:bg-indigo-400 transition-colors cursor-row-resize border-y border-gray-200 flex justify-center items-center group">
-                                                <div className="w-10 h-1 rounded-full bg-gray-300 group-hover:bg-indigo-200"></div>
+                                            <PanelResizeHandle className="h-1.5 bg-[var(--bg-main)] hover:bg-[var(--bg-active)] transition-colors cursor-row-resize flex justify-center items-center group relative z-20">
+                                                <div className="w-12 h-1 rounded-full bg-[var(--border-sub)] group-hover:bg-[var(--accent-primary)] transition-colors"></div>
                                             </PanelResizeHandle>
 
-                                            {/* ---------- RESULTS ---------- */}
-                                            <Panel defaultSize={55} minSize={20} className={`flex flex-col ${theme.panel}`}>
+                                            {/* ---------- RESULTS AREA ---------- */}
+                                            <Panel defaultSize={55} minSize={20} className="flex flex-col bg-[var(--bg-panel)] relative">
+                                                {/* Error Banner */}
                                                 {activeTab.error && (
-                                                    <div className="bg-red-50 border-b border-red-100 p-4 flex items-start gap-3">
-                                                        <div className="bg-red-100 text-red-600 p-2 rounded-lg flex-shrink-0"><X size={20} /></div>
-                                                        <div className="flex-1">
-                                                            <h4 className="font-bold text-red-800 text-sm">Erro na execução</h4>
-                                                            <p className="text-red-700 text-xs font-mono mt-1 whitespace-pre-wrap leading-relaxed">{activeTab.error}</p>
-                                                            {!activeTab.error.includes("cancelada") && (
-                                                                <button onClick={handleFixError} disabled={aiLoading} className="mt-3 text-xs bg-white border border-red-200 text-red-600 px-3 py-1.5 rounded-md font-bold hover:bg-red-50 transition-colors flex items-center w-fit shadow-sm">
-                                                                    ✨ Corrigir com IA
-                                                                </button>
-                                                            )}
+                                                    <div className="absolute top-0 left-0 right-0 z-40 bg-red-50/95 backdrop-blur-sm border-b border-red-100 p-4 animate-in slide-in-from-top-2">
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="p-2 bg-red-100 text-red-600 rounded-lg shrink-0"><Zap size={18} /></div>
+                                                            <div className="flex-1">
+                                                                <h4 className="font-bold text-red-900 text-sm">Erro na Execução</h4>
+                                                                <p className="font-mono text-xs text-red-700 mt-1">{activeTab.error}</p>
+                                                            </div>
+                                                            <button onClick={handleFixError} className="px-4 py-2 bg-white border border-red-200 text-red-600 rounded-lg text-xs font-bold hover:bg-red-50 shadow-sm transition-all flex items-center gap-2">
+                                                                ✨ Corrigir
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 )}
 
-                                                {activeTab.results ? (
-                                                    <div className="flex-1 flex flex-col min-h-0">
-                                                        {/* Results Header */}
-                                                        <div className="px-4 py-2 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                                                            <div className="flex items-center space-x-4">
-                                                                <h3 className="text-[10px] font-black tracking-widest text-gray-400 uppercase">Resultados</h3>
-                                                                <button onClick={() => setShowFilters(!showFilters)} className={`text-xs font-bold flex items-center px-2 py-1 rounded-md transition-colors ${showFilters ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-200'}`}>
-                                                                    <Search size={12} className="mr-1" /> Filtros
-                                                                </button>
+                                                <div className="flex-1 flex flex-col min-h-0 bg-[var(--bg-content)]">
+                                                    {/* Results Toolbar */}
+                                                    <div className="px-5 py-3 border-b border-[var(--border-main)] flex justify-between items-center bg-[var(--bg-panel)] z-10">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest">Resultado</span>
+                                                                <div className="flex items-baseline gap-2">
+                                                                    {activeTab.totalRecords !== undefined && (
+                                                                        <span className="text-[10px] font-bold text-[var(--text-secondary)] bg-[var(--bg-main)] px-1.5 py-0.5 rounded-md border border-[var(--border-sub)]">
+                                                                            {activeTab.totalRecords.toLocaleString()} registros
+                                                                        </span>
+                                                                    )}
+                                                                </div>
                                                             </div>
-                                                            <div className="flex space-x-2">
-                                                                <button onClick={() => exportData('xlsx')} className="text-xs font-bold text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors flex items-center">
-                                                                    <Download size={12} className="mr-1.5" /> Excel
-                                                                </button>
-                                                                <button onClick={() => exportData('csv')} className="text-xs font-bold text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors flex items-center">
-                                                                    <Download size={12} className="mr-1.5" /> CSV
-                                                                </button>
-                                                            </div>
+
+                                                            <div className="h-6 w-px bg-[var(--border-sub)]"></div>
+
+                                                            <button
+                                                                onClick={() => setShowFilters(!showFilters)}
+                                                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${showFilters ? 'bg-[var(--bg-active)] text-[var(--accent-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]'}`}
+                                                            >
+                                                                <Search size={14} /> Filtros
+                                                            </button>
                                                         </div>
 
-                                                        {/* Table Container */}
-                                                        {activeTab.results.metaData.length === 0 ? (
-                                                            <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-                                                                <div className="w-16 h-16 bg-green-50 text-green-500 rounded-full flex items-center justify-center mb-4"><span className="text-3xl">✓</span></div>
-                                                                <p className="font-medium text-gray-600">Comando Executado</p>
-                                                                <p className="text-xs mt-1">Nenhum dado retornado (DDL/Script)</p>
+                                                        <div className="flex items-center gap-2">
+                                                            <button onClick={() => exportData('csv')} className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--bg-active)] rounded-lg transition-all" title="Baixar CSV">
+                                                                <Download size={18} />
+                                                            </button>
+                                                            <div className="relative group/save">
+                                                                {showSaveInput ? (
+                                                                    <div className="flex items-center gap-1 bg-[var(--bg-main)] p-1 rounded-lg animate-in fade-in slide-in-from-right-4">
+                                                                        <input
+                                                                            autoFocus
+                                                                            value={queryName}
+                                                                            onChange={e => setQueryName(e.target.value)}
+                                                                            placeholder="Nome da Query..."
+                                                                            className="bg-transparent text-xs w-32 px-2 outline-none text-[var(--text-primary)] font-medium placeholder:text-[var(--text-muted)]"
+                                                                            onKeyDown={e => e.key === 'Enter' && saveQuery()}
+                                                                        />
+                                                                        <button onClick={saveQuery} className="p-1 rounded bg-[var(--bg-panel)] text-green-600 shadow-sm hover:text-green-700"><Save size={14} /></button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <button onClick={() => setShowSaveInput(true)} className="p-2 text-[var(--text-muted)] hover:text-green-600 hover:bg-green-50 rounded-lg transition-all" title="Salvar Query">
+                                                                        <Save size={18} />
+                                                                    </button>
+                                                                )}
                                                             </div>
-                                                        ) : (
-                                                            <div className="flex-1 overflow-hidden relative flex flex-col">
-                                                                {/* SYNCED HEADER */}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* The Table */}
+                                                    {activeTab.results ? (
+                                                        activeTab.results.metaData.length > 0 ? (
+                                                            <div className="flex-1 overflow-hidden relative flex flex-col bg-[var(--bg-content)]">
+                                                                {/* HEADER */}
                                                                 <div
                                                                     ref={headerContainerRef}
-                                                                    className={`flex divide-x divide-gray-100 border-b ${theme.border} ${theme.bg} overflow-hidden select-none`}
-                                                                    style={{ height: showFilters ? '65px' : '32px' }} // Fixed height
+                                                                    className="flex border-b border-[var(--border-sub)] bg-[var(--bg-header)] backdrop-blur-md overflow-hidden select-none sticky top-0 z-20 shadow-sm"
+                                                                    style={{ height: showFilters ? '72px' : '40px' }}
                                                                 >
                                                                     {columnOrder.map(colName => {
                                                                         if (!visibleColumns[colName]) return null;
@@ -1200,28 +1461,29 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                                                         return (
                                                                             <div
                                                                                 key={colName}
-                                                                                className={`flex-shrink-0 px-3 py-1.5 text-xs font-bold ${theme.text} flex flex-col justify-center relative hover:bg-opacity-80 transition-colors group h-full`}
+                                                                                className="flex-shrink-0 px-4 py-2 text-xs font-bold text-[var(--text-secondary)] relative hover:bg-[var(--bg-hover)] transition-colors group flex flex-col justify-center border-r border-transparent hover:border-[var(--border-sub)]"
                                                                                 style={{ width: `${width}px` }}
                                                                                 draggable
                                                                                 onDragStart={(e) => handleDragStart(e, colName)}
                                                                                 onDragOver={(e) => handleDragOver(e, colName)}
                                                                                 onDragEnd={handleDragEnd}
                                                                             >
-                                                                                <div className="flex items-center justify-between mb-1">
-                                                                                    <span className="truncate" title={colName}>{colName}</span>
+                                                                                <div className="flex items-center justify-between mb-0.5">
+                                                                                    <span className="truncate">{colName}</span>
                                                                                 </div>
                                                                                 {showFilters && (
-                                                                                    <input
-                                                                                        type="text"
-                                                                                        placeholder="..."
-                                                                                        className="w-full text-[10px] px-1.5 py-0.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-400 outline-none bg-white"
-                                                                                        value={columnFilters[colName] || ''}
-                                                                                        onChange={e => setColumnFilters({ ...columnFilters, [colName]: e.target.value })}
-                                                                                    />
+                                                                                    <div className="relative">
+                                                                                        <input
+                                                                                            type="text"
+                                                                                            placeholder="Filtrar..."
+                                                                                            className="w-full text-[10px] px-2 py-1 bg-[var(--bg-main)] border border-[var(--border-sub)] rounded-md focus:border-[var(--accent-primary)] focus:bg-[var(--bg-panel)] outline-none transition-all placeholder:text-[var(--text-muted)] text-[var(--text-primary)]"
+                                                                                            value={columnFilters[colName] || ''}
+                                                                                            onChange={e => setColumnFilters({ ...columnFilters, [colName]: e.target.value })}
+                                                                                        />
+                                                                                    </div>
                                                                                 )}
-                                                                                {/* Resizer Handle */}
                                                                                 <div
-                                                                                    className="absolute right-0 top-0 bottom-0 w-1 hover:bg-blue-400 cursor-col-resize z-10"
+                                                                                    className="absolute right-0 top-1 bottom-1 w-1 cursor-col-resize hover:bg-blue-400 rounded-full transition-colors opacity-0 group-hover:opacity-100"
                                                                                     onDoubleClick={() => handleDoubleClickResizer(colName)}
                                                                                 ></div>
                                                                             </div>
@@ -1237,15 +1499,14 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                                                                 height={height}
                                                                                 width={width}
                                                                                 itemCount={filteredRows.length}
-                                                                                itemSize={36}
+                                                                                itemSize={38}
                                                                                 outerRef={setListOuterElement}
                                                                                 itemData={{
                                                                                     rows: filteredRows,
                                                                                     columnOrder,
                                                                                     visibleColumns,
-                                                                                    theme,
-                                                                                    metaData: activeTab.results.metaData,
-                                                                                    columnWidths
+                                                                                    columnWidths,
+                                                                                    metaData: activeTab.results.metaData
                                                                                 }}
                                                                             >
                                                                                 {SqlRunnerRow}
@@ -1254,136 +1515,187 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                                                     </AutoSizer>
                                                                 </div>
                                                             </div>
-                                                        )}
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex-1 flex flex-col items-center justify-center text-gray-300 pointer-events-none select-none">
-                                                        <Database size={64} className="mb-4 opacity-20" />
-                                                        <p className="text-sm font-medium opacity-50">Execute uma query para ver resultados</p>
-                                                    </div>
-                                                )}
+                                                        ) : (
+                                                            <div className="flex-1 flex flex-col items-center justify-center text-[var(--text-muted)]">
+                                                                <div className="w-20 h-20 bg-[var(--bg-panel)] text-emerald-500 rounded-2xl flex items-center justify-center mb-4 shadow-sm border border-[var(--border-sub)]">
+                                                                    <span className="text-4xl">✓</span>
+                                                                </div>
+                                                                <p className="font-bold text-[var(--text-primary)] text-lg">Sucesso!</p>
+                                                                <p className="text-sm font-medium text-[var(--text-muted)] mt-1">Comando executado sem retorno de dados.</p>
+                                                            </div>
+                                                        )
+                                                    ) : (
+                                                        <div className="flex-1 flex flex-col items-center justify-center text-slate-300 relative overflow-hidden">
+                                                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,var(--bg-hover)_0,rgba(0,0,0,0)_70%)]"></div>
+                                                            <div className="bg-[var(--bg-panel)] p-6 rounded-3xl shadow-[0_20px_50px_var(--shadow-color)] border border-[var(--border-sub)] flex flex-col items-center relative z-10">
+                                                                <div className="w-16 h-16 bg-[var(--bg-main)] text-[var(--accent-primary)] rounded-2xl flex items-center justify-center mb-4 transform rotate-3">
+                                                                    <Database size={32} strokeWidth={1.5} />
+                                                                </div>
+                                                                <p className="text-[var(--text-primary)] font-bold text-lg mb-1">Pronto para rodar</p>
+                                                                <p className="text-[var(--text-muted)] text-xs text-center max-w-[200px] leading-relaxed">
+                                                                    Escreva sua query acima e pressione <span className="font-bold text-[var(--text-secondary)]">Executar</span>
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </Panel>
                                         </PanelGroup>
                                     </div>
                                 </Panel>
 
-                                {showSidebar && <PanelResizeHandle className="w-1 bg-gray-100 hover:bg-indigo-300 cursor-col-resize transition-colors" />}
-
                                 {/* ---------- SIDEBAR ---------- */}
                                 {showSidebar && (
-                                    <Panel defaultSize={20} minSize={15} maxSize={40} className={`${theme.panel} border-l ${theme.border} flex flex-col`}>
-                                        {/* Tabs */}
-                                        <div className={`flex border-b ${theme.border}`}>
-                                            {['saved', 'schema', 'chat'].map(tab => (
-                                                <button
-                                                    key={tab}
-                                                    onClick={() => setActiveSidebarTab(tab)}
-                                                    className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${activeSidebarTab === tab ? 'text-indigo-600 border-b-2 border-indigo-500 bg-indigo-50/30' : 'text-gray-400 hover:bg-gray-50'}`}
-                                                >
-                                                    {tab === 'saved' ? 'Salvos' : tab === 'schema' ? 'Tabelas' : 'IA Chat'}
-                                                </button>
-                                            ))}
-                                        </div>
+                                    <>
+                                        <PanelResizeHandle className="w-px bg-slate-200 hover:bg-blue-400 hover:w-1 transition-all cursor-col-resize relative group z-20">
+                                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-8 bg-white border border-slate-200 rounded-full flex items-center justify-center shadow-sm group-hover:border-blue-300">
+                                                <div className="w-0.5 h-3 bg-slate-300 group-hover:bg-blue-400 rounded-full"></div>
+                                            </div>
+                                        </PanelResizeHandle>
 
-                                        <div className={`flex-1 overflow-y-auto p-4 ${theme.bg}`}>
-                                            {activeSidebarTab === 'saved' && (
-                                                <div className="space-y-3">
-                                                    {savedQueries.map(q => (
-                                                        <div key={q.id} onClick={() => loadQuery(q)} className="group bg-white p-3 rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-indigo-200 cursor-pointer transition-all">
-                                                            <div className="flex justify-between items-start mb-1">
-                                                                <h5 className="font-bold text-gray-700 text-sm truncate flex-1 min-w-0 mr-2" title={q.name}>{q.name}</h5>
-                                                                <button onClick={e => { e.stopPropagation(); deleteQuery(q.id); }} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100">
-                                                                    <Trash2 size={12} />
-                                                                </button>
-                                                            </div>
-                                                            <p className="text-xs text-gray-400 font-mono truncate">{q.sql}</p>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
+                                        <Panel defaultSize={20} minSize={15} maxSize={40} className="flex flex-col bg-[var(--bg-panel)] border-l border-[var(--border-main)]">
+                                            {/* Tabs */}
+                                            <div className="flex p-1 bg-[var(--bg-main)] m-2 rounded-xl border border-[var(--border-sub)]">
+                                                {['saved', 'schema', 'chat'].map(tab => (
+                                                    <button
+                                                        key={tab}
+                                                        onClick={() => setActiveSidebarTab(tab)}
+                                                        className={`
+                                                            flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all
+                                                            ${activeSidebarTab === tab
+                                                                ? 'bg-[var(--bg-panel)] text-[var(--accent-primary)] shadow-sm'
+                                                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+                                                            }
+                                                        `}
+                                                    >
+                                                        {tab === 'saved' ? 'Salvos' : tab === 'schema' ? 'Dados' : 'IA Chat'}
+                                                    </button>
+                                                ))}
+                                            </div>
 
-                                            {activeSidebarTab === 'schema' && (
-                                                <div className="space-y-4">
-                                                    <div className="relative">
-                                                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                                                        <input
-                                                            className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-100 transition-shadow"
-                                                            placeholder="Buscar tabelas..."
-                                                            value={schemaSearch}
-                                                            onChange={e => { setSchemaSearch(e.target.value); fetchSchemaTables(e.target.value); }}
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-1">
-                                                        {schemaTables.map(t => (
-                                                            <div key={t}>
-                                                                <button onClick={() => handleExpandTable(t)} className={`w-full text-left px-3 py-2 rounded-lg text-xs font-mono flex items-center justify-between transition-colors ${expandedTable === t ? 'bg-indigo-100 text-indigo-700 font-bold' : 'hover:bg-white text-gray-600'}`}>
-                                                                    {t} <span className="text-gray-400 text-[10px]">{expandedTable === t ? '▼' : '▶'}</span>
-                                                                </button>
-                                                                {expandedTable === t && (
-                                                                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pl-3 mt-1 space-y-0.5 border-l-2 border-indigo-100 ml-2">
-                                                                        {tableColumns.map(c => (
-                                                                            <div key={c.name} onClick={() => insertTextAtCursor(c.name)} className="flex justify-between items-center px-2 py-1 hover:bg-indigo-50 rounded cursor-pointer group text-[10px]">
-                                                                                <span className="text-gray-500 group-hover:text-indigo-600 font-medium">{c.name}</span>
-                                                                                <span className="text-gray-300 group-hover:text-indigo-400">{c.type}</span>
-                                                                            </div>
-                                                                        ))}
-                                                                    </motion.div>
-                                                                )}
+                                            <div className="flex-1 overflow-y-auto px-4 pb-4 custom-scrollbar">
+                                                {activeSidebarTab === 'saved' && (
+                                                    <div className="space-y-3 pt-2">
+                                                        {savedQueries.map(q => (
+                                                            <div key={q.id} onClick={() => loadQuery(q)} className="group bg-[var(--bg-content)] p-3 rounded-xl border border-[var(--border- sub)] shadow-[0_2px_8px_var(--shadow-color)] hover:shadow-md hover:border-[var(--accent-primary)] cursor-pointer transition-all relative overflow-hidden">
+                                                                <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-transparent to-[var(--bg-hover)] rounded-bl-full -mr-8 -mt-8 pointer-events-none group-hover:to-[var(--bg-active)] transition-colors"></div>
+                                                                <div className="flex justify-between items-start mb-1 relative z-10">
+                                                                    <h5 className="font-bold text-[var(--text-primary)] text-xs truncate flex-1 min-w-0 mr-2" title={q.name}>{q.name}</h5>
+                                                                    <button onClick={e => { e.stopPropagation(); deleteQuery(q.id); }} className="text-[var(--text-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                        <Trash2 size={12} />
+                                                                    </button>
+                                                                </div>
+                                                                <div className="h-px w-full bg-[var(--border-sub)] my-1.5 group-hover:bg-[var(--accent-primary)]/20"></div>
+                                                                <p className="text-[10px] text-[var(--text-secondary)] font-mono line-clamp-2 relative z-10">{q.sql}</p>
                                                             </div>
                                                         ))}
+                                                        {savedQueries.length === 0 && (
+                                                            <div className="text-center py-8 text-[var(--text-muted)]">
+                                                                <div className="w-12 h-12 bg-[var(--bg-main)] rounded-full flex items-center justify-center mx-auto mb-2"><Save size={18} /></div>
+                                                                <p className="text-xs">Nenhuma query salva</p>
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                </div>
-                                            )}
+                                                )}
 
-                                            {activeSidebarTab === 'chat' && (
-                                                <div className="flex flex-col h-full">
-                                                    <div className="flex-1 space-y-4 mb-4">
-                                                        {aiChatHistory.map((msg, i) => (
-                                                            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                                                <div className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm shadow-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-700 rounded-bl-none'}`}>
-                                                                    <div className="prose prose-sm max-w-none dark:prose-invert">
+                                                {activeSidebarTab === 'schema' && (
+                                                    <div className="space-y-4 pt-2">
+                                                        <div className="relative group/search">
+                                                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-hover/search:text-[var(--accent-primary)] transition-colors" />
+                                                            <input
+                                                                className="w-full pl-9 pr-3 py-2.5 text-xs bg-[var(--bg-content)] border border-[var(--border-sub)] rounded-xl outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/20 focus:border-[var(--accent-primary)] transition-all font-medium placeholder:text-[var(--text-muted)] text-[var(--text-primary)]"
+                                                                placeholder="Buscar tabelas..."
+                                                                value={schemaSearch}
+                                                                onChange={e => { setSchemaSearch(e.target.value); fetchSchemaTables(e.target.value); }}
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1.5">
+                                                            {schemaTables.map(t => (
+                                                                <div key={t} className="bg-[var(--bg-content)] rounded-xl border border-transparent hover:border-[var(--border-sub)] hover:shadow-sm transition-all overflow-hidden">
+                                                                    <button onClick={() => handleExpandTable(t)} className={`w-full text-left px-3 py-2.5 text-xs font-mono flex items-center justify-between transition-colors ${expandedTable === t ? 'bg-[var(--bg-active)] text-[var(--accent-primary)] font-bold' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}>
+                                                                        <span className="truncate">{t}</span>
+                                                                        <span className={`text-[10px] text-[var(--text-muted)] transition-transform duration-200 ${expandedTable === t ? 'rotate-180' : ''}`}>▼</span>
+                                                                    </button>
+                                                                    <AnimatePresence>
+                                                                        {expandedTable === t && (
+                                                                            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="border-t border-[var(--border-sub)] bg-[var(--bg-main)]/50">
+                                                                                {tableColumns.length > 0 ? (
+                                                                                    <div className="space-y-0.5 p-1">
+                                                                                        {tableColumns.map(c => (
+                                                                                            <div key={c.name} onClick={() => insertTextAtCursor(c.name)} className="flex justify-between items-center px-3 py-1.5 hover:bg-[var(--bg-hover)] hover:shadow-sm rounded-lg cursor-pointer group text-[10px] transition-all">
+                                                                                                <span className="text-[var(--text-muted)] group-hover:text-[var(--accent-primary)] font-medium truncate">{c.name}</span>
+                                                                                                <span className="text-[var(--text-muted)] group-hover:text-[var(--accent-secondary)] text-[9px] uppercase">{c.type}</span>
+                                                                                            </div>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                ) : (
+                                                                                    <div className="p-2 text-center text-[10px] text-[var(--text-muted)]">Carregando...</div>
+                                                                                )}
+                                                                            </motion.div>
+                                                                        )}
+                                                                    </AnimatePresence>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {activeSidebarTab === 'chat' && (
+                                                    <div className="flex flex-col h-full pt-1">
+                                                        <div className="flex-1 space-y-4 mb-4 overflow-y-auto custom-scrollbar pr-1">
+                                                            {aiChatHistory.length === 0 && (
+                                                                <div className="text-center py-10 opacity-50">
+                                                                    <div className="w-16 h-16 bg-[var(--bg-main)] text-[var(--accent-primary)] rounded-2xl flex items-center justify-center mx-auto mb-3"><MessageSquare size={24} /></div>
+                                                                    <p className="text-xs font-medium text-[var(--text-muted)]">Pergunte sobre seus dados</p>
+                                                                </div>
+                                                            )}
+                                                            {aiChatHistory.map((msg, i) => (
+                                                                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                                                    <div className={`max-w-[90%] rounded-2xl px-4 py-3 text-xs shadow-sm leading-relaxed ${msg.role === 'user' ? 'bg-[var(--accent-primary)] text-white rounded-br-none' : 'bg-[var(--bg-content)] border border-[var(--border-sub)] text-[var(--text-secondary)] rounded-bl-none'}`}>
                                                                         <ReactMarkdown
                                                                             components={{
-                                                                                code: ({ node, inline, className, children, ...props }) => {
-                                                                                    return (
-                                                                                        <code className={className} {...props}>
-                                                                                            {children}
-                                                                                        </code>
-                                                                                    );
-                                                                                }
+                                                                                code: ({ node, inline, className, children, ...props }) => (
+                                                                                    <code className={`${className} ${inline ? 'bg-black/10 px-1 py-0.5 rounded' : 'block bg-[var(--bg-main)] text-[var(--text-primary)] border border-[var(--border-sub)] p-2 rounded-lg my-2 overflow-x-auto text-[10px]'}`} {...props}>
+                                                                                        {children}
+                                                                                    </code>
+                                                                                )
                                                                             }}
                                                                         >
                                                                             {msg.content}
                                                                         </ReactMarkdown>
                                                                     </div>
                                                                 </div>
-                                                            </div>
-                                                        ))}
-                                                        {aiLoading && (
-                                                            <div className="flex justify-start">
-                                                                <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm flex items-center space-x-2">
-                                                                    <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></span>
-                                                                    <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-100"></span>
-                                                                    <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-200"></span>
+                                                            ))}
+                                                            {aiLoading && (
+                                                                <div className="flex justify-start">
+                                                                    <div className="bg-[var(--bg-content)] border border-[var(--border-sub)] rounded-2xl rounded-bl-none px-4 py-3 shadow-sm flex items-center space-x-1.5">
+                                                                        <span className="w-1.5 h-1.5 bg-[var(--accent-primary)] rounded-full animate-bounce"></span>
+                                                                        <span className="w-1.5 h-1.5 bg-[var(--accent-primary)] rounded-full animate-bounce delay-75"></span>
+                                                                        <span className="w-1.5 h-1.5 bg-[var(--accent-primary)] rounded-full animate-bounce delay-150"></span>
+                                                                    </div>
                                                                 </div>
-                                                            </div>
-                                                        )}
+                                                            )}
+                                                        </div>
+                                                        <form onSubmit={handleAiChatSubmit} className="relative mt-auto pt-2 bg-[var(--bg-panel)]">
+                                                            <input
+                                                                className="w-full bg-[var(--bg-content)] border border-[var(--border-sub)] shadow-sm rounded-xl px-4 py-3 pr-10 text-xs outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/20 focus:border-[var(--accent-primary)] transition-all placeholder:text-[var(--text-muted)] text-[var(--text-primary)]"
+                                                                placeholder="Pergunte à IA..."
+                                                                value={aiChatInput}
+                                                                onChange={e => setAiChatInput(e.target.value)}
+                                                            />
+                                                            <button
+                                                                type="submit"
+                                                                disabled={!aiChatInput.trim() || aiLoading}
+                                                                className="absolute right-2 top-1/2 -translate-y-1/2 mt-1 p-1.5 bg-[var(--accent-primary)] text-white rounded-lg hover:bg-[var(--accent-secondary)] disabled:opacity-50 disabled:hover:bg-[var(--accent-primary)] transition-all shadow-md shadow-[var(--shadow-color)]"
+                                                            >
+                                                                <Share2 size={12} className="rotate-90 -translate-y-px -translate-x-px" />
+                                                            </button>
+                                                        </form>
                                                     </div>
-                                                    <form onSubmit={handleAiChatSubmit} className="relative">
-                                                        <input
-                                                            className="w-full bg-white border border-gray-200 shadow-sm rounded-xl px-4 py-3 pr-10 text-sm outline-none focus:ring-2 focus:ring-indigo-100 transition-all"
-                                                            placeholder="Pergunte à IA..."
-                                                            value={aiChatInput}
-                                                            onChange={e => setAiChatInput(e.target.value)}
-                                                        />
-                                                        <button type="submit" disabled={!aiChatInput.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                                                            <Share2 size={12} className="rotate-90" />
-                                                        </button>
-                                                    </form>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </Panel>
+                                                )}
+                                            </div>
+                                        </Panel>
+                                    </>
                                 )}
                             </PanelGroup>
                         </div>

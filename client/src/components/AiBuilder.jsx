@@ -3663,8 +3663,6 @@ From vw_empresa_conveniada_cad e
             activeFilters: ctx.filters,
             sqlMode: ctx.sqlMode,
             parsedSqlData: ctx.parsedSqlData, // Assuming we will save this too
-            sqlMode: ctx.sqlMode,
-            parsedSqlData: ctx.parsedSqlData, // Assuming we will save this too
             selectedCard: { tableName: ctx.tableName },
             groupBy: ctx.groupBy
         });
