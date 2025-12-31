@@ -185,23 +185,44 @@ try {
 }
 
 // --- Serve Static Frontend ---
-// In production/packaged mode, serve the React app from 'client/dist'
-const clientDistPath = path.join(__dirname, '..', 'client', 'dist');
-if (fs.existsSync(clientDistPath)) {
-  console.log(`[DEBUG] Serving static files from: ${clientDistPath} `);
-  console.log(`[DEBUG] Directory contents: ${fs.readdirSync(clientDistPath).join(', ')} `);
+// In production/packaged mode, assets are copied to 'public' folder by copy_assets.ps1
+// In dev/monorepo mode, they might be in '../client/dist'
+const possiblePaths = [
+  path.join(__dirname, 'public'), // Production (copied)
+  path.join(__dirname, '..', 'client', 'dist') // Dev (sibling)
+];
+
+let clientDistPath = null;
+for (const p of possiblePaths) {
+  if (fs.existsSync(p) && fs.existsSync(path.join(p, 'index.html'))) {
+    clientDistPath = p;
+    break;
+  }
+}
+
+if (clientDistPath) {
+  console.log(`[DEBUG] Serving static files from: ${clientDistPath}`);
+  try {
+    console.log(`[DEBUG] Directory contents: ${fs.readdirSync(clientDistPath).join(', ')}`);
+  } catch (e) { /* ignore */ }
+
   app.use(express.static(clientDistPath));
+
   // SPA Fallback
   app.get(/.*/, (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
       return next();
     }
-    console.log(`[DEBUG] Serving index.html for path: ${req.path} `);
+    console.log(`[DEBUG] Serving index.html for path: ${req.path}`);
     res.sendFile(path.join(clientDistPath, 'index.html'));
   });
 } else {
-  console.log(`[ERROR] Client dist not found at: ${clientDistPath}. Run 'npm run build' in client folder.`);
+  console.error('[ERROR] Could not find client build! Checked:', possiblePaths);
+  app.get('/', (req, res) => {
+    res.send('Frontend build not found. Please run build script.');
+  });
 }
+
 // -----------------------------
 app.post('/api/connect', async (req, res) => {
   const { user, password, connectString } = req.body;
