@@ -91,15 +91,22 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
+            sandbox: false, // Ensure sandbox is off to allow requires
             preload: path.join(__dirname, 'preload.js')
         },
         icon: path.join(__dirname, 'icon.png')
     });
 
+    console.log("DEBUG: Preload Path:", path.join(__dirname, 'preload.js'));
+
     // Load the local server
     // Note: index.js starts listening on port 3001
     const startUrl = process.env.ELECTRON_START_URL || `http://localhost:${serverPort}`;
+    console.log("DEBUG: Loading URL:", startUrl);
     mainWindow.loadURL(startUrl);
+
+    // Open DevTools automatically for debugging
+    mainWindow.webContents.openDevTools();
 
     // Clear cache to ensure latest version is loaded
     mainWindow.webContents.session.clearCache().then(() => {
@@ -141,6 +148,28 @@ ipcMain.handle('select-file', async () => {
         filters: [{ name: 'CSV Files', extensions: ['csv', 'txt'] }]
     });
     return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle('save-backup-json', async (event, { content }) => {
+    try {
+        const appData = app.getPath('userData');
+        const backupDir = path.join(appData, 'Backups');
+
+        if (!fs.existsSync(backupDir)) {
+            await fs.promises.mkdir(backupDir, { recursive: true });
+        }
+
+        // User Request: "atualizar o arquivo" -> Overwrite single file for sync
+        // We keep a single current backup file.
+        const fileName = `hap_backup_current.json`;
+        const filePath = path.join(backupDir, fileName);
+
+        await fs.promises.writeFile(filePath, content, 'utf-8');
+        return filePath;
+    } catch (e) {
+        console.error("Backup Error:", e);
+        throw e;
+    }
 });
 
 ipcMain.handle('read-file', async (event, path) => {

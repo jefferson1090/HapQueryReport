@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
+console.log("DEBUG: Preload script is running!", new Date().toISOString());
 
 contextBridge.exposeInMainWorld('electronAPI', {
     resetFocus: () => ipcRenderer.send('reset-focus'),

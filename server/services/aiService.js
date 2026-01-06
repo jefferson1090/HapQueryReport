@@ -480,7 +480,9 @@ class AiService {
            - Strings: Case Sensitive. Use UPPER(col) LIKE UPPER('%val%').
         4. draft_table { tableName: string, columns: array, ... } -> Criar rascunho de tabela.
         5. list_triggers { table_name: string } -> Listar triggers.
-        6. find_record { table_name: string, value: string } -> Localizar registro único.
+        6. find_record { table_name: string, column_name: string, value: string } -> Localizar registro único.
+           - Se o usuário disser "Localize CAMPO valor na Tabela", extraia 'column_name'.
+           - Se não disser a coluna, mande null.
         7. create_routine { name: string, goal: string, steps: array } -> Criar rotina.
         8. execute_routine { name: string } -> Executar rotina.
         9. resolve_column { table_name: string, term: string, value_context: string } -> USAR SEMPRE QUE PRECISAR SCNEAR COLUNAS.
@@ -1165,33 +1167,77 @@ class AiService {
 
             // 3. COLUMN RESOLUTION
             let targetCol = null;
+
             if (columnName) {
+                // User provided a column name (e.g., "localize CAMPO X")
                 targetCol = this.resolveColumn(columnName, columns);
+
                 if (!targetCol) {
+                    // Fuzzy Search for candidates to suggest
+                    const candidates = columns.filter(c =>
+                        c.COLUMN_NAME.includes(columnName) ||
+                        columnName.includes(c.COLUMN_NAME)
+                    ).map(c => c.COLUMN_NAME);
+
+                    if (candidates.length > 0) {
+                        return {
+                            text: `Não encontrei a coluna **"${columnName}"** em **${tableName}**. Você quis dizer alguma dessas?`,
+                            action: 'clarification',
+                            data: {
+                                question: `Qual coluna você quer usar?`,
+                                options: candidates.slice(0, 5)
+                            }
+                        };
+                    }
+
                     return {
-                        text: `Coluna **${columnName}** não encontrada em **${tableName}**.`,
-                        action: 'chat'
+                        text: `Não encontrei a coluna **"${columnName}"** na tabela **${tableName}**. Por favor, verifique o nome.`,
+                        action: 'chat' // Should we list all columns? Maybe too big.
                     };
                 }
             } else {
-                // Heuristic Auto-Resolution
-                const isFirstNum = !isNaN(parseFloat(values[0])) && isFinite(values[0]);
+                // User did NOT provide a column (heuristic needed, OR ask user)
+                // New Rule: Identify if we need to ask.
 
+                // 1. Check for obvious semantic columns (CPF, ID, CODIGO)
                 const semanticCols = columns.filter(c =>
                     ['CPF', 'NR_CPF', 'CNPJ', 'NR_CNPJ', 'ID', 'CODIGO', 'COD'].includes(c.COLUMN_NAME) ||
                     (c.COLUMN_NAME.includes('CPF') && !c.COLUMN_NAME.includes('DATA')) ||
                     c.COLUMN_NAME.endsWith('_ID')
                 );
 
-                if (semanticCols.length > 0) {
-                    const cpfCol = semanticCols.find(c => c.COLUMN_NAME.includes('CPF'));
-                    if (cpfCol && values[0].length > 5) targetCol = cpfCol;
-                    else targetCol = semanticCols[0];
-                }
+                // 2. Identify text-searchable columns for fallback
+                const stringCols = columns.filter(c => c.DATA_TYPE.includes('CHAR') || c.DATA_TYPE.includes('CLOB'));
 
-                if (!targetCol) {
-                    // Default to first string column or first column
-                    targetCol = columns.find(c => c.DATA_TYPE.includes('CHAR')) || columns[0];
+                if (semanticCols.length === 1 && values[0].match(/^\d+$/)) {
+                    // Single number/ID candidate -> Safe to assume
+                    targetCol = semanticCols[0];
+                } else if (stringCols.length === 1) {
+                    // Single text column -> Safe to assume
+                    targetCol = stringCols[0];
+                } else {
+                    // AMBIGUITY: Multiple possibilities. ASK THE USER.
+                    const options = [
+                        ...semanticCols.map(c => c.COLUMN_NAME),
+                        ...stringCols.slice(0, 5).map(c => c.COLUMN_NAME)
+                    ];
+
+                    // Deduplicate
+                    const uniqueOptions = [...new Set(options)].slice(0, 6);
+
+                    if (uniqueOptions.length > 0) {
+                        return {
+                            text: `Em qual coluna da tabela **${tableName}** devo buscar o valor **"${values[0]}"**?`,
+                            action: 'clarification',
+                            data: {
+                                question: `Escolha a coluna para busca:`,
+                                options: uniqueOptions
+                            }
+                        };
+                    }
+
+                    // Fallback if no obvious columns (rare)
+                    targetCol = columns[0];
                 }
             }
 

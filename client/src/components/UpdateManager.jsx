@@ -7,6 +7,7 @@ import logo from '../assets/hap_logo_v2.png';
  * Handles the entire update experience: Prompt -> Download Progress -> Restart
  */
 const UpdateManager = ({ updateInfo, status, progress, onCheck, onRestart, onDismiss }) => {
+    console.log(`DEBUG: UpdateManager Rendered | Status: ${status}`);
 
     // -- RENDER: CHECKING STATE (Toast) --
     if (status === 'checking') {

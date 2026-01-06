@@ -4,6 +4,7 @@ import {
     Filter, ArrowRight, Settings, FileText, Bot,
     MessageSquare, Table as TableIcon, Zap, PlusCircle
 } from 'lucide-react';
+import logo from '../assets/hap_splash_icon.png';
 
 const CommandCenter = ({ onNavigate, userName = 'Usuário', recentActivity = [] }) => {
 
@@ -37,8 +38,10 @@ const CommandCenter = ({ onNavigate, userName = 'Usuário', recentActivity = [] 
                     </div>
 
                     {/* QUICK ACTIONS */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-10 w-full">
-                        {/* Legacy Actions */}
+                    {/* QUICK ACTIONS GRID (3x3 with Logo in Center) */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10 w-full max-w-6xl mx-auto">
+
+                        {/* ROW 1 */}
                         <ActionCard
                             title="Criar Tabela"
                             desc="Importar/Criar tabela"
@@ -60,7 +63,8 @@ const CommandCenter = ({ onNavigate, userName = 'Usuário', recentActivity = [] 
                             color="bg-gradient-to-br from-purple-500 to-purple-600"
                             onClick={() => onNavigate('db_structure')}
                         />
-                        {/* NEW: Ver Dados */}
+
+                        {/* ROW 2 */}
                         <ActionCard
                             title="Ver Dados"
                             desc="Explorar registros"
@@ -68,7 +72,12 @@ const CommandCenter = ({ onNavigate, userName = 'Usuário', recentActivity = [] 
                             color="bg-gradient-to-br from-cyan-500 to-cyan-600"
                             onClick={() => onNavigate('db_data')}
                         />
-                        {/* NEW: Buscar Registro */}
+
+                        {/* CENTER LOGO */}
+                        <div className="flex flex-col items-center justify-center group hover:scale-110 transition-transform duration-500">
+                            <img src={logo} alt="Logo" className="h-52 w-auto object-contain drop-shadow-2xl animate-pulse-slow" />
+                        </div>
+
                         <ActionCard
                             title="Buscar Registro"
                             desc="Encontrar dados"
@@ -77,7 +86,7 @@ const CommandCenter = ({ onNavigate, userName = 'Usuário', recentActivity = [] 
                             onClick={() => onNavigate('db_find')}
                         />
 
-                        {/* Existing High Value Actions */}
+                        {/* ROW 3 */}
                         <ActionCard
                             title="Nova Extração"
                             desc="Extrair dados via SQL"

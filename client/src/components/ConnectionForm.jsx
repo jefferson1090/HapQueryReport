@@ -146,7 +146,7 @@ function ConnectionForm({ onConnect }) {
 
         if (conn.isDefault) {
             setIsEditing(false); // Defaults cannot be edited
-            setEditingId(null);
+            setEditingId(conn.id);
             setIsViewOnly(true);
             setStatus({ type: 'info', message: 'Conexão padrão selecionada (Somente leitura).' });
         } else {
@@ -198,7 +198,7 @@ function ConnectionForm({ onConnect }) {
             });
             const data = await response.json();
             if (data.success) {
-                onConnect(formData);
+                onConnect({ ...formData, id: editingId });
             } else {
                 setStatus({ type: 'error', message: data.message });
             }

@@ -33,11 +33,15 @@ const AiChat = ({ isVisible, onClose }) => {
         const handleTrigger = (e) => {
             const { text, autoSend } = e.detail;
             if (text) {
-                setInput(text);
-                if (textareaRef.current) {
-                    textareaRef.current.focus();
-                    // Optional: set cursor at end
-                    textareaRef.current.setSelectionRange(text.length, text.length);
+                if (autoSend) {
+                    // Direct send
+                    handleSend(text);
+                } else {
+                    setInput(text);
+                    if (textareaRef.current) {
+                        textareaRef.current.focus();
+                        textareaRef.current.setSelectionRange(text.length, text.length);
+                    }
                 }
             }
         };
@@ -45,9 +49,10 @@ const AiChat = ({ isVisible, onClose }) => {
         return () => window.removeEventListener('hap-trigger-chat-input', handleTrigger);
     }, []);
 
-    const handleSend = async () => {
-        if (!input.trim() || isLoading) return;
-        const text = input;
+    const handleSend = async (textOverride = null) => {
+        const text = typeof textOverride === 'string' ? textOverride : input;
+
+        if (!text.trim() || isLoading) return;
         setInput('');
 
         // Reset textarea height
@@ -101,6 +106,26 @@ const AiChat = ({ isVisible, onClose }) => {
 
                     // Add a brief message instead of the full table
                     aiContent += "\n\nOpções encontradas exibidas na tela ao lado. 👀";
+                }
+            } else if (data.action === 'table_selection' && Array.isArray(data.data)) {
+                const tables = data.data;
+                if (tables.length > 0) {
+                    // Trigger visual display for table selection
+                    const mappedTables = tables.map(t => ({
+                        name: t.includes('.') ? t.split('.')[1] : t,
+                        table_name: t.includes('.') ? t.split('.')[1] : t,
+                        full_name: t,
+                        owner: t.includes('.') ? t.split('.')[0] : 'SUGESTÃO',
+                        comments: 'Você quis dizer esta tabela?'
+                    }));
+
+                    setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('hap-show-search-results', {
+                            detail: { tables: mappedTables }
+                        }));
+                    }, 100);
+
+                    aiContent += "\n\nEncontrei algumas opções parecidas. Selecione uma ao lado. 👉";
                 }
             } else if (data.action === 'describe_table' && data.data) {
 

@@ -7,6 +7,7 @@ import AiBuilder from './components/AiBuilder';
 const SqlRunner = React.lazy(() => import('./components/SqlRunner'));
 import CsvImporter from './components/CsvImporter';
 import DocsModule from './components/DocsModule';
+import SettingsModal from './components/SettingsModal';
 import Reminders from './components/Reminders';
 import TeamChat from './components/TeamChat';
 import Login from './components/Login';
@@ -27,6 +28,7 @@ import DataProcessor from './components/DataProcessor';
 import { FixedSizeList as List } from 'react-window';
 import { useApi } from './context/ApiContext';
 import { decryptPassword } from './utils/security';
+import Navigation from './components/Navigation'; // New Component
 
 import pkg from '../package.json';
 
@@ -112,6 +114,9 @@ function App() {
         setCurrentThemeName(name);
         localStorage.setItem('app_theme', name);
     };
+
+    // Navigation Position State
+    const [navPosition, setNavPosition] = useState('left'); // 'top', 'left', 'bottom'
 
     // --- Lifted SQL Runner State ---
     const [sqlTabs, setSqlTabs] = useState(() => {
@@ -399,14 +404,18 @@ function App() {
 
             // Trigger native check
             try {
+                console.log("DEBUG: Invoking manual-check-update...");
                 const result = await window.electronAPI.invoke('manual-check-update');
                 // If update check returns explicitly (e.g. skipped or immediate result), handling it here creates race conditions with events.
                 // But if it's null/undefined (Dev mode skipped), we should reset.
                 if (!result) {
-                    console.log("Update check returned no result (likely Dev mode).");
+                    console.log("DEBUG: Update check returned no result (likely Dev mode). Setting up-to-date in 2s...");
                     // Delay slightly to allow events to fire if they exist
                     setTimeout(() => {
-                        setUpdateStatus(prev => prev === 'checking' ? 'up-to-date' : prev); // Assume up-to-date if no result
+                        console.log("DEBUG: Timeout fired. Setting status to up-to-date.");
+                        setUpdateStatus('up-to-date');
+                        // Auto-clear after 4s
+                        setTimeout(() => setUpdateStatus('idle'), 4000);
                     }, 2000);
                 }
             } catch (error) {
@@ -554,27 +563,121 @@ function App() {
         setConnection(null); // Also disconnect Oracle
     };
 
-    // --- Data Persistence: Manual Backup & Restore ---
-    const handleBackupData = () => {
+    // --- Data Persistence: Advanced Backup System ---
+    const [lastBackup, setLastBackup] = useState(() => {
+        const saved = localStorage.getItem('hap_last_backup');
+        return saved ? JSON.parse(saved) : null;
+    });
+
+    const [autoBackupEnabled, setAutoBackupEnabled] = useState(() => {
+        return localStorage.getItem('hap_auto_backup') !== 'false'; // Default true
+    });
+
+    const [isBackingUp, setIsBackingUp] = useState(false);
+
+    useEffect(() => {
+        localStorage.setItem('hap_auto_backup', autoBackupEnabled);
+    }, [autoBackupEnabled]);
+
+
+
+    const backupDataRef = useRef({ savedSqlQueries, sqlTabs, reminders, currentThemeName, chatUser });
+    useEffect(() => {
+        backupDataRef.current = { savedSqlQueries, sqlTabs, reminders, currentThemeName, chatUser };
+    }, [savedSqlQueries, sqlTabs, reminders, currentThemeName, chatUser]);
+
+
+
+    // Correct Implementation of AutoBackup Effect:
+    useEffect(() => {
+        if (!autoBackupEnabled) return;
+
+        const timer = setInterval(() => {
+            // We need to trigger the backup. To access fresh state, connect to a ref-based saver or use functional state updates if possible (not for reading).
+            // Calls a stable wrapper that uses refs.
+            triggerAutoBackup();
+        }, 15 * 60 * 1000);
+
+        return () => clearInterval(timer);
+    }, [autoBackupEnabled]);
+
+    const triggerAutoBackup = () => {
+        // We can't easily access state here without re-creating the function.
+        // So we will use the `backupDataRef` strategy.
+        performBackupInternal(true);
+    };
+
+    // Internal Backup Function (Safe for Interval)
+    const performBackupInternal = async (silent) => {
         const data = {
             version: VERSION,
             exportDate: new Date().toISOString(),
-            savedQueries: savedSqlQueries,
-            sqlTabs: sqlTabs.map(t => ({ ...t, results: null })), // Clean results
-            reminders: reminders,
-            theme: currentThemeName,
-            chatUser: chatUser
+            savedQueries: backupDataRef.current.savedSqlQueries,
+            sqlTabs: backupDataRef.current.sqlTabs.map(t => ({ ...t, results: null })),
+            reminders: backupDataRef.current.reminders,
+            theme: backupDataRef.current.currentThemeName,
+            chatUser: backupDataRef.current.chatUser
         };
 
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `hap_backup_${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        setIsBackingUp(true);
+        try {
+            if (window.electronAPI) {
+                const filePath = await window.electronAPI.invoke('save-backup-json', { content: JSON.stringify(data, null, 2) });
+                if (filePath) {
+                    const backupInfo = {
+                        date: new Date().toISOString(),
+                        path: filePath,
+                        summary: {
+                            queries: data.savedQueries.length,
+                            tabs: data.sqlTabs.length,
+                            reminders: data.reminders.length
+                        }
+                    };
+                    setLastBackup(backupInfo);
+                    localStorage.setItem('hap_last_backup', JSON.stringify(backupInfo));
+                    if (!silent) setToast({ message: `Backup sincronizado!`, type: 'success' });
+                }
+            } else {
+                if (!silent) setToast({ message: 'Erro: Funcionalidade disponível apenas no App Desktop.', type: 'error' });
+                console.warn("Backup skipped: Electron API not found.");
+            }
+        } catch (e) { console.error(e); }
+        finally { setIsBackingUp(false); }
+    };
+
+    // Manual handler just calls internal
+    const handleForceBackup = () => performBackupInternal(false);
+
+    // --- Settings Logic ---
+
+    // --- Settings Logic ---
+    const [showSettings, setShowSettings] = useState(false);
+    const [userSettings, setUserSettings] = useState(() => {
+        const saved = localStorage.getItem('hap_user_settings');
+        return saved ? JSON.parse(saved) : { fontFamily: 'font-sans', fontSize: 'text-base' };
+    });
+
+    // Update settings in Theme Context (by merging into theme object or providing separate context)
+    // For now, we will apply font styles directly to the main div via style prop or specific class injection
+    // But better yet, let's update the theme object prop passed to provider if possible, or just use inline styles for the main container
+
+    useEffect(() => {
+        localStorage.setItem('hap_user_settings', JSON.stringify(userSettings));
+    }, [userSettings]);
+
+    const handleSaveSettings = (newSettings) => {
+        // Update User Profile (Mock persistence + Local State)
+        setChatUser(prev => ({ ...prev, username: newSettings.username, avatar: newSettings.avatar }));
+        const updatedUser = { ...chatUser, username: newSettings.username, avatar: newSettings.avatar };
+        localStorage.setItem('chat_user', JSON.stringify(updatedUser));
+
+        // Update Appearance
+        setUserSettings({
+            fontFamily: newSettings.fontFamily,
+            fontSize: newSettings.fontSize
+        });
+
+        setShowSettings(false);
     };
 
     const handleRestoreData = (event) => {
@@ -604,35 +707,8 @@ function App() {
     };
 
     // V2: Refined Navigation Tab (Clean & Elegant with Tech Colors)
-    const NavTab = ({ id, icon: Icon, label, colorClass = "text-blue-600", bgClass = "bg-blue-50" }) => {
-        const isActive = activeTab === id;
-        return (
-            <button
-                onClick={() => {
-                    window.electronAPI?.resetFocus();
-                    window.focus();
-                    if (document.activeElement) document.activeElement.blur();
-                    setActiveTab(id);
-                }}
-                className={`
-                    relative group px-4 py-2 text-sm font-medium rounded-xl transition-all duration-300 ease-out flex items-center gap-2.5 overflow-hidden
-                    ${isActive
-                        ? `${colorClass} ${bgClass} shadow-sm border border-transparent`
-                        : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100 border border-transparent'
-                    }
-                `}
-            >
-                {/* Active Indicator Line (Left) */}
-                <span className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 ${colorClass.replace('text-', 'bg-')} rounded-r-full transition-all duration-300 ${isActive ? 'opacity-100' : 'opacity-0 -translate-x-full'}`}></span>
-
-                <Icon size={18} className={`transition-transform duration-300 ${isActive ? 'scale-110' : 'group-hover:scale-110 group-hover:-rotate-3'}`} />
-                <span className="tracking-wide">{label}</span>
-
-                {/* Tech Glow Effect (Active) */}
-                {isActive && <span className={`absolute inset-0 rounded-xl ${colorClass.replace('text-', 'bg-')} opacity-5 pointer-events-none`}></span>}
-            </button>
-        );
-    };
+    // V3: Enterprise Navigation Tab (Clean, Minimal, Professional)
+    // NavTab logic moved to Navigation.jsx
 
     // DEBUG: Expose Demo Function
     useEffect(() => {
@@ -662,370 +738,192 @@ function App() {
     // 2. Main Application Layout
     return (
         <ThemeContext.Provider value={{ theme, currentThemeName, changeTheme }}>
-            <div className={`flex flex-col h-screen ${theme.bg} ${theme.text} font-sans overflow-hidden transition-colors duration-300`}>
+            <div className={`
+                flex h-screen ${theme.bg} ${theme.text} overflow-hidden transition-colors duration-300
+                ${userSettings.fontFamily} ${userSettings.fontSize}
+                ${navPosition === 'left' ? 'flex-row' : (navPosition === 'top' ? 'flex-col' : 'flex-col-reverse')}
+            `}>
 
-                {/* V2 Update Manager (Replaces Banner) */}
+                {/* --- NAVIGATION COMPONENT --- */}
+                <Navigation
+                    activeTab={activeTab}
+                    onTabChange={setActiveTab}
+                    position={navPosition}
+                    onPositionChange={setNavPosition}
+                    onBackup={handleForceBackup} // Legacy prop name, mapped to Force Logic
+                    lastBackup={lastBackup}
+                    onForceBackup={handleForceBackup}
+                    isBackingUp={isBackingUp}
+                    autoBackupEnabled={autoBackupEnabled}
+                    toggleAutoBackup={() => setAutoBackupEnabled(!autoBackupEnabled)}
+                    onRestore={() => { /* Restore Logic? */ }} connection={connection}
+                    connectionBadgeExpanded={connectionBadgeExpanded}
+                    setConnectionBadgeExpanded={setConnectionBadgeExpanded}
+                    showConnectionSwitcher={showConnectionSwitcher}
+                    setShowConnectionSwitcher={setShowConnectionSwitcher}
+                    dropdownRef={dropdownRef}
+                    handleQuickSwitch={handleQuickSwitch}
+                    savedConnections={savedConnections}
+                    handleDisconnect={handleDisconnect}
+                    user={chatUser}
+                    onLogout={handleLogout}
+                    onOpenSettings={() => setShowSettings(true)}
+                    updateStatus={updateStatus}
+                    updateInfo={updateInfo}
+                    currentVersion={VERSION}
+                    onCheckUpdates={() => checkForUpdates(true)}
+                />
+
+                <SettingsModal
+                    isOpen={showSettings}
+                    onClose={() => setShowSettings(false)}
+                    user={chatUser}
+                    onSave={handleSaveSettings}
+                    initialSettings={userSettings}
+                />
+
+                {/* MAIN CONTENT AREA */}
+                <div className="flex-1 flex flex-col relative overflow-hidden">
+
+
+
+
+
+                    {/* Right Side: Version & User */}
+
+
+                    {/* Main Content Area */}
+                    <main className="flex-1 overflow-hidden relative">
+                        <div className="absolute inset-0 overflow-auto p-0">
+                            <div className="h-full flex flex-col relative w-full">
+
+                                {/* Team Chat (Always Visible if Active) */}
+                                <div key="view-team-chat" className={`${activeTab === 'team-chat' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                                    <ErrorBoundary>
+                                        <TeamChat
+                                            isVisible={activeTab === 'team-chat'}
+                                            user={chatUser}
+                                            socket={socket}
+                                            savedQueries={savedSqlQueries}
+                                            setSavedQueries={setSavedSqlQueries}
+                                            reminders={reminders}
+                                            setReminders={saveReminders}
+                                        />
+                                    </ErrorBoundary>
+                                </div>
+
+                                {/* SQL Runner (Gated by Oracle Connection) */}
+                                <div key="view-sql-runner" className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                                    <ErrorBoundary>
+                                        {!connection ? (
+                                            <ConnectionForm onConnect={handleConnect} />
+                                        ) : (
+                                            <React.Suspense fallback={<div className="p-4 flex items-center justify-center">Carregando Editor SQL...</div>}>
+                                                <SqlRunner
+                                                    isVisible={activeTab === 'sql-runner'}
+                                                    tabs={sqlTabs}
+                                                    setTabs={setSqlTabs}
+                                                    activeTabId={activeSqlTabId}
+                                                    setActiveTabId={setActiveSqlTabId}
+                                                    onDisconnect={handleDisconnect}
+                                                    connection={connection}
+                                                    savedQueries={savedSqlQueries}
+                                                    setSavedQueries={setSavedSqlQueries}
+                                                />
+                                            </React.Suspense>
+                                        )}
+                                    </ErrorBoundary>
+                                </div>
+                                {/* AI Builder (Gated by Oracle Connection) */}
+                                <div key="view-query-builder" className={`${activeTab === 'query-builder' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                                    <ErrorBoundary>
+                                        {!connection ? (
+                                            <ConnectionForm onConnect={handleConnect} />
+                                        ) : (
+                                            <AiBuilder
+                                                isVisible={activeTab === 'query-builder'}
+                                                connection={connection}
+                                                savedQueries={savedSqlQueries}
+                                            />
+                                        )}
+                                    </ErrorBoundary>
+                                </div>
+
+                                {/* CSV Importer (Gated by Oracle Connection) */}
+                                <div key="view-csv-importer" className={`${activeTab === 'csv-importer' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                                    <ErrorBoundary>
+                                        {!connection ? (
+                                            <ConnectionForm onConnect={handleConnect} />
+                                        ) : (
+                                            <CsvImporter
+                                                isVisible={activeTab === 'csv-importer'}
+                                                connectionName={connection?.connectionName || connection?.user}
+                                            />
+                                        )}
+                                    </ErrorBoundary>
+                                </div>
+
+                                {/* Reminders (Not Gated) */}
+                                <div key="view-reminders" className={`${activeTab === 'reminders' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                                    <ErrorBoundary>
+                                        <Reminders
+                                            isVisible={activeTab === 'reminders'}
+                                            reminders={reminders}
+                                            setReminders={saveReminders}
+                                            socket={socket}
+                                            user={chatUser}
+                                        />
+                                    </ErrorBoundary>
+                                </div>
+
+                                {/* Docs (Not Gated) */}
+                                <div key="view-docs" className={`${activeTab === 'docs' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                                    <ErrorBoundary>
+                                        <DocsModule
+                                            pendingDoc={pendingDoc}
+                                            onDocHandled={() => setPendingDoc(null)}
+                                            user={chatUser}
+                                        />
+                                    </ErrorBoundary>
+                                </div>
+
+                                {/* Data Processor Module */}
+                                <div key="view-data-processor" className={`${activeTab === 'data-processor' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                                    <ErrorBoundary>
+                                        <DataProcessor
+                                            isVisible={activeTab === 'data-processor'}
+                                            connection={connection}
+                                        />
+                                    </ErrorBoundary>
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div >
+
+                {/* GLOBAL OVERLAYS */}
                 <UpdateManager
                     updateInfo={updateInfo}
-                    updateStatus={updateStatus} // 'idle' | 'available' | 'ready'
-                    onUpdateConfirm={() => {
-                        // In autoDownload=true mode, confirming just means "Show me the progress"
-                        // But if we switched to manual, we'd fire window.electronAPI.invoke('download-update') here.
-                        console.log("User confirmed update view");
+                    status={updateStatus}
+                    onUpdateConfirm={() => console.log("User confirmed update view")}
+                    onDismiss={() => {
+                        setUpdateStatus('idle');
+                        setUpdateInfo(null);
                     }}
-                    onCancel={() => setUpdateInfo(null)}
                     onRestart={() => window.electronAPI?.restartApp()}
                 />
 
-                {/* Header */}
-
-                {/* Top Navigation Bar - Minimal Hub Style */}
-                <header className={`relative h-14 shadow-sm flex items-center justify-between px-4 z-20 border-b ${theme.navbar} ${theme.navbarText} ${theme.border} print:hidden transition-all duration-300`}>
-
-                    <div className="flex items-center gap-4">
-                        {/* Home / Back Button */}
-                        {activeTab !== 'query-builder' ? (
-                            <button
-                                onClick={() => setActiveTab('query-builder')}
-                                className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors font-bold text-sm"
-                            >
-                                <ArrowLeft size={18} />
-                                <span>Voltar ao Início</span>
-                            </button>
-                        ) : (
-                            <div className="flex items-center gap-2 text-blue-700 font-bold text-lg">
-                                {/* Logo Removed by User Request */}
-                            </div>
-                        )}
-
-                        {/* Breadcrumbs / Title */}
-                        {activeTab !== 'query-builder' && (
-                            <div className="h-6 w-[1px] bg-gray-300 mx-2"></div>
-                        )}
-                        {activeTab === 'team-chat' && <span className="font-semibold text-gray-600">Team Chat</span>}
-                        {activeTab === 'sql-runner' && <span className="font-semibold text-gray-600">Editor SQL</span>}
-                        {activeTab === 'csv-importer' && <span className="font-semibold text-gray-600">Importar CSV</span>}
-                        {activeTab === 'reminders' && <span className="font-semibold text-gray-600">Lembretes</span>}
-                        {activeTab === 'docs' && <span className="font-semibold text-gray-600">Documentação</span>}
-                        {activeTab === 'data-processor' && <span className="font-semibold text-gray-600">Tratar Dados</span>}
-                    </div>
-
-                    {/* RESTORED: Legacy Navigation Tabs from Screenshot */}
-                    <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-                        <NavTab id="team-chat" icon={MessageSquare} label="Chat" />
-                        <NavTab id="sql-runner" icon={Database} label="Editor SQL" />
-                        <NavTab id="query-builder" icon={Sparkles} label="Construtor AI" />
-                        <NavTab id="csv-importer" icon={FileInput} label="Importar CSV" />
-                        <NavTab id="reminders" icon={Calendar} label="Lembretes" />
-                        <NavTab id="docs" icon={FolderOpen} label="Docs" />
-                        <NavTab id="data-processor" icon={FileSpreadsheet} label="Tratar Dados" />
-                    </div>
-
-                    {/* Right Side: Version & User */}\
-                    <div className="flex items-center gap-2 flex-shrink-0 justify-end">
-
-                        {/* Backup Actions - Always visible but compact */}
-                        <div className="flex items-center gap-1">
-                            <button
-                                onClick={handleBackupData}
-                                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
-                                title="Fazer Backup"
-                            >
-                                <Cloud size={18} />
-                            </button>
-                            <label className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-all cursor-pointer" title="Restaurar Backup">
-                                <RefreshCw size={18} />
-                                <input type="file" onChange={handleRestoreData} accept=".json" className="hidden" />
-                            </label>
+                {/* Toast Notification */}
+                {
+                    toast && (
+                        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg shadow-xl text-white text-sm font-bold flex items-center gap-2 animate-in slide-in-from-bottom-5 fade-in z-[100] ${toast.type === 'error' ? 'bg-red-500' : 'bg-green-600'}`}>
+                            <span>{toast.type === 'error' ? '⚠️' : '✅'}</span>
+                            <span>{toast.message}</span>
                         </div>
-
-
-
-                        {/* Global Connection Badge - Responsive & Interactive */}
-                        {connection && (
-                            <div className="relative z-50">
-                                <div
-                                    onClick={() => setConnectionBadgeExpanded(!connectionBadgeExpanded)}
-                                    className={`
-                                        flex items-center gap-2 px-2 py-1.5 rounded-full text-xs font-bold border shadow-sm transition-all duration-300 cursor-pointer select-none
-                                        ${connectionBadgeExpanded
-                                            ? 'bg-indigo-600 text-white border-indigo-500 pr-4'
-                                            : 'bg-white text-indigo-600 border-indigo-100 hover:bg-indigo-50'
-                                        }
-                                    `}
-                                    title={`Conexão: ${connection.connectionName || 'N/A'}\nUsuário: ${connection.user}\nHost: ${connection.connectString}`}
-                                >
-                                    <div className={`p-0.5 rounded-full transition-colors ${connectionBadgeExpanded ? 'bg-indigo-500 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
-                                        <Database size={14} className={`shrink-0`} />
-                                    </div>
-
-                                    <div className={`
-                                        overflow-hidden whitespace-nowrap transition-all duration-500 ease-in-out flex flex-col items-start
-                                        ${connectionBadgeExpanded ? 'max-w-[200px] opacity-100 ml-1' : 'max-w-0 opacity-0'}
-                                    `}>
-                                        <span className="truncate leading-tight block">
-                                            {connection.connectionName || connection.user}
-                                        </span>
-                                        {connectionBadgeExpanded && <span className="text-[9px] font-normal opacity-80 block truncate w-full">{connection.user} @ {connection.connectString}</span>}
-                                    </div>
-
-                                    {/* Status Dot */}
-                                    <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${connectionBadgeExpanded ? 'bg-green-300' : 'bg-green-500'}`}></span>
-                                </div>
-
-                                {/* Unified Connection Switcher Dropdown */}
-                                {connectionBadgeExpanded && (
-                                    <div ref={dropdownRef} className="absolute top-full mt-2 right-0 bg-white rounded-xl shadow-xl border border-gray-100 p-2 w-[240px] flex flex-col gap-1 z-50 animate-in fade-in slide-in-from-top-2 origin-top-right">
-
-                                        {!showConnectionSwitcher ? (
-                                            // VIEW 1: Actions
-                                            <>
-                                                <div className="px-2 py-1.5 text-xs text-gray-500 font-bold border-b border-gray-100 mb-1">
-                                                    Conexão Atual
-                                                </div>
-
-                                                {/* Switch Trigger */}
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setShowConnectionSwitcher(true);
-                                                    }}
-                                                    className="flex items-center gap-2 w-full px-2 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 rounded-lg text-left transition-colors"
-                                                >
-                                                    <span className="text-gray-400">⇄</span> Trocar Conexão
-                                                </button>
-
-                                                {/* Disconnect */}
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleDisconnect();
-                                                    }}
-                                                    className="flex items-center gap-2 w-full px-2 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-lg text-left transition-colors"
-                                                >
-                                                    <span className="text-red-400">✕</span> Desconectar
-                                                </button>
-                                            </>
-                                        ) : (
-                                            // VIEW 2: Saved Connections List
-                                            <>
-                                                <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-gray-500 font-bold border-b border-gray-100 mb-1">
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setShowConnectionSwitcher(false);
-                                                        }}
-                                                        className="hover:text-blue-600 hover:bg-blue-50 p-1 -ml-1 rounded transition-colors"
-                                                        title="Voltar"
-                                                    >
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-                                                    </button>
-                                                    <span>Conexões Salvas</span>
-                                                </div>
-
-                                                <div className="max-h-[200px] overflow-y-auto custom-scrollbar">
-                                                    {savedConnections.length === 0 && <div className="text-center p-2 text-xs text-gray-400">Nenhuma salva</div>}
-                                                    {savedConnections.map((conn, i) => (
-                                                        <button
-                                                            key={i}
-                                                            onClick={(e) => { e.stopPropagation(); handleQuickSwitch(conn); }}
-                                                            className="w-full text-left px-2 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-lg truncate flex items-center justify-between group"
-                                                        >
-                                                            <span>{typeof conn.connectionName === 'string' ? conn.connectionName : 'Sem nome'}</span>
-                                                            {conn.id === connection.id && <span className="text-green-500">●</span>}
-                                                        </button>
-                                                    ))}
-                                                </div>
-
-                                                <div className="border-t border-gray-100 mt-1 pt-1">
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleDisconnect();
-                                                            setConnectionBadgeExpanded(false);
-                                                        }}
-                                                        className="w-full text-left px-2 py-2 text-xs text-blue-600 font-bold hover:bg-blue-50 rounded-lg"
-                                                    >
-                                                        + Nova Conexão
-                                                    </button>
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        <button
-                            onClick={() => checkForUpdates(true)}
-                            disabled={updateStatus === 'checking'}
-                            className={`
-                                flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold
-                                transition-all duration-300 shadow-sm
-                                ${updateStatus === 'available' || updateStatus === 'ready'
-                                    ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white animate-pulse'
-                                    : 'bg-white/50 text-gray-600 hover:bg-white/80 hover:text-blue-600 border border-gray-200'}
-                            `}
-                        >
-                            <RefreshCw size={14} className={`${updateStatus === 'checking' ? 'animate-spin' : ''}`} />
-                            <span className="hidden lg:inline">
-                                {updateStatus === 'checking' ? 'Buscando...' :
-                                    updateStatus === 'available' ? 'Nova Versão!' :
-                                        updateStatus === 'ready' ? 'Instalar' :
-                                            `v${VERSION}`}
-                            </span>
-                        </button>
-
-                        <div className="h-4 w-[1px] bg-gray-100 mx-1"></div>
-
-                        {/* Theme Select (Compact) */}
-                        <div className="relative group">
-                            <select
-                                value={currentThemeName}
-                                onChange={(e) => changeTheme(e.target.value)}
-                                className={`text-xs py-1 px-2 rounded-lg bg-gray-50 border border-gray-200 outline-none cursor-pointer hover:bg-white hover:border-blue-300 transition-colors text-gray-600 font-medium`}
-                                title="Mudar Tema"
-                            >
-                                {Object.entries(THEMES).map(([key, val]) => (
-                                    <option key={key} value={key}>{val.name}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* Chat User Info (Hidden on smaller screens) */}
-                        <div className="text-right hidden 2xl:block group cursor-default">
-                            <p className="text-sm font-bold leading-tight text-gray-700 group-hover:text-blue-600 transition-colors">{chatUser.username}</p>
-                            <p className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">{chatUser.team || 'Geral'}</p>
-                        </div>
-
-                        {/* Logout Button (V2) */}
-                        <button
-                            onClick={handleLogout}
-                            className="p-2 rounded-xl text-gray-400 hover:bg-red-50 hover:text-red-500 transition-all duration-300"
-                            title="Sair / Logout"
-                        >
-                            <LogOut size={16} />
-                        </button>
-                    </div>
-                </header>
-
-                {/* Main Content Area */}
-                <main className="flex-1 overflow-hidden relative">
-                    <div className="absolute inset-0 overflow-auto p-0">
-                        <div className="h-full flex flex-col relative w-full">
-
-                            {/* Team Chat (Always Visible if Active) */}
-                            <div key="view-team-chat" className={`${activeTab === 'team-chat' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
-                                <ErrorBoundary>
-                                    <TeamChat
-                                        isVisible={activeTab === 'team-chat'}
-                                        user={chatUser}
-                                        socket={socket}
-                                        savedQueries={savedSqlQueries}
-                                        setSavedQueries={setSavedSqlQueries}
-                                        reminders={reminders}
-                                        setReminders={saveReminders}
-                                    />
-                                </ErrorBoundary>
-                            </div>
-
-                            {/* SQL Runner (Gated by Oracle Connection) */}
-                            <div key="view-sql-runner" className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
-                                <ErrorBoundary>
-                                    {!connection ? (
-                                        <ConnectionForm onConnect={handleConnect} />
-                                    ) : (
-                                        <React.Suspense fallback={<div className="p-4 flex items-center justify-center">Carregando Editor SQL...</div>}>
-                                            <SqlRunner
-                                                isVisible={activeTab === 'sql-runner'}
-                                                tabs={sqlTabs}
-                                                setTabs={setSqlTabs}
-                                                activeTabId={activeSqlTabId}
-                                                setActiveTabId={setActiveSqlTabId}
-                                                onDisconnect={handleDisconnect}
-                                                connection={connection}
-                                                savedQueries={savedSqlQueries}
-                                                setSavedQueries={setSavedSqlQueries}
-                                            />
-                                        </React.Suspense>
-                                    )}
-                                </ErrorBoundary>
-                            </div>
-                            {/* AI Builder (Gated by Oracle Connection) */}
-                            <div key="view-query-builder" className={`${activeTab === 'query-builder' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
-                                <ErrorBoundary>
-                                    {!connection ? (
-                                        <ConnectionForm onConnect={handleConnect} />
-                                    ) : (
-                                        <AiBuilder
-                                            isVisible={activeTab === 'query-builder'}
-                                            connection={connection}
-                                            savedQueries={savedSqlQueries}
-                                        />
-                                    )}
-                                </ErrorBoundary>
-                            </div>
-
-                            {/* CSV Importer (Gated by Oracle Connection) */}
-                            <div key="view-csv-importer" className={`${activeTab === 'csv-importer' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
-                                <ErrorBoundary>
-                                    {!connection ? (
-                                        <ConnectionForm onConnect={handleConnect} />
-                                    ) : (
-                                        <CsvImporter
-                                            isVisible={activeTab === 'csv-importer'}
-                                            connectionName={connection?.connectionName || connection?.user}
-                                        />
-                                    )}
-                                </ErrorBoundary>
-                            </div>
-
-                            {/* Reminders (Not Gated) */}
-                            <div key="view-reminders" className={`${activeTab === 'reminders' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
-                                <ErrorBoundary>
-                                    <Reminders
-                                        isVisible={activeTab === 'reminders'}
-                                        reminders={reminders}
-                                        setReminders={saveReminders}
-                                        socket={socket}
-                                        user={chatUser}
-                                    />
-                                </ErrorBoundary>
-                            </div>
-
-                            {/* Docs (Not Gated) */}
-                            <div key="view-docs" className={`${activeTab === 'docs' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
-                                <ErrorBoundary>
-                                    <DocsModule
-                                        pendingDoc={pendingDoc}
-                                        onDocHandled={() => setPendingDoc(null)}
-                                        user={chatUser}
-                                    />
-                                </ErrorBoundary>
-                            </div>
-
-                            {/* Data Processor Module */}
-                            <div key="view-data-processor" className={`${activeTab === 'data-processor' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
-                                <ErrorBoundary>
-                                    <DataProcessor
-                                        isVisible={activeTab === 'data-processor'}
-                                        connection={connection}
-                                    />
-                                </ErrorBoundary>
-                            </div>
-                        </div>
-                    </div>
-                </main>
+                    )
+                }
             </div>
-
-            {/* Toast Notification */}
-            {toast && (
-                <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg shadow-xl text-white text-sm font-bold flex items-center gap-2 animate-in slide-in-from-bottom-5 fade-in z-[100] ${toast.type === 'error' ? 'bg-red-500' : 'bg-green-600'}`}>
-                    <span>{toast.type === 'error' ? '⚠️' : '✅'}</span>
-                    <span>{toast.message}</span>
-                </div>
-            )}
-        </ThemeContext.Provider>
+        </ThemeContext.Provider >
     );
 }
 

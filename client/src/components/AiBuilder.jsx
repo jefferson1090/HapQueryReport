@@ -2,7 +2,7 @@
 // CACHE BUSTER: FORCE REBUILD 123456789
 import ReactMarkdown from 'react-markdown';
 import RemarkGfm from 'remark-gfm';
-import { ThumbsUp, ThumbsDown, Check, X, AlertTriangle, Lightbulb, BarChart3, Search, Table, PlusCircle, Database, Download, Rocket, Cpu } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Check, X, AlertTriangle, Lightbulb, BarChart3, Search, Table, PlusCircle, Database, Download, Rocket, Cpu, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ThemeContext } from '../context/ThemeContext';
 import { useApi } from '../context/ApiContext';
@@ -394,6 +394,7 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
     // Missing Items State
     const [missingItems, setMissingItems] = useState({});
     const [isMissingItemsModalOpen, setIsMissingItemsModalOpen] = useState(false);
+    const [availableTables, setAvailableTables] = useState([]);
 
     // --- AI CHAT EVENT LISTENER ---
     // Connects V3 Chat components to V2 Builder UI
@@ -401,6 +402,8 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
         const handleShowSearchResults = (e) => {
             console.log("Event: hap-show-search-results", e.detail);
             setActiveView('table_results');
+            setMenuState('table_search_results');
+            setAvailableTables(e.detail.tables);
             setViewData(e.detail.tables);
         };
 
@@ -456,6 +459,43 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
     const [correctionModalOpen, setCorrectionModalOpen] = useState(false);
     const [correctionData, setCorrectionData] = useState({ term: '', value: '', type: 'table', context: '' });
     const [likedMessages, setLikedMessages] = useState(new Set());
+
+    // --- SIDEBAR RESIZE LOGIC ---
+    const [sidebarWidth, setSidebarWidth] = useState(400); // Default width
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [isResizing, setIsResizing] = useState(false);
+    const sidebarRef = useRef(null);
+
+    const startResizing = useCallback((mouseDownEvent) => {
+        mouseDownEvent.preventDefault();
+        setIsResizing(true);
+    }, []);
+
+    const stopResizing = useCallback(() => {
+        setIsResizing(false);
+    }, []);
+
+    const resize = useCallback((mouseMoveEvent) => {
+        if (isResizing) {
+            const newWidth = mouseMoveEvent.clientX; // Assuming sidebar is on the left
+            if (newWidth >= 300 && newWidth <= 800) { // Constraints
+                setSidebarWidth(newWidth);
+            }
+        }
+    }, [isResizing]);
+
+    useEffect(() => {
+        window.addEventListener("mousemove", resize);
+        window.addEventListener("mouseup", stopResizing);
+        return () => {
+            window.removeEventListener("mousemove", resize);
+            window.removeEventListener("mouseup", stopResizing);
+        };
+    }, [resize, stopResizing]);
+
+    const toggleSidebar = () => {
+        setIsSidebarOpen(!isSidebarOpen);
+    };
 
     const messagesEndRef = useRef(null);
 
@@ -745,7 +785,20 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
                     setViewData(data.data);
                 } else if (data.action === 'table_selection') {
                     setActiveView('table_selection');
-                    setViewData(data.data);
+                    // Transform string array (from AI) to object array (for UI)
+                    if (Array.isArray(data.data)) {
+                        const tables = data.data.map(t => ({
+                            owner: t.includes('.') ? t.split('.')[0] : 'SUGESTÃO',
+                            table_name: t.includes('.') ? t.split('.')[1] : t,
+                            full_name: t,
+                            comments: 'Sugerida pela IA'
+                        }));
+                        setAvailableTables(tables);
+                        setMenuState('table_search_results');
+                        setViewData(data.data);
+                    } else {
+                        setViewData(data.data);
+                    }
                 } else if (data.action === 'agent_report') {
                     setActiveView('agent_report');
                     setViewData(data.data);
@@ -981,10 +1034,17 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
                                             Estrutura
                                         </button>
                                         <button
-                                            onClick={() => handleShowData(t)}
+                                            onClick={() => {
+                                                const msg = `Selecionar a tabela ${t.owner}.${t.name}. Continue a análise.`;
+                                                window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', {
+                                                    detail: { text: msg, autoSend: true }
+                                                }));
+                                                // Optional: Set menuState to root if we want to close the list immediately
+                                                setMenuState('root');
+                                            }}
                                             className="text-white hover:bg-emerald-600 bg-emerald-500 px-3 py-1 rounded text-xs shadow-sm font-bold"
                                         >
-                                            Exibir Dados
+                                            Selecionar
                                         </button>
                                     </td>
                                 </tr>
@@ -1301,7 +1361,9 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
     // Separated for clarity and state management of animations
 
 
-    const StartScreen = React.forwardRef(({ onAction, menuState, setMenuState, connection, handleHubNavigation, savedQueries }, ref) => {
+    // MEMOIZED COMPONENT TO PREVENT REMOUNTING ON PARENT STATE CHANGES
+    const StartScreen = useMemo(() => React.forwardRef(({ onAction, menuState, setMenuState, connection, handleHubNavigation, savedQueries }, ref) => {
+        const { theme } = useContext(ThemeContext); // Inject Theme Context explicitly
         const { apiUrl } = useApi();
         const searchLockRef = useRef(false);
 
@@ -1474,13 +1536,15 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
 
         React.useImperativeHandle(ref, () => ({
             reset: () => {
-                console.log('[StartScreen] Resetting internal state');
+                console.log('[StartScreen] Resetting internal state TRIGGERED!');
                 setExecutionResult(null);
                 setCargaValue('');
                 setIsManualOperator(false);
                 setOperatorList([]);
                 setSqlMode(false);
+                console.log('[DEBUG] sqlMode set to false via reset()');
                 setParsedSqlData(null);
+                console.log('[DEBUG] parsedSqlData set to null via reset()');
                 // fetchOperatorList(); 
             },
             openDashboard: (card = null) => {
@@ -1701,6 +1765,7 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
                     }
 
                     setIsParsingSql(false);
+                    setSqlMode(true); // Reinforce SQL Mode
                     setMenuState('carga_input'); // Navigate to filters
                     fetchSigoOperators();
                 }, 1000);
@@ -2674,7 +2739,7 @@ From vw_empresa_conveniada_cad e
             // Prefetch operators
             // Dynamically fetch based on mode
             fetchOperators();
-        }, [sqlMode]);
+        }, [sqlMode, parsedSqlData]);
 
         const fetchOperators = async () => {
             try {
@@ -2684,7 +2749,8 @@ From vw_empresa_conveniada_cad e
 
                 let query = "Select cd_operadora, nm_operadora From incorpora.tb_ope_operadora order by cd_operadora desc";
 
-                if (sqlMode) {
+                // Robust check: sqlMode OR existence of parsedSqlData (implies SIGO/SQL context)
+                if (sqlMode || parsedSqlData) {
                     query = "Select cd_empresa_plano, nm_empresa_plano From VW_EMPRESA_PLANO_OPER order by 1";
                 }
 
@@ -3513,7 +3579,7 @@ From vw_empresa_conveniada_cad e
                     )}
                 </AnimatePresence>
 
-                {menuState !== 'carga_result' && (
+                {(menuState !== 'carga_result' && menuState !== 'root') && (
                     <div className="text-center mb-10 mt-10 flex-shrink-0">
                         <h1 className="text-4xl font-extrabold text-gray-900 mb-2 tracking-tight">
                             Extração de Dados
@@ -3869,35 +3935,27 @@ From vw_empresa_conveniada_cad e
 
                                 <div className="w-full max-w-6xl bg-white/90 backdrop-blur-2xl rounded-[2.5rem] shadow-2xl border border-white/50 overflow-hidden ring-1 ring-black/5 flex flex-col h-[85vh] max-h-[900px] min-h-[600px]">
 
-                                    {/* Header Moderno */}
-                                    <div className="px-10 py-8 border-b border-gray-100/50 flex justify-between items-center bg-gradient-to-b from-white to-gray-50/30 flex-shrink-0">
-                                        <div className="flex items-center gap-6">
+                                    {/* Header Moderno (Compacto) */}
+                                    <div className="px-6 py-4 border-b border-gray-100/50 flex justify-between items-center bg-white flex-shrink-0">
+                                        <div className="flex items-center gap-4">
                                             <motion.button
                                                 whileHover={{ x: -2, backgroundColor: '#EFF6FF' }}
                                                 whileTap={{ scale: 0.95 }}
                                                 onClick={() => {
                                                     if (sqlMode) {
                                                         setMenuState('sigo_menu');
-                                                        // Do NOT reset SQL mode here, so user can choose another preset or go back again
                                                     } else {
                                                         setMenuState('extraction_carga');
                                                     }
-
-                                                    if (sqlMode && !parsedSqlData) {
-                                                        // Only reset if we really are bailing out completely? 
-                                                        // Actually, if we go back to sigo_menu, we might want to keep the mode?
-                                                        // Let's keep it simple: Go back to menu.
-                                                    }
                                                 }}
-                                                className="w-10 h-10 rounded-full border border-gray-200 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:border-blue-200 transition-colors bg-white shadow-sm"
+                                                className="w-8 h-8 rounded-full border border-gray-200 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:border-blue-200 transition-colors bg-white shadow-sm"
                                             >
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
                                             </motion.button>
                                             <div>
-                                                <h2 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-gray-900 to-gray-600 tracking-tight flex items-center gap-3">
-                                                    {sqlMode ? 'Extração no SIGO' : 'Filtro de Carga'}
+                                                <h2 className="text-xl font-extrabold text-gray-800 tracking-tight flex items-center gap-2">
+                                                    {(sqlMode || parsedSqlData) ? 'Filtro de Extração' : 'Filtro de Carga'}
                                                 </h2>
-                                                <p className="text-sm text-gray-400 font-medium mt-1">Configure os parâmetros para processar sua carga</p>
                                             </div>
                                         </div>
 
@@ -3912,10 +3970,10 @@ From vw_empresa_conveniada_cad e
                                         </div>
                                     </div>
 
-                                    <div className="flex-1 p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 overflow-hidden">
+                                    <div className="flex-1 p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 overflow-hidden">
 
-                                        {/* LEFT COL: OPERATOR SELECTION */}
-                                        <div className="lg:col-span-4 flex flex-col h-full gap-4 min-h-0 relative">
+                                        {/* LEFT COL: OPERATOR SELECTION (Expanded to 5) */}
+                                        <div className="lg:col-span-5 flex flex-col h-full gap-3 min-h-0 relative">
 
                                             {/* Validation Alert */}
                                             {(() => {
@@ -3977,13 +4035,13 @@ From vw_empresa_conveniada_cad e
                                                             setCargaValue('%');
                                                             setIsManualOperator(false);
                                                         }}
-                                                        className={`w-full group operator-item p-4 rounded-2xl flex items-center gap-4 transition-all border ${cargaValue === '%' ? 'bg-blue-600 border-blue-500 shadow-lg shadow-blue-500/20' : 'bg-white border-transparent hover:border-gray-200'}`}
+                                                        className={`w-full group operator-item p-3 rounded-xl flex items-center gap-3 transition-all border ${cargaValue === '%' ? 'bg-blue-600 border-blue-500 shadow-md' : 'bg-white border-transparent hover:border-gray-200'}`}
                                                     >
-                                                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-xl shadow-sm transition-colors ${cargaValue === '%' ? 'bg-white text-blue-600' : 'bg-gradient-to-br from-gray-100 to-gray-200 text-gray-400 group-hover:from-blue-100 group-hover:to-blue-50 group-hover:text-blue-500'}`}>
+                                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black text-lg shadow-sm transition-colors ${cargaValue === '%' ? 'bg-white text-blue-600' : 'bg-gradient-to-br from-gray-100 to-gray-200 text-gray-400 group-hover:from-blue-100 group-hover:to-blue-50 group-hover:text-blue-500'}`}>
                                                             ∞
                                                         </div>
                                                         <div className="flex-1 text-left">
-                                                            <span className={`block text-sm font-bold ${cargaValue === '%' ? 'text-white' : 'text-gray-700 group-hover:text-gray-900'}`}>TODAS AS OPERADORAS</span>
+                                                            <span className={`block text-xs font-bold ${cargaValue === '%' ? 'text-white' : 'text-gray-700 group-hover:text-gray-900'}`}>TODAS AS OPERADORAS</span>
                                                             <span className={`text-[10px] font-semibold tracking-wide ${cargaValue === '%' ? 'text-blue-200' : 'text-gray-400'}`}>CARGA COMPLETA</span>
                                                         </div>
                                                         {cargaValue === '%' && <motion.div layoutId="active-dot" className="w-2 h-2 rounded-full bg-white" />}
@@ -4013,18 +4071,18 @@ From vw_empresa_conveniada_cad e
                                                                     setCargaValue(newIds.join(', '));
                                                                     setIsManualOperator(false);
                                                                 }}
-                                                                className={`w-full group operator-item p-3 rounded-2xl flex items-center gap-3 transition-all border relative overflow-hidden ${isSelected ? 'bg-indigo-50 border-indigo-200 shadow-md ring-1 ring-indigo-200' : 'bg-white border-transparent hover:bg-gray-50'}`}
+                                                                className={`w-full group operator-item p-2 rounded-xl flex items-center gap-3 transition-all border relative overflow-hidden ${isSelected ? 'bg-indigo-50 border-indigo-200 shadow-sm ring-1 ring-indigo-200' : 'bg-white border-transparent hover:bg-gray-50'}`}
                                                             >
-                                                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-xs font-mono transition-colors ${isSelected ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'}`}>
+                                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-[10px] font-mono transition-colors ${isSelected ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'}`}>
                                                                     {op.id}
                                                                 </div>
                                                                 <div className="flex-1 text-left z-10">
-                                                                    <span className={`block text-sm font-bold truncate transition-colors ${isSelected ? 'text-indigo-900' : 'text-gray-600 group-hover:text-gray-900'}`}>{op.name}</span>
+                                                                    <span className={`block text-xs font-bold truncate transition-colors ${isSelected ? 'text-indigo-900' : 'text-gray-600 group-hover:text-gray-900'}`}>{op.name}</span>
                                                                 </div>
                                                                 {isSelected && (
                                                                     <motion.div
                                                                         layoutId={`active-indicator-${op.id}`} // Unique layoutId
-                                                                        className="absolute inset-y-0 left-0 w-1 bg-indigo-600 rounded-l-2xl"
+                                                                        className="absolute inset-y-0 left-0 w-1 bg-indigo-600 rounded-l-xl"
                                                                     />
                                                                 )}
                                                             </motion.button>
@@ -4052,7 +4110,8 @@ From vw_empresa_conveniada_cad e
                                         </div>
 
                                         {/* RIGHT COL: CONFIG & EXECUTE */}
-                                        <div className="lg:col-span-8 flex flex-col h-full gap-6 min-h-0">
+                                        {/* RIGHT COL: CONFIG & EXECUTE (Reduced to 7) */}
+                                        <div className="lg:col-span-7 flex flex-col h-full gap-4 min-h-0">
 
                                             {/* MANUAL INPUT AREA */}
                                             <AnimatePresence>
@@ -4253,12 +4312,11 @@ From vw_empresa_conveniada_cad e
                                                 <button
                                                     onClick={handleManualExecute}
                                                     disabled={(!cargaValue && activeFilters.length === 0) || executionLoading}
-                                                    className="w-full py-5 rounded-2xl relative overflow-hidden group disabled:opacity-50 disabled:grayscale transition-all hover:scale-[1.01] active:scale-[0.99] shadow-xl hover:shadow-2xl hover:shadow-indigo-500/30"
+                                                    className="w-full py-3 rounded-xl relative overflow-hidden group disabled:opacity-50 disabled:grayscale transition-all hover:scale-[1.01] active:scale-[0.99] shadow-lg hover:shadow-xl hover:shadow-indigo-500/20"
                                                 >
                                                     <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 group-hover:bg-size-200 transition-all duration-500"></div>
-                                                    <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out skew-y-12"></div>
 
-                                                    <div className="relative z-10 flex items-center justify-center gap-3 text-white font-black text-lg tracking-wide uppercase">
+                                                    <div className="relative z-10 flex items-center justify-center gap-2 text-white font-bold text-sm tracking-wide uppercase">
                                                         {executionLoading ? (
                                                             <>
                                                                 <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -4269,7 +4327,7 @@ From vw_empresa_conveniada_cad e
                                                             </>
                                                         ) : (
                                                             <>
-                                                                <span className="text-xl group-hover:scale-125 transition-transform duration-300">⚡</span>
+                                                                <span className="text-lg">⚡</span>
                                                                 <span>Executar Extração</span>
                                                             </>
                                                         )}
@@ -4694,18 +4752,18 @@ From vw_empresa_conveniada_cad e
 
                                                 <button
                                                     onClick={() => {
-                                                        // Open in Carga Input
-                                                        setExportTableName(table.full_name || `${table.owner}.${table.table_name}`);
-                                                        setSelectedCard({ title: table.table_name, tableName: table.full_name }); // Mock card
-                                                        fetchTableColumns(table.full_name || `${table.owner}.${table.table_name}`);
-                                                        setSqlMode(false);
-                                                        setCargaValue('');
-                                                        setExecutionResult(null);
-                                                        setMenuState('carga_input');
+                                                        // Send selection back to AI Sidebar using event
+                                                        const msg = `Selecionar a tabela ${table.full_name || table.table_name}. Continue a análise.`;
+                                                        window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', {
+                                                            detail: { text: msg, autoSend: true }
+                                                        }));
+                                                        // Switch back to root or clear selection view to show progress in chat?
+                                                        // Let's go to root for now so the user sees the chat sidebar context
+                                                        setMenuState('root');
                                                     }}
-                                                    className="w-full py-2 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white rounded-lg font-bold text-xs transition-colors flex items-center justify-center gap-2"
+                                                    className="w-full py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold text-xs transition-colors flex items-center justify-center gap-2 shadow-sm shadow-green-200"
                                                 >
-                                                    Visualizar Dados →
+                                                    Selecionar Tabela →
                                                 </button>
                                             </motion.div>
                                         ))}
@@ -5255,13 +5313,13 @@ From vw_empresa_conveniada_cad e
 
             </div >
         );
-    });
+    }), []); // End of useMemo [Stable Component Identity]
 
 
 
 
     return (
-        <div className={`h-full ${theme.bg} overflow-hidden font-sans flex flex-row bg-gray-100`}>
+        <div className={`h-full ${theme.bg} overflow-hidden font-sans flex flex-row bg-gray-100 relative`}>
 
             {/* --- SKILLS MODAL --- */}
             {showSkillsModal && (
@@ -5464,9 +5522,33 @@ From vw_empresa_conveniada_cad e
             )}
 
             {/* V3 AI CHAT - LEFT SIDEBAR (Restored Layout) */}
-            <div className="w-[400px] flex-shrink-0 border-r border-gray-200 bg-white z-10 relative shadow-xl">
-                <AiChat isVisible={true} />
+            <div
+                ref={sidebarRef}
+                className={`flex-shrink-0 border-r border-gray-200 bg-white z-10 relative shadow-xl transition-all duration-300 ease-in-out ${isResizing ? 'transition-none' : ''}`}
+                style={{ width: isSidebarOpen ? sidebarWidth : 0, overflow: 'hidden' }}
+            >
+                <div style={{ width: sidebarWidth, overflow: 'hidden', height: '100%' }}>
+                    <AiChat isVisible={true} />
+                </div>
+
+                {/* Resize Handle */}
+                <div
+                    className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-blue-400 opacity-0 hover:opacity-100 transition-opacity z-20 flex items-center justify-center group"
+                    onMouseDown={startResizing}
+                >
+                    {/* Visual Grip Indicator (Optional, maybe just on hover) */}
+                </div>
             </div>
+
+            {/* Toggle Button (Moved outside) */}
+            <button
+                onClick={toggleSidebar}
+                className={`absolute top-1/2 transform -translate-y-1/2 w-6 h-12 bg-white border border-gray-200 border-l-0 rounded-r-lg shadow-md flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-gray-50 z-20 focus:outline-none transition-all duration-300 ease-in-out ${isResizing ? 'transition-none' : ''}`}
+                style={{ left: isSidebarOpen ? sidebarWidth : 0 }}
+                title={isSidebarOpen ? "Recolher Chat" : "Expandir Chat"}
+            >
+                {isSidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            </button>
 
             {/* MAIN CONTENT AREA */}
             <div className="flex-1 bg-gray-50 flex flex-col relative overflow-hidden transition-all duration-300">
