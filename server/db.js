@@ -585,6 +585,55 @@ async function dropTable(tableName, connectionParams = null) {
     }
 }
 
+async function getExplainPlan(sql, params = [], connectionParams = null) {
+    let conn;
+    try {
+        conn = await getConnection(connectionParams);
+
+        // 1. Generate unique statement ID
+        const statementId = `EXP_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+        // 2. Run EXPLAIN PLAN
+        // Note: We need to inject the statement ID into the EXPLAIN PLAN command.
+        // We cannot bind parameters in the 'EXPLAIN PLAN FOR' clause easily for the query itself if it has binds? 
+        // Actually, 'EXPLAIN PLAN FOR <sql>' works. if <sql> has binds, they are just placeholders in the plan.
+
+        // However, if the user SQL has bind variables (e.g. :1, :val), EXPLAIN PLAN might fail if not handled 
+        // or it might just explain the statement with placeholders. 
+        // Usually, 'EXPLAIN PLAN FOR select * from t where id = :1' works fine.
+
+        const explainSql = `EXPLAIN PLAN SET STATEMENT_ID = '${statementId}' FOR ${sql}`;
+        // We don't pass params to EXPLAIN PLAN itself, as it doesn't execute the query.
+        log(`[DB] Explaining Plan: ${statementId}`);
+        await conn.execute(explainSql);
+
+        // 3. Fetch the Plan
+        // DBMS_XPLAN.DISPLAY(table_name, statement_id, format, filter_preds)
+        // Default table_name is 'PLAN_TABLE'.
+        const displaySql = `SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY(NULL, '${statementId}', 'ALL'))`;
+
+        const result = await conn.execute(displaySql);
+
+        // 4. Cleanup (Optional, usually PLAN_TABLE entries are persistent until deleted?)
+        // Good practice to delete our entry
+        try {
+            await conn.execute(`DELETE FROM PLAN_TABLE WHERE STATEMENT_ID = '${statementId}'`);
+        } catch (e) { /* ignore */ }
+
+        return result.rows.map(r => r[0]); // Returns array of strings (lines)
+
+    } catch (err) {
+        // Fallback: If ORA-00942 (table or view does not exist) for PLAN_TABLE, 
+        // maybe try to create it? Or just return error.
+        if (err.message.includes('00942')) {
+            throw new Error("Tabela PLAN_TABLE não encontrada. Por favor, execute o script de criação do PLAN_TABLE no seu banco de dados.");
+        }
+        throw err;
+    } finally {
+        if (conn) await conn.close();
+    }
+}
+
 module.exports = {
     checkConnection,
     getTables,
@@ -599,5 +648,6 @@ module.exports = {
     execute,
     oracledb,
     findObjects,
-    getSchemaDictionary
+    getSchemaDictionary,
+    getExplainPlan
 };

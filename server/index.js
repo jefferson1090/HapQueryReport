@@ -525,11 +525,11 @@ app.get('/api/schema/dictionary', async (req, res) => {
 });
 
 // 4. Execute Query
-const { Parser } = require('json2csv');
-
 app.post('/api/export', async (req, res) => {
   // ... (Export logic is handled client-side now, but keeping this as backup/legacy)
   try {
+    // Lazy load json2csv to prevent startup crashes if dependency issues exist
+    const { Parser } = require('json2csv');
     const { sql, params, format } = req.body;
     const dbParams = getDbParams(req);
     const result = await db.executeQuery(sql, params, 1000, {}, dbParams);
@@ -600,6 +600,55 @@ app.post('/api/ai/chat', async (req, res) => {
   }
 });
 
+// --- AI Chat V3 Routes ---
+
+app.get('/api/chat/ai/sessions', async (req, res) => {
+  try {
+    const sessions = chatService.getAiSessions();
+    res.json(sessions);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/chat/ai/sessions', async (req, res) => {
+  try {
+    const { title } = req.body;
+    const session = chatService.createAiSession(title);
+    res.json(session);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/chat/ai/sessions/:id', async (req, res) => {
+  try {
+    const history = chatService.getAiHistory(req.params.id);
+    res.json(history);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/chat/ai/sessions/:id', async (req, res) => {
+  try {
+    chatService.deleteAiSession(req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/chat/ai/message', async (req, res) => {
+  try {
+    const { sessionId, role, content } = req.body;
+    const msg = chatService.saveAiMessage(sessionId, role, content);
+    res.json(msg);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/query', async (req, res) => {
   const { sql, params, limit, offset, filter } = req.body;
   const dbParams = getDbParams(req);
@@ -641,22 +690,20 @@ app.post('/api/query', async (req, res) => {
   }
 });
 
-// Endpoint SIGO Workflow: Parse SQL File
-app.post('/api/parse-sql', (req, res) => {
+app.post('/api/explain', async (req, res) => {
+  const { sql, params } = req.body;
+  const dbParams = getDbParams(req);
+  console.log('[API] /api/explain called');
   try {
-    const { sqlContent } = req.body;
-    if (!sqlContent) {
-      return res.status(400).json({ error: 'Conteúdo SQL não fornecido.' });
-    }
-
-    const result = parseSigoSql(sqlContent);
-    res.json(result);
-
+    const planLines = await db.getExplainPlan(sql, params, dbParams);
+    res.json({ lines: planLines });
   } catch (err) {
-    console.error('Error parsing SQL:', err);
-    res.status(500).json({ error: err.message, details: 'Falha ao processar o arquivo SQL.' });
+    console.error('[API] /api/explain failed:', err);
+    res.status(500).json({ error: err.message });
   }
 });
+
+
 
 app.post('/api/verify-missing', async (req, res) => {
   const { tableName, columnName, values } = req.body;

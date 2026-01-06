@@ -16,12 +16,15 @@ import hapLogo from './assets/hap_logo_v4.png';
 import { getApiUrl } from './config';
 import UpdateManager from './components/UpdateManager';
 import {
-    MessageSquare, Database, Sparkles, FileInput, Calendar, BookOpen,
-    RefreshCw, ShieldCheck, User as UserIcon, LogOut, Cloud
+    MessageSquare, Database, Sparkles, FileInput, Calendar, FolderOpen, FileSpreadsheet,
+    RefreshCw, ShieldCheck, User as UserIcon, LogOut, Cloud, ArrowLeft
 } from 'lucide-react';
 
 // --- Theme Context & Definitions ---
 import { ThemeContext, THEMES } from './context/ThemeContext';
+import CommandCenter from './components/CommandCenter';
+import DataProcessor from './components/DataProcessor';
+import { FixedSizeList as List } from 'react-window';
 import { useApi } from './context/ApiContext';
 import { decryptPassword } from './utils/security';
 
@@ -94,7 +97,8 @@ function App() {
     }, [apiUrl]);
 
     // Handle initial auth check (Local Storage)
-    const [activeTab, setActiveTab] = useState('team-chat'); // Default to chat after login
+    const [activeTab, setActiveTab] = useState('query-builder'); // Default to AI Hub (Home)
+
     const [pendingDoc, setPendingDoc] = useState(null); // { id, bookId, query }
 
     // Theme State
@@ -421,38 +425,78 @@ function App() {
         // Interval Check (every 30 mins)
         const interval = setInterval(() => checkForUpdates(false), 30 * 60 * 1000);
         return () => clearInterval(interval);
+    }, []);
 
 
-        // Global Event Listener for Deep Linking to Docs
-        const handleDocOpen = (e) => {
-            const { id, bookId, query } = e.detail;
-            setPendingDoc({ id, bookId, query });
-            if (activeTab !== 'docs') {
-                setActiveTab('docs');
+    // Global Event Listener for Deep Linking to Docs
+    const handleDocOpen = (e) => {
+        const { id, bookId, query } = e.detail;
+        setPendingDoc({ id, bookId, query });
+        if (activeTab !== 'docs') {
+            setActiveTab('docs');
+        }
+    };
+
+    // Global Event Listener for Running SQL from Docs
+    const handleRunSql = (e) => {
+        const { query } = e.detail;
+        if (query) {
+            setActiveTab('sql-runner');
+            setSqlTabs(prev => {
+                const newTabs = [...prev];
+                const activeIndex = newTabs.findIndex(t => t.id === activeSqlTabId);
+                if (activeIndex !== -1) {
+                    newTabs[activeIndex] = { ...newTabs[activeIndex], sqlContent: query };
+                }
+                return newTabs;
+            });
+        }
+    };
+
+    // Global Event Listener for Tab Switching (from CommandCenter etc)
+    // Global Event Listener for Tab Switching (from CommandCenter etc)
+    // Global Event Listener for Tab Switching (from CommandCenter etc)
+    const handleSwitchTab = (tabId, text) => {
+        if (activeTab === tabId && !text && tabId !== 'query-builder' && tabId !== 'data-processor') return;
+
+        // Legacy Actions -> Route to AI Builder (Query Builder) + Trigger Chat
+        if (tabId === 'carga_input' || tabId === 'db_search' || tabId === 'db_structure' || tabId === 'db_data' || tabId === 'db_find') {
+            setActiveTab('query-builder');
+            // Trigger Chat with specific legacy prompts (Templates)
+            let prompt = "";
+            switch (tabId) {
+                case 'carga_input': prompt = "Quero criar a tabela [NOME_DA_TABELA] com as colunas [LISTA_DE_COLUNAS]"; break;
+                case 'db_search': prompt = "Localize a tabela [NOME_DA_TABELA]"; break;
+                case 'db_structure': prompt = "Exibir estrutura da tabela [NOME_DA_TABELA]"; break;
+                case 'db_data': prompt = "Ver dados da tabela [NOME_DA_TABELA]"; break;
+                case 'db_find': prompt = "Buscar o registro onde [CONDIÇÃO] na tabela [NOME_DA_TABELA]"; break;
             }
-        };
+            setTimeout(() => window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', { detail: { text: prompt } })), 100);
+            return;
+        }
 
-        // Global Event Listener for Running SQL from Docs
-        const handleRunSql = (e) => {
-            const { query } = e.detail;
-            if (query) {
-                setActiveTab('sql-runner');
-                setSqlTabs(prev => {
-                    const newTabs = [...prev];
-                    const activeIndex = newTabs.findIndex(t => t.id === activeSqlTabId);
-                    if (activeIndex !== -1) {
-                        newTabs[activeIndex] = { ...newTabs[activeIndex], sqlContent: query };
-                    }
-                    return newTabs;
-                });
-            }
+        if (text) {
+            setTimeout(() => window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', { detail: { text } })), 100);
+        }
+
+        if (tabId) setActiveTab(tabId);
+    };
+
+    // Handle External Navigation Events
+    useEffect(() => {
+        const handleSwitch = (e) => {
+            console.log("DEBUG: App received hap-switch-tab event:", e.detail);
+            handleSwitchTab(e.detail.tabId, e.detail.text);
         };
 
         window.addEventListener('hap-doc-open', handleDocOpen);
         window.addEventListener('hap-run-sql', handleRunSql);
+        window.addEventListener('hap-switch-tab', handleSwitch);
+
         return () => {
             window.removeEventListener('hap-doc-open', handleDocOpen);
             window.removeEventListener('hap-run-sql', handleRunSql);
+            window.removeEventListener('hap-switch-tab', handleSwitch);
         };
     }, [activeTab, activeSqlTabId]);
 
@@ -635,27 +679,49 @@ function App() {
 
                 {/* Header */}
 
-                {/* Top Navigation Bar */}
-                <header className={`h-16 shadow-sm flex items-center justify-between px-6 z-20 border-b ${theme.navbar} ${theme.navbarText} ${theme.border} print:hidden transition-all duration-300`}>
+                {/* Top Navigation Bar - Minimal Hub Style */}
+                <header className={`relative h-14 shadow-sm flex items-center justify-between px-4 z-20 border-b ${theme.navbar} ${theme.navbarText} ${theme.border} print:hidden transition-all duration-300`}>
 
-                    {/* Channel Indicator (Beta) */}
-                    {appChannel === 'beta' && (
-                        <div className="absolute top-0 left-1/2 transform -translate-x-1/2 bg-yellow-400 text-yellow-900 text-[10px] font-bold px-3 py-0.5 rounded-b-lg shadow-sm z-50">
-                            MODE: BETA (ADMIN)
-                        </div>
-                    )}
+                    <div className="flex items-center gap-4">
+                        {/* Home / Back Button */}
+                        {activeTab !== 'query-builder' ? (
+                            <button
+                                onClick={() => setActiveTab('query-builder')}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors font-bold text-sm"
+                            >
+                                <ArrowLeft size={18} />
+                                <span>Voltar ao Início</span>
+                            </button>
+                        ) : (
+                            <div className="flex items-center gap-2 text-blue-700 font-bold text-lg">
+                                {/* Logo Removed by User Request */}
+                            </div>
+                        )}
 
-                    {/* Tabs - Responsive Scrollable Container */}
-                    <div className="flex-1 flex justify-start space-x-1 overflow-x-auto no-scrollbar mask-gradient-right min-w-0 mr-2">
-                        <NavTab id="team-chat" icon={MessageSquare} label="Chat" colorClass="text-blue-600" bgClass="bg-blue-50" />
-                        <NavTab id="sql-runner" icon={Database} label="Editor SQL" colorClass="text-orange-600" bgClass="bg-orange-50" />
-                        <NavTab id="query-builder" icon={Sparkles} label="Construtor AI" colorClass="text-purple-600" bgClass="bg-purple-50" />
-                        <NavTab id="csv-importer" icon={FileInput} label="Importar CSV" colorClass="text-green-600" bgClass="bg-green-50" />
-                        <NavTab id="reminders" icon={Calendar} label="Lembretes" colorClass="text-red-500" bgClass="bg-red-50" />
-                        <NavTab id="docs" icon={BookOpen} label="Docs" colorClass="text-indigo-600" bgClass="bg-indigo-50" />
+                        {/* Breadcrumbs / Title */}
+                        {activeTab !== 'query-builder' && (
+                            <div className="h-6 w-[1px] bg-gray-300 mx-2"></div>
+                        )}
+                        {activeTab === 'team-chat' && <span className="font-semibold text-gray-600">Team Chat</span>}
+                        {activeTab === 'sql-runner' && <span className="font-semibold text-gray-600">Editor SQL</span>}
+                        {activeTab === 'csv-importer' && <span className="font-semibold text-gray-600">Importar CSV</span>}
+                        {activeTab === 'reminders' && <span className="font-semibold text-gray-600">Lembretes</span>}
+                        {activeTab === 'docs' && <span className="font-semibold text-gray-600">Documentação</span>}
+                        {activeTab === 'data-processor' && <span className="font-semibold text-gray-600">Tratar Dados</span>}
                     </div>
 
-                    {/* Right Side: Version & User - Fixed / flexible but won't be crushed */}
+                    {/* RESTORED: Legacy Navigation Tabs from Screenshot */}
+                    <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                        <NavTab id="team-chat" icon={MessageSquare} label="Chat" />
+                        <NavTab id="sql-runner" icon={Database} label="Editor SQL" />
+                        <NavTab id="query-builder" icon={Sparkles} label="Construtor AI" />
+                        <NavTab id="csv-importer" icon={FileInput} label="Importar CSV" />
+                        <NavTab id="reminders" icon={Calendar} label="Lembretes" />
+                        <NavTab id="docs" icon={FolderOpen} label="Docs" />
+                        <NavTab id="data-processor" icon={FileSpreadsheet} label="Tratar Dados" />
+                    </div>
+
+                    {/* Right Side: Version & User */}\
                     <div className="flex items-center gap-2 flex-shrink-0 justify-end">
 
                         {/* Backup Actions - Always visible but compact */}
@@ -765,7 +831,7 @@ function App() {
                                                             onClick={(e) => { e.stopPropagation(); handleQuickSwitch(conn); }}
                                                             className="w-full text-left px-2 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-lg truncate flex items-center justify-between group"
                                                         >
-                                                            <span>{conn.connectionName || 'Sem nome'}</span>
+                                                            <span>{typeof conn.connectionName === 'string' ? conn.connectionName : 'Sem nome'}</span>
                                                             {conn.id === connection.id && <span className="text-green-500">●</span>}
                                                         </button>
                                                     ))}
@@ -891,7 +957,11 @@ function App() {
                                     {!connection ? (
                                         <ConnectionForm onConnect={handleConnect} />
                                     ) : (
-                                        <AiBuilder isVisible={activeTab === 'query-builder'} connection={connection} />
+                                        <AiBuilder
+                                            isVisible={activeTab === 'query-builder'}
+                                            connection={connection}
+                                            savedQueries={savedSqlQueries}
+                                        />
                                     )}
                                 </ErrorBoundary>
                             </div>
@@ -930,6 +1000,16 @@ function App() {
                                         pendingDoc={pendingDoc}
                                         onDocHandled={() => setPendingDoc(null)}
                                         user={chatUser}
+                                    />
+                                </ErrorBoundary>
+                            </div>
+
+                            {/* Data Processor Module */}
+                            <div key="view-data-processor" className={`${activeTab === 'data-processor' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                                <ErrorBoundary>
+                                    <DataProcessor
+                                        isVisible={activeTab === 'data-processor'}
+                                        connection={connection}
                                     />
                                 </ErrorBoundary>
                             </div>

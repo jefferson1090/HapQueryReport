@@ -19,6 +19,10 @@ class ChatService {
         this.usersFile = path.join(this.dbDir, 'users.json');
         this.onStatusCallback = null;
         this.messagesFile = path.join(this.dbDir, 'messages.json');
+        this.dashboardsFile = path.join(this.dbDir, 'dashboards.json');
+        this.aiSessionsFile = path.join(this.dbDir, 'ai_sessions.json');
+
+        if (!fs.existsSync(this.aiSessionsFile)) fs.writeFileSync(this.aiSessionsFile, '[]', 'utf-8');
 
         if (!fs.existsSync(this.usersFile)) fs.writeFileSync(this.usersFile, '[]', 'utf-8');
 
@@ -317,6 +321,96 @@ class ChatService {
             return await this.adapter.publishVersion(version, notes, url);
         }
         return false;
+    }
+
+    // --- Dashboard Persistence ---
+    getDashboards() {
+        return this.readJSON(this.dashboardsFile);
+    }
+
+    saveDashboards(dashboards) {
+        this.writeJSON(this.dashboardsFile, dashboards);
+        return { success: true };
+    }
+
+    // --- AI Chat V3 Persistence (JSON) ---
+
+    /**
+     * Creates a new AI Session.
+     * @returns {string} sessionId
+     */
+    createAiSession(title = 'Nova Conversa') {
+        const sessions = this.readJSON(this.aiSessionsFile);
+        const newSession = {
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+            title,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            messages: []
+        };
+        sessions.unshift(newSession); // Newest first
+        this.writeJSON(this.aiSessionsFile, sessions);
+        return newSession;
+    }
+
+    /**
+     * Retrieves all sessions (summary only).
+     */
+    getAiSessions() {
+        const sessions = this.readJSON(this.aiSessionsFile);
+        return sessions.map(s => ({
+            id: s.id,
+            title: s.title,
+            updated_at: s.updated_at,
+            preview: s.messages.length > 0 ? s.messages[s.messages.length - 1].content.substring(0, 50) : '...'
+        }));
+    }
+
+    /**
+     * Retrieves full history for a session.
+     */
+    getAiHistory(sessionId) {
+        const sessions = this.readJSON(this.aiSessionsFile);
+        const session = sessions.find(s => s.id === sessionId);
+        return session ? session.messages : [];
+    }
+
+    /**
+     * Saves a message to an AI session.
+     */
+    saveAiMessage(sessionId, role, content) {
+        const sessions = this.readJSON(this.aiSessionsFile);
+        const sessionIndex = sessions.findIndex(s => s.id === sessionId);
+
+        if (sessionIndex === -1) return null;
+
+        const msg = {
+            role, // 'user' | 'assistant'
+            content,
+            timestamp: new Date().toISOString()
+        };
+
+        sessions[sessionIndex].messages.push(msg);
+        sessions[sessionIndex].updated_at = new Date().toISOString();
+
+        // Auto-update title if it's the first user message
+        if (role === 'user' && sessions[sessionIndex].messages.length === 1) {
+            sessions[sessionIndex].title = content.substring(0, 30) + (content.length > 30 ? '...' : '');
+        }
+
+        // Move updated session to top
+        const session = sessions.splice(sessionIndex, 1)[0];
+        sessions.unshift(session);
+
+        this.writeJSON(this.aiSessionsFile, sessions);
+        return msg;
+    }
+
+    deleteAiSession(sessionId) {
+        let sessions = this.readJSON(this.aiSessionsFile);
+        sessions = sessions.filter(s => s.id !== sessionId);
+        this.writeJSON(this.aiSessionsFile, sessions);
+        return { success: true };
     }
 }
 

@@ -38,8 +38,9 @@ class AiService {
                 action: 'describe_table'
             },
             {
-                // FIND RECORD
-                regex: /(?:encontre|busque|ache)\s+(?:o\s+)?(?:registro|id|código)?\s+([a-zA-Z0-9_\-]+)\s+(?:na|em)\s+(?:tabela\s+(?:de|do|da)?\s*)?([a-zA-Z0-9_$#\.]+)/i,
+                // FIND RECORD (Natural Language & Flexible)
+                // Matches: "buscar registro onde cpf 123 na tabela pessoa", "encontre id 5 em usuarios"
+                regex: /(?:encontre|busque|ache|visualizar|olhar|ver|me mostra|traz)\s+(?:o\s+)?(?:registro|id|código|o\s+dado|a\s+linha)?\s*(?:onde|com|cujo|que\s+tenha)?\s*(?:o|a)?\s*(?:cpf|cnpj|id|código|nome|valor)?\s*[:=]?\s*([a-zA-Z0-9_\-,\.\s]+)\s+(?:na|em|da|do)\s+(?:tabela\s+(?:de|do|da)?\s*)?([a-zA-Z0-9_$#\.]+)/i,
                 action: 'find_record'
             },
             {
@@ -58,6 +59,53 @@ class AiService {
                 action: 'create_table_sql'
             }
         ];
+
+        // --- SYSTEM PROMPT (AUTONOMOUS AGENT) ---
+        const systemPrompt = `
+        VOCÊ É UM AGENTE DE DADOS AUTÔNOMO E ESPECIALISTA EM ORACLE.
+        SUA MISSÃO: Entender a intenção do usuário, explorar o banco de dados e apresentar a resposta final ou a ferramenta correta.
+        
+        # PERSONALIDADE
+        - Você NÃO é um chatbot passivo. Você é um AGENTE ATIVO.
+        - Se o usuário pede "ver o cliente 123", você NÃO pergunta "qual tabela?". Você TENTA DESCOBRIR (ex: busca em 'clientes', 'pessoas', 'usuarios').
+        - Se o usuário dá um comando vago, você usa sua inteligência para INFERIR o contexto.
+        
+        # SUAS FERRAMENTAS (Comandos JSON)
+        Para agir, retorne APENAS um JSON:
+        
+        1. **list_tables**: Para encontrar tabelas.
+           Use quando: O usuário quer "achar", "listar", "ver" tabelas sobre um assunto.
+           JSON: { "action": "list_tables", "term": "termo_de_busca" }
+           
+        2. **describe_table**: Para ver colunas/estrutura.
+           Use quando: "como é a tabela X", "quais campos tem na tabela Y".
+           JSON: { "action": "describe_table", "tableName": "NOME_TABELA" }
+           
+        3. **find_record**: Para buscar dados específicos.
+           Use quando: "buscar cpf 123", "quem é o id 5", "ver usuário jefferson".
+           **IMPORTANTE**: Se não souber a coluna, mande apenas o valor.
+           JSON: { "action": "find_record", "data": { "table_name": "NOME_TABELA", "value": "VALOR_BUSCADO" } }
+           
+        4. **run_sql**: Para consultas complexas ou listagens gerais.
+           Use quando: "mostre os 10 últimos", "agrupe por status", "quantos registros existem".
+           JSON: { "action": "run_sql", "sql": "SELECT ...", "limit": 500 }
+           
+        5. **draft_table**: Para criar novas tabelas.
+           Use quando: "crie uma tabela de logs", "nova tabela x".
+           JSON: { "action": "draft_table", "tableName": "NOME", "columns": [{ "name": "ID", "type": "NUMBER" }] }
+
+        # REGRAS DE OURO
+        1. **NUNCA** retorne texto pedindo para o usuário fazer o que você pode fazer.
+           ERRADO: "Eu posso buscar na tabela X."
+           CERTO: (Executa list_tables ou find_record silenciosamente).
+           
+        2. **CONTEXTO VISUAL**:
+           - Se a resposta for uma lista de tabelas -> list_tables
+           - Se a resposta fore dados -> find_record ou run_sql
+           
+        3. **FALHA NO FETCH**:
+           - Se você tentar buscar e der erro, NÃO mostre o erro cru. Diga: "Não consegui acessar os dados. Tente ser mais específico com o nome da tabela."
+        `;
 
         // State for Multi-turn Conversations (Session Isolated)
         this.sessions = new Map();
@@ -1049,20 +1097,44 @@ class AiService {
         if (session.columnOverride) {
             console.log(`[AiService] Applying Column Override: ${session.columnOverride}`);
             columnName = session.columnOverride;
-            // Clear it after use - single shot override
             session.columnOverride = null;
         }
 
-        // Store context for potential retry/override in SESSION
+        // Store context
         session.lastAction = 'find_record';
         session.lastPayload = { ...data, column_name: columnName };
-        session.lastTable = tableName; // STICKY CONTEXT
+        session.lastTable = tableName;
+
+        if (!tableName) return { text: "Por favor, informe o nome da tabela." };
 
         if (!tableName) return { text: "Por favor, informe o nome da tabela." };
 
         try {
+            // 0. CHECK CONNECTION FIRST
+            try {
+                // Determine if we have credentials (either in session or legacy/global)
+                // We can do a lightweight check or just rely on the specific error
+
+                // But safer to wrap the first DB call specific to this logic
+
+            } catch (e) {
+                // Ignore here, catch below
+            }
+
             // 1. SMART TABLE CHECK
-            let columns = await db.getColumns(tableName);
+            let columns = [];
+            try {
+                columns = await db.getColumns(tableName);
+            } catch (err) {
+                if (err.message && err.message.includes("Nenhuma credencial")) {
+                    return {
+                        text: `⚠️ **Acesso Negado**\n\nPara buscar registros, preciso me conectar ao banco de dados.\nPor favor, utilize o formulário de conexão no menu lateral.`,
+                        action: 'chat'
+                    };
+                }
+                throw err;
+            }
+
             if (!columns.length) {
                 // Table Ambiguity logic ...
                 const searchName = tableName.split('.').pop();
@@ -1071,18 +1143,11 @@ class AiService {
                      WHERE OBJECT_TYPE IN ('TABLE','VIEW') 
                      AND (OBJECT_NAME = :name OR OBJECT_NAME LIKE '%' || :name || '%')
                      AND OWNER NOT IN ('SYS','SYSTEM') 
-                     AND OWNER NOT IN ('SYS','SYSTEM')`,
+                     FETCH NEXT 5 ROWS ONLY`,
                     { name: searchName }
                 );
 
-                if (similar.rows.length > 0) {
-                    // STORE STATE FOR LEARNING
-                    session.status = 'AWAITING_TABLE_SELECTION';
-                    session.payload = {
-                        originalTerm: tableName,
-                        originalData: data
-                    };
-
+                if (similar && similar.rows && similar.rows.length > 0) {
                     return {
                         text: `Não encontrei a tabela **${tableName}**. Você quis dizer alguma dessas?`,
                         action: 'table_selection',
@@ -1093,166 +1158,72 @@ class AiService {
             }
 
             // 2. VALUE PARSING
-            const values = valueRaw.split(/[\s,;\n]+/).filter(v => v.trim() !== '');
+            const values = valueRaw ? valueRaw.split(/[\s,;\n]+/).filter(v => v.trim() !== '') : [];
+            if (values.length === 0) return { text: "Qual valor você quer buscar?", action: 'chat' };
+
             const isMultiValue = values.length > 1;
 
             // 3. COLUMN RESOLUTION
             let targetCol = null;
             if (columnName) {
-                // Try to resolve user provided column (e.g. "cpf")
                 targetCol = this.resolveColumn(columnName, columns);
-
                 if (!targetCol) {
                     return {
-                        text: `Coluna **${columnName}** não encontrada em **${tableName}**. Selecione abaixo:`,
-                        action: 'column_selection',
-                        data: {
-                            tableName,
-                            value: valueRaw,
-                            columns: columns.map(c => ({ name: c.COLUMN_NAME, type: c.DATA_TYPE })),
-                            mode: 'filter', // Explicit mode
-                            originalShowColumns: data.show_columns // Persist projection context
-                        }
+                        text: `Coluna **${columnName}** não encontrada em **${tableName}**.`,
+                        action: 'chat'
                     };
                 }
             } else {
                 // Heuristic Auto-Resolution
                 const isFirstNum = !isNaN(parseFloat(values[0])) && isFinite(values[0]);
 
-                // 1. Semantic Priority (CPF, ID, COD)
-                // Expanded list and logic
                 const semanticCols = columns.filter(c =>
                     ['CPF', 'NR_CPF', 'CNPJ', 'NR_CNPJ', 'ID', 'CODIGO', 'COD'].includes(c.COLUMN_NAME) ||
                     (c.COLUMN_NAME.includes('CPF') && !c.COLUMN_NAME.includes('DATA')) ||
-                    (c.COLUMN_NAME.includes('CNPJ') && !c.COLUMN_NAME.includes('DATA')) ||
-                    c.COLUMN_NAME.endsWith('_ID') || c.COLUMN_NAME.startsWith('ID_') || c.COLUMN_NAME.startsWith('COD_')
+                    c.COLUMN_NAME.endsWith('_ID')
                 );
 
                 if (semanticCols.length > 0) {
-                    // Prioritize CPF/CNPJ if user provides numbers (often formatted without dots in args, or with dots)
-                    const cpfCol = semanticCols.find(c => c.COLUMN_NAME.includes('CPF') || c.COLUMN_NAME.includes('CNPJ'));
-                    if (cpfCol && (isFirstNum || isMultiValue || values[0].length > 5)) { // Check length too for CPF
-                        targetCol = cpfCol;
-                    } else if (semanticCols.length === 1) {
-                        targetCol = semanticCols[0];
-                    } else {
-                        // Multiple IDs? Try typical "ID" or "CODIGO"
-                        targetCol = semanticCols.find(c => c.COLUMN_NAME === 'ID' || c.COLUMN_NAME === 'CODIGO') || semanticCols[0];
-                    }
+                    const cpfCol = semanticCols.find(c => c.COLUMN_NAME.includes('CPF'));
+                    if (cpfCol && values[0].length > 5) targetCol = cpfCol;
+                    else targetCol = semanticCols[0];
                 }
 
-                // 2. Data Type Priority
-                if (!targetCol && (isFirstNum || isMultiValue)) {
-                    const numberCols = columns.filter(c => c.DATA_TYPE === 'NUMBER' || c.DATA_TYPE.includes('INT'));
-                    if (numberCols.length === 1) targetCol = numberCols[0];
-                }
-
-                // If STILL null -> Interactive Filter Selection
                 if (!targetCol) {
-                    // STORE STATE FOR LEARNING
-                    // STORE STATE FOR LEARNING
-                    const session = this.getSession(userId);
-                    session.status = 'AWAITING_COLUMN_SELECTION';
-                    session.payload = {
-                        tableName: tableName,
-                        originalTerm: columnName || valueRaw, // What was ambiguous
-                        originalData: data,
-                        mode: 'filter'
-                    };
-
-                    return {
-                        text: `Não sei em qual campo buscar o valor **"${valueRaw}"** na tabela **${tableName}**. Por favor, selecione:`,
-                        action: 'column_selection',
-                        data: {
-                            tableName,
-                            value: valueRaw,
-                            columns: columns.map(c => ({ name: c.COLUMN_NAME, type: c.DATA_TYPE })),
-                            mode: 'filter',
-                            originalShowColumns: data.show_columns // Persist projection context
-                        }
-                    };
+                    // Default to first string column or first column
+                    targetCol = columns.find(c => c.DATA_TYPE.includes('CHAR')) || columns[0];
                 }
             }
 
-            // 4. PROJECTION HANDLING
-            let selectClause = "*";
-            let projectionMode = false;
+            if (!targetCol) return { text: "Não consegui identificar a coluna de busca.", action: 'chat' };
 
-            if (data.show_columns && Array.isArray(data.show_columns) && data.show_columns.length > 0) {
-                const matchedCols = [];
-                const missingCols = [];
+            // 4. EXECUTE QUERY
+            // Use LIKE for strings, = for numbers
+            const isLike = targetCol.DATA_TYPE.includes('CHAR') || targetCol.DATA_TYPE.includes('CLOB');
+            const operator = isLike ? "LIKE" : "=";
+            const finalValue = isLike ? `%${values[0]}%` : values[0];
 
-                for (const reqCol of data.show_columns) {
-                    // Use helper (includes fuzzy + abbreviations)
-                    const found = this.resolveColumn(reqCol, columns);
-                    if (found) matchedCols.push(found.COLUMN_NAME);
-                    else missingCols.push(reqCol);
-                }
+            const sql = `SELECT * FROM ${tableName} WHERE ${targetCol.COLUMN_NAME} ${operator} :val FETCH NEXT 20 ROWS ONLY`;
 
-                if (missingCols.length > 0) {
-                    // STORE STATE FOR LEARNING (Projection)
-                    this.conversationState = {
-                        status: 'AWAITING_COLUMN_SELECTION',
-                        payload: {
-                            tableName: tableName,
-                            originalTerm: missingCols[0], // Learn the first missing one for now
-                            originalData: data,
-                            mode: 'projection'
-                        }
-                    };
+            const result = await db.executeQuery(sql, { val: finalValue });
 
-                    return {
-                        text: `Encontrei a coluna de busca (${targetCol.COLUMN_NAME}), mas não achei os campos para exibir: **${missingCols.join(', ')}**. Por favor, selecione o que deseja ver:`,
-                        action: 'column_selection',
-                        data: {
-                            tableName,
-                            value: valueRaw,
-                            columns: columns.map(c => ({ name: c.COLUMN_NAME, type: c.DATA_TYPE })),
-                            filterColumn: targetCol.COLUMN_NAME,
-                            mode: 'projection'
-                        }
-                    };
-                }
-
-                selectClause = matchedCols.join(', ');
-                projectionMode = true;
-            }
-
-            // 5. QUERY BUILD & EXECUTE
-            // ... (rest is mostly same, just updating type check slightly)
-            if (targetCol.DATA_TYPE === 'NUMBER' && isNaN(parseFloat(values[0]))) {
-                return { text: `A coluna **${targetCol.COLUMN_NAME}** é numérica, mas o valor **"${values[0]}"** parece texto.` };
-            }
-
-            let sql = `SELECT ${selectClause} FROM ${tableName} WHERE ${targetCol.COLUMN_NAME} `;
-            const params = {};
-
-            if (isMultiValue) {
-                const binds = values.map((_, i) => `:${i}`).join(', ');
-                sql += `IN (${binds})`;
-                values.forEach((v, i) => params[i.toString()] = v);
-            } else {
-                sql += `= :val`;
-                params.val = values[0];
-            }
-
-            const result = await db.executeQuery(sql, params, 100);
-
-            if (result.rows.length === 0) {
-                return { text: `Nenhum registro encontrado com **"${valueRaw}"** na coluna **${targetCol.COLUMN_NAME}** de **${tableName}**.` };
-            }
+            if (result.rows.length === 0) return { text: `Nenhum registro encontrado em **${tableName}** onde **${targetCol.COLUMN_NAME}** ${operator} "${values[0]}".`, action: 'chat' };
 
             return {
-                text: `Encontrei **${result.rows.length}** registro(s)${projectionMode ? ' (Colunas Filtradas)' : ''}:`,
-                action: 'show_data',
-                data: { metaData: result.metaData, rows: result.rows }
+                text: `Encontrei **${result.rows.length}** registros.`,
+                action: 'find_record',
+                data: { metaData: result.metaData, rows: result.rows, sql }
             };
 
-        } catch (err) {
-            console.error(err);
-            return { text: `Erro ao buscar dados: ${err.message}` };
+        } catch (e) {
+            console.error("performFindRecord Error:", e);
+            return {
+                text: `Tive um problema ao buscar na tabela **${tableName}**: ${e.message}`,
+                action: 'error'
+            };
         }
     }
+
 
     async processText(text, instruction) {
         if (!this.groq) {

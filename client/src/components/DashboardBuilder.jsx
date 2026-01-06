@@ -1429,10 +1429,33 @@ export default function DashboardBuilder({
     }, [columns, data]);
 
     useEffect(() => {
-        const saved = localStorage.getItem('sigo_dashboards');
-        if (saved) {
-            setAllDashboards(JSON.parse(saved));
-        }
+        // [MIGRATION] Load from Server, fallback to LocalStorage if empty
+        fetch(`${API_URL}/api/dashboards/list`)
+            .then(r => r.json())
+            .then(data => {
+                if (Array.isArray(data) && data.length > 0) {
+                    setAllDashboards(data);
+                } else {
+                    // Fallback: Check LocalStorage (First Run after update)
+                    const localSaved = localStorage.getItem('sigo_dashboards');
+                    if (localSaved) {
+                        try {
+                            const parsed = JSON.parse(localSaved);
+                            if (parsed.length > 0) {
+                                console.log("Migrating dashboards from LocalStorage to Server...");
+                                setAllDashboards(parsed);
+                                // Sync to Server
+                                fetch(`${API_URL}/api/dashboards/save`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ dashboards: parsed })
+                                }).catch(console.error);
+                            }
+                        } catch (e) { }
+                    }
+                }
+            })
+            .catch(console.error);
     }, []);
 
     // Effect: If we have data and NO current dashboard, check if we triggered a load
@@ -1451,7 +1474,16 @@ export default function DashboardBuilder({
 
     const saveDashboards = (newList) => {
         setAllDashboards(newList);
-        localStorage.setItem('sigo_dashboards', JSON.stringify(newList));
+        // Save to Server
+        fetch(`${API_URL}/api/dashboards/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dashboards: newList })
+        }).catch(err => {
+            console.error("Failed to save dashboards to server", err);
+            // Fallback
+            localStorage.setItem('sigo_dashboards', JSON.stringify(newList));
+        });
     };
 
     // --- NEW CREATION FLOW ---

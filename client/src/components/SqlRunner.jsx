@@ -10,8 +10,10 @@ import { saveAs } from 'file-saver';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql, PLSQL } from '@codemirror/lang-sql';
 import { autocompletion } from '@codemirror/autocomplete';
+import { keymap, EditorView } from '@codemirror/view';
+import { defaultKeymap, historyKeymap } from '@codemirror/commands';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
-import { PanelRightClose, PanelRightOpen, Share2, Play, Square, Download, FolderOpen, Save, Trash2, Plus, X, Search, Database, MessageSquare, Zap, LogOut, Home, Maximize2, Minimize2 } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen, Share2, Play, Square, Download, FolderOpen, Save, Trash2, Plus, X, Search, Database, MessageSquare, Zap, LogOut, Home, Maximize2, Minimize2, Eye, Activity } from 'lucide-react';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import { FixedSizeList as VirtualList } from 'react-window';
 import ErrorBoundary from './ErrorBoundary';
@@ -23,6 +25,7 @@ import ConnectionForm from './ConnectionForm';
 // --- V3.0 Editor Theme ---
 import { createTheme } from '@uiw/codemirror-themes';
 import { tags as t } from '@lezer/highlight';
+import { PLSQL_AUTOCOMPLETE_DATABASE } from '../utils/plsql_data';
 
 const themeDefs = {
     light: {
@@ -33,7 +36,7 @@ const themeDefs = {
             bg: '#ffffff',
             fg: '#334155',
             caret: '#2563eb',
-            selection: '#dbeafe',
+            selection: '#bfdbfe', // Darker Blue 200 for better visibility
             lineHighlight: '#f1f5f9',
             gutterBg: '#ffffff',
             gutterFg: '#94a3b8',
@@ -248,7 +251,7 @@ const themeDefs = {
 };
 
 const createDynamicTheme = (themeDef) => {
-    return createTheme({
+    const mainTheme = createTheme({
         theme: themeDef.type,
         settings: {
             background: themeDef.colors.bg,
@@ -271,6 +274,18 @@ const createDynamicTheme = (themeDef) => {
             { tag: t.punctuation, color: themeDef.syntax.operator },
         ],
     });
+
+    // Force selection color override with higher specificity
+    const selectionOverride = EditorView.theme({
+        "& .cm-selectionLayer .cm-selectionBackground, & .cm-content ::selection": {
+            backgroundColor: `${themeDef.colors.selection} !important`
+        },
+        ".cm-selectionMatch": {
+            backgroundColor: `${themeDef.colors.selection}44 !important`
+        }
+    }, { dark: themeDef.type === 'dark' });
+
+    return [mainTheme, selectionOverride];
 };
 
 // --- Standalone Row Component (V3.0 Style) ---
@@ -365,6 +380,11 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const [aiLoading, setAiLoading] = useState(false);
     const [columnWidths, setColumnWidths] = useState({});
 
+    // Explain Plan State
+    const [explainData, setExplainData] = useState(null);
+    const [showExplainModal, setShowExplainModal] = useState(false);
+    const [explainLoading, setExplainLoading] = useState(false);
+
     // Tab Renaming State
     const [editingTabId, setEditingTabId] = useState(null);
     const [editingTitle, setEditingTitle] = useState('');
@@ -435,6 +455,42 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const [tableColumns, setTableColumns] = useState([]);
     const [loadingSchema, setLoadingSchema] = useState(false);
     const [schemaData, setSchemaData] = useState({});
+
+    // --- Custom Autocomplete Schema Integration ---
+    // User requested to REMOVE keywords from schema (preventing them from looking like tables)
+    // and implement a custom completer using their PL/SQL data file.
+
+    // Schema now only contains real database tables
+    const editorSchema = React.useMemo(() => {
+        return { ...schemaData };
+    }, [schemaData]);
+
+    const customPlSqlCompleter = (context) => {
+        let word = context.matchBefore(/[\w\.$]*/)
+        if (!word || (word.from === word.to && !context.explicit)) return null;
+
+        const suggestions = [];
+
+        if (PLSQL_AUTOCOMPLETE_DATABASE) {
+            // Keywords
+            if (PLSQL_AUTOCOMPLETE_DATABASE.keywords) {
+                suggestions.push(...PLSQL_AUTOCOMPLETE_DATABASE.keywords.map(kw => ({ label: kw, type: "keyword", boost: -1 })));
+            }
+            // System Vars
+            if (PLSQL_AUTOCOMPLETE_DATABASE.system_vars) {
+                suggestions.push(...PLSQL_AUTOCOMPLETE_DATABASE.system_vars.map(v => ({ label: v, type: "variable" })));
+            }
+            // Functions
+            if (PLSQL_AUTOCOMPLETE_DATABASE.functions) {
+                suggestions.push(...PLSQL_AUTOCOMPLETE_DATABASE.functions.map(f => ({ label: f, type: "function" })));
+            }
+        }
+
+        return {
+            from: word.from,
+            options: suggestions
+        };
+    };
 
     // Column Management State
     const [visibleColumns, setVisibleColumns] = useState({});
@@ -614,6 +670,44 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         }
     };
 
+    // Helper: Determine what SQL to run (Selection vs Statement at Cursor vs File)
+    const getSmartSql = () => {
+        const view = viewRef.current;
+        if (!view) return activeTab.sqlContent;
+
+        const { state } = view;
+        const { selection } = state;
+
+        // 1. If explicit selection exists, run it
+        if (!selection.main.empty) {
+            return state.sliceDoc(selection.main.from, selection.main.to);
+        }
+
+        // 2. If no selection, find the statement under cursor (Simple Semicolon Split)
+        // Note: This naive split might break inside strings/comments, but sufficient for standard usage.
+        const doc = state.doc.toString();
+        const pos = selection.main.head;
+
+        let start = 0;
+        for (let i = pos - 1; i >= 0; i--) {
+            if (doc[i] === ';') {
+                start = i + 1;
+                break;
+            }
+        }
+
+        let end = doc.length;
+        for (let i = pos; i < doc.length; i++) {
+            if (doc[i] === ';') {
+                end = i;
+                break;
+            }
+        }
+
+        const statement = doc.slice(start, end).trim();
+        return statement || activeTab.sqlContent; // Fallback to full content if empty
+    };
+
     const executeQuery = async () => {
         updateActiveTab({ loading: true, error: null, results: null, totalRecords: undefined });
         if (abortControllerRef.current) abortControllerRef.current.abort();
@@ -621,7 +715,10 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         const signal = abortControllerRef.current.signal;
 
         try {
-            const cleanSql = activeTab.sqlContent.trim().replace(/;+\s*$/, '');
+            const rawSql = getSmartSql();
+            const cleanSql = rawSql.trim().replace(/;+\s*$/, '');
+            if (!cleanSql) return showToast("Nenhum comando SQL encontrado.", "warning");
+
             const conn = activeTab.connection || globalConnection;
 
             const res = await fetch('http://127.0.0.1:3001/api/query', {
@@ -674,6 +771,32 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
             if (err.name !== 'AbortError') updateActiveTab({ error: err.message, loading: false });
         } finally {
             abortControllerRef.current = null;
+        }
+    };
+
+    const handleExplainPlan = async () => {
+        const rawSql = getSmartSql();
+        const cleanSql = rawSql.trim().replace(/;+\s*$/, '');
+        if (!cleanSql) return showToast("Selecione uma query para explicar.", "warning");
+
+        setExplainLoading(true);
+        try {
+            const conn = activeTab.connection || globalConnection;
+            const res = await fetch(`${apiUrl}/api/explain`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getConnectionHeaders() },
+                body: JSON.stringify({ sql: cleanSql, connection: conn })
+            });
+            const data = await res.json();
+
+            if (data.error) throw new Error(data.error);
+
+            setExplainData(data.lines);
+            setShowExplainModal(true);
+        } catch (err) {
+            showToast("Erro ao gerar Explain Plan: " + err.message, "error");
+        } finally {
+            setExplainLoading(false);
         }
     };
 
@@ -988,6 +1111,66 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         }
     };
 
+    // --- Explain Plan Visualization Modal ---
+    const renderExplainModal = () => {
+        if (!showExplainModal || !explainData) return null;
+
+        return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowExplainModal(false)}></div>
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden relative"
+                >
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg">
+                                <Activity size={20} />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Visual Explain Plan</h3>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">Análise de execução da query</p>
+                            </div>
+                        </div>
+                        <button onClick={() => setShowExplainModal(false)} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors">
+                            <X size={20} className="text-slate-500" />
+                        </button>
+                    </div>
+
+                    <div className="flex-1 overflow-auto p-6 bg-slate-100 dark:bg-slate-900 custom-scrollbar">
+                        <div className="space-y-2">
+                            {explainData.map((line, idx) => {
+                                // Basic Parsing for "Intelligent" visualization
+                                const isFullScan = line.includes("TABLE ACCESS FULL");
+                                const isHighCost = line.includes("CARTESIAN");
+
+                                return (
+                                    <div
+                                        key={idx}
+                                        className={`
+                                            font-mono text-xs px-4 py-2 border-l-4 rounded-r-md shadow-sm transition-all hover:translate-x-1
+                                            ${isFullScan ? 'bg-red-50 dark:bg-red-900/10 border-red-500 text-red-900 dark:text-red-200' :
+                                                isHighCost ? 'bg-orange-50 dark:bg-orange-900/10 border-orange-500 text-orange-900 dark:text-orange-200' :
+                                                    'bg-white dark:bg-slate-800 border-indigo-400 text-slate-700 dark:text-slate-300'}
+                                        `}
+                                    >
+                                        <div className="whitespace-pre-wrap">{line}</div>
+                                        {isFullScan && (
+                                            <div className="mt-1 flex items-center gap-2 text-[10px] font-bold text-red-600 dark:text-red-400">
+                                                <Eye size={12} /> ALERTA: Leitura Completa de Tabela detectada. Pode ser lento em grandes volumes.
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </motion.div>
+            </div>
+        );
+    };
+
     const handleScroll = (event) => {
         if (headerContainerRef.current) {
             headerContainerRef.current.scrollLeft = event.currentTarget.scrollLeft;
@@ -1057,6 +1240,8 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     return (
         <ErrorBoundary>
             <div className={`space-y-4 relative h-full flex flex-col ${theme.bg}`}>
+                {/* ... other modals ... */}
+                {renderExplainModal()}
                 {toast && (
                     <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-xl z-[9999] animate-bounce-up text-white font-bold flex items-center ${toast.type === 'error' ? 'bg-red-500' : 'bg-emerald-500'}`}>
                         {toast.type === 'error' ? '🚫' : '✅'} <span className="ml-2">{toast.message}</span>
@@ -1301,13 +1486,18 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                                             height="100%"
                                                             theme={createDynamicTheme(themeDefs[currentThemeId])}
                                                             extensions={[
-                                                                sql({ schema: {}, dialect: PLSQL, upperCaseKeywords: true }),
-                                                                autocompletion({ override: [] }) // Add completion logic here if needed
+                                                                sql({ schema: editorSchema, dialect: PLSQL, upperCaseKeywords: true }),
+                                                                autocompletion({ override: [customPlSqlCompleter] }),
+                                                                keymap.of([
+                                                                    { key: "F8", run: () => { executeQuery(); return true; } },
+                                                                    ...defaultKeymap,
+                                                                    ...historyKeymap
+                                                                ])
                                                             ]}
                                                             onChange={(val) => updateActiveTab({ sqlContent: val })}
                                                             onCreateEditor={(view) => { viewRef.current = view; }}
-                                                            className="h-full focus:outline-none"
                                                             basicSetup={{
+                                                                drawSelection: false,
                                                                 lineNumbers: true,
                                                                 highlightActiveLineGutter: true,
                                                                 highlightActiveLine: true,
@@ -1315,6 +1505,12 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                                                 dropCursor: true,
                                                                 allowMultipleSelections: true,
                                                                 indentOnInput: true,
+                                                                bracketMatching: true,
+                                                                closeBrackets: true,
+                                                                autocompletion: true,
+                                                                rectangularSelection: true,
+                                                                crosshairCursor: true,
+                                                                highlightSelectionMatches: true,
                                                             }}
                                                         />
                                                     )}
@@ -1353,6 +1549,14 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                                                             </button>
                                                             <button onClick={handleOptimizeSql} className="p-2 text-[var(--text-muted)] hover:text-emerald-500 hover:bg-[var(--bg-active)] rounded-lg transition-colors" title="Otimizar Query">
                                                                 <Zap size={16} />
+                                                            </button>
+                                                            <button
+                                                                onClick={handleExplainPlan}
+                                                                disabled={explainLoading}
+                                                                className="p-2 text-[var(--text-muted)] hover:text-blue-500 hover:bg-[var(--bg-active)] rounded-lg transition-colors relative"
+                                                                title="Visual Explain Plan"
+                                                            >
+                                                                {explainLoading ? <span className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin block"></span> : <Activity size={16} />}
                                                             </button>
                                                         </div>
 

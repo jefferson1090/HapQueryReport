@@ -5,6 +5,7 @@ const path = require('path');
 const net = require('net');
 const startServer = require('./index'); // Restored internal require
 const chatService = require('./services/chatService');
+const dataBackupService = require('./services/dataBackupService');
 
 // ... (existing code)
 
@@ -334,9 +335,7 @@ ipcMain.handle('manual-check-update', async () => {
     }
 });
 
-ipcMain.on('restart_app', () => {
-    autoUpdater.quitAndInstall();
-});
+// Duplicate handler removed (consolidated below)
 
 // --- Legacy Update Handlers Removed (Now using Supabase above) ---
 
@@ -381,8 +380,15 @@ app.on('ready', async () => {
     autoUpdater.checkForUpdates();
 });
 
-ipcMain.on('restart_app', () => {
-    log.info("Client requested restart. Calling quitAndInstall...");
+ipcMain.on('restart_app', async () => {
+    log.info("Client requested restart. Starting backup...");
+    try {
+        const version = app.getVersion();
+        await dataBackupService.createBackup(version);
+        log.info("Backup complete. Quitting and installing...");
+    } catch (e) {
+        log.error("Backup failed during restart:", e);
+    }
     autoUpdater.quitAndInstall();
 });
 

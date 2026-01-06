@@ -1,7 +1,7 @@
 {
   "name": "hap-query-report-client",
   "private": true,
-  "version": "3.0.2",
+  "version": "3.0.6",
   "type": "module",
   "scripts": {
     "clean": "node -e \"const fs = require('fs'); fs.rmSync('dist', { recursive: true, force: true });\"",
@@ -53,6 +53,7 @@
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^3.0.6",
+    "react-syntax-highlighter": "^16.1.0",
     "react-virtualized-auto-sizer": "^1.0.26",
     "react-window": "^1.8.11",
     "react-window-infinite-loader": "^2.0.0",

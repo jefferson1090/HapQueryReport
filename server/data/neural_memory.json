@@ -55,6 +55,34 @@
       "tags": [],
       "activation": 0,
       "last_activated": null
+    },
+    "TB_USUARIO": {
+      "id": "TB_USUARIO",
+      "type": "auto",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
+    },
+    "HUMASTER.TB_USUARIO": {
+      "id": "HUMASTER.TB_USUARIO",
+      "type": "auto",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
+    },
+    "": {
+      "id": "",
+      "type": "auto",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
+    },
+    "CD_PESSOA": {
+      "id": "CD_PESSOA",
+      "type": "auto",
+      "tags": [],
+      "activation": 0,
+      "last_activated": null
     }
   },
   "edges": [
@@ -87,6 +115,18 @@
       "to": "HUMASTER.AU_PESSOA",
       "weight": 1,
       "relation": "is_alias_of"
+    },
+    {
+      "from": "TB_USUARIO",
+      "to": "HUMASTER.TB_USUARIO",
+      "weight": 1,
+      "relation": "is_alias_of"
+    },
+    {
+      "from": "",
+      "to": "CD_PESSOA",
+      "weight": 0.9,
+      "relation": "is_column_alias"
     }
   ]
 }
