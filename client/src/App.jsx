@@ -29,6 +29,11 @@ import { FixedSizeList as List } from 'react-window';
 import { useApi } from './context/ApiContext';
 import { decryptPassword } from './utils/security';
 import Navigation from './components/Navigation'; // New Component
+import SmartFindRecord from './components/SmartFindRecord'; // New Smart Find Component
+import SmartResolver from './components/SmartResolver'; // Legacy Resolution (Modal)
+import SmartAnalysisPanel from './components/SmartAnalysisPanel'; // New Split-View Panel
+import AiChat from './components/AiChat'; // Shared Chat Component
+
 
 import pkg from '../package.json';
 
@@ -154,12 +159,15 @@ function App() {
         }
         return [];
     });
-
     // Connection Switcher State
     const [savedConnections, setSavedConnections] = useState([]);
     const [showConnectionSwitcher, setShowConnectionSwitcher] = useState(false);
+    const [resolverData, setResolverData] = useState(null); // Data for Smart Resolver
     const dropdownRef = useRef(null);
     const [toast, setToast] = useState(null); // { message, type }
+
+    // Activate Resolver Listener
+    useSmartResolverListener(setResolverData, setActiveTab);
 
     // Auto-dismiss toast
     useEffect(() => {
@@ -462,11 +470,19 @@ function App() {
         }
     };
 
-    // Global Event Listener for Tab Switching (from CommandCenter etc)
-    // Global Event Listener for Tab Switching (from CommandCenter etc)
+
     // Global Event Listener for Tab Switching (from CommandCenter etc)
     const handleSwitchTab = (tabId, text) => {
         if (activeTab === tabId && !text && tabId !== 'query-builder' && tabId !== 'data-processor') return;
+
+        // Listener for Smart Resolver
+        if (tabId === 'smart-resolver') {
+            setActiveTab('query-builder'); // Route to AI Builder which will handle Smart Resolver Mode
+            // Dispatch event to AI Builder to switch mode? Or rely on the global event?
+            // Global event `hap-show-smart-resolver` is handled by useSmartResolverListener
+            // which we will update to NOT switch tabs but maybe just ensure query-builder is active?
+            return;
+        }
 
         // Legacy Actions -> Route to AI Builder (Query Builder) + Trigger Chat
         if (tabId === 'carga_input' || tabId === 'db_search' || tabId === 'db_structure' || tabId === 'db_data' || tabId === 'db_find') {
@@ -478,9 +494,17 @@ function App() {
                 case 'db_search': prompt = "Localize a tabela [NOME_DA_TABELA]"; break;
                 case 'db_structure': prompt = "Exibir estrutura da tabela [NOME_DA_TABELA]"; break;
                 case 'db_data': prompt = "Ver dados da tabela [NOME_DA_TABELA]"; break;
-                case 'db_find': prompt = "Buscar o registro onde [CONDIÇÃO] na tabela [NOME_DA_TABELA]"; break;
+                case 'db_data': prompt = "Ver dados da tabela [NOME_DA_TABELA]"; break;
+                // case 'db_find': prompt = "Buscar o registro onde [CONDIÇÃO] na tabela [NOME_DA_TABELA]"; break; // Handled by new UI Flow
             }
-            setTimeout(() => window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', { detail: { text: prompt } })), 100);
+            if (tabId === 'db_find') {
+                setActiveTab('query-builder');
+                setTimeout(() => window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', { detail: { text: "[SYSTEM_INIT_FIND_FLOW]", autoSend: true } })), 100);
+                return;
+            }
+            if (tabId !== 'db_find') {
+                setTimeout(() => window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', { detail: { text: prompt } })), 100);
+            }
             return;
         }
 
@@ -896,36 +920,62 @@ function App() {
                                         />
                                     </ErrorBoundary>
                                 </div>
+
+                                {/* Smart Resolver Module */}
+                                <div key="view-smart-resolver" className={`${activeTab === 'smart-resolver' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
+                                    <ErrorBoundary>
+                                        <SmartResolver
+                                            isVisible={activeTab === 'smart-resolver'}
+                                            resolverData={resolverData}
+                                        />
+                                    </ErrorBoundary>
+                                </div>
+
                             </div>
                         </div>
                     </main>
-                </div >
-
-                {/* GLOBAL OVERLAYS */}
-                <UpdateManager
-                    updateInfo={updateInfo}
-                    status={updateStatus}
-                    onUpdateConfirm={() => console.log("User confirmed update view")}
-                    onDismiss={() => {
-                        setUpdateStatus('idle');
-                        setUpdateInfo(null);
-                    }}
-                    onRestart={() => window.electronAPI?.restartApp()}
-                />
-
-                {/* Toast Notification */}
-                {
-                    toast && (
-                        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg shadow-xl text-white text-sm font-bold flex items-center gap-2 animate-in slide-in-from-bottom-5 fade-in z-[100] ${toast.type === 'error' ? 'bg-red-500' : 'bg-green-600'}`}>
-                            <span>{toast.type === 'error' ? '⚠️' : '✅'}</span>
-                            <span>{toast.message}</span>
-                        </div>
-                    )
-                }
+                </div>
             </div>
-        </ThemeContext.Provider >
+
+            {/* GLOBAL OVERLAYS */}
+            <UpdateManager
+                updateInfo={updateInfo}
+                status={updateStatus}
+                onUpdateConfirm={() => console.log("User confirmed update view")}
+                onDismiss={() => {
+                    setUpdateStatus('idle');
+                    setUpdateInfo(null);
+                }}
+                onRestart={() => window.electronAPI?.restartApp()}
+            />
+
+            {/* Toast Notification */}
+            {
+                toast && (
+                    <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg shadow-xl text-white text-sm font-bold flex items-center gap-2 animate-in slide-in-from-bottom-5 fade-in z-[100] ${toast.type === 'error' ? 'bg-red-500' : 'bg-green-600'}`}>
+                        <span>{toast.type === 'error' ? '⚠️' : '✅'}</span>
+                        <span>{toast.message}</span>
+                    </div>
+                )
+            }
+        </ThemeContext.Provider>
     );
 }
 
+// Hook to listen for Smart Resolver events globaly
+const useSmartResolverListener = (setResolverData, setActiveTab) => {
+    useEffect(() => {
+        const handleShowResolver = (e) => {
+            console.log("Showing Smart Resolver:", e.detail);
+            setResolverData(e.detail);
+            setActiveTab('query-builder'); // Switch to AiBuilder
+            // Dispatch internal event or let AiBuilder pick up `resolverData` from some context?
+            // Actually, `useSmartResolverListener` sits in App.jsx.
+            // We need to pass `resolverData` into `AiBuilder`.
+        };
+        window.addEventListener('hap-show-smart-resolver', handleShowResolver);
+        return () => window.removeEventListener('hap-show-smart-resolver', handleShowResolver);
+    }, [setActiveTab, setResolverData]);
+};
 
 export default App;

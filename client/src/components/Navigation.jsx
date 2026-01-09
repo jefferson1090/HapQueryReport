@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
     MessageSquare, Database, Bot, FileInput, Calendar, FolderOpen, FileSpreadsheet,
-    Settings, Layout, ArrowLeft, ArrowDown, ArrowUp, ArrowRight, Cloud, RefreshCw, LogOut, Check, Sparkles
+    Settings, Layout, ArrowLeft, ArrowDown, ArrowUp, ArrowRight, Cloud, RefreshCw, LogOut, Check, Sparkles, Search
 } from 'lucide-react';
 import BackupMenu from './BackupMenu';
 

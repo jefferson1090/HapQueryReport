@@ -412,6 +412,27 @@ class ChatService {
         this.writeJSON(this.aiSessionsFile, sessions);
         return { success: true };
     }
+
+    // --- CONVERSATIONAL STATE MANAGEMENT ---
+
+    // In-memory store for active conversation states (sessionId -> stateObject)
+    // stateObject: { step: 'INIT' | 'AWAITING_TABLE' | 'AWAITING_COLUMN' | 'AWAITING_VALUE', context: {} }
+
+    getConversationState(sessionId) {
+        if (!this._conversationStates) this._conversationStates = new Map();
+        return this._conversationStates.get(sessionId) || null;
+    }
+
+    setConversationState(sessionId, state) {
+        if (!this._conversationStates) this._conversationStates = new Map();
+        this._conversationStates.set(sessionId, state);
+    }
+
+    clearConversationState(sessionId) {
+        if (this._conversationStates) {
+            this._conversationStates.delete(sessionId);
+        }
+    }
 }
 
 module.exports = new ChatService();

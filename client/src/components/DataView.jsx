@@ -9,6 +9,10 @@ const DataView = ({ viewData, dataFilters, setDataFilters, dataSort, setDataSort
     if (viewData.metaData && viewData.rows) {
         columns = viewData.metaData.map(m => m.name);
         rows = viewData.rows;
+    } else if (viewData.columns && viewData.rows) {
+        // Fallback for legacy format or manual columns
+        columns = viewData.columns.map(c => typeof c === 'object' ? c.name : c);
+        rows = viewData.rows;
     } else if (Array.isArray(viewData) && viewData.length > 0) {
         rows = viewData;
         columns = Object.keys(rows[0]);
@@ -24,6 +28,9 @@ const DataView = ({ viewData, dataFilters, setDataFilters, dataSort, setDataSort
 
         if (viewData.metaData && viewData.rows) {
             columns = viewData.metaData.map(m => m.name);
+            rows = viewData.rows;
+        } else if (viewData.columns && viewData.rows) {
+            columns = viewData.columns.map(c => typeof c === 'object' ? c.name : c);
             rows = viewData.rows;
         } else if (Array.isArray(viewData) && viewData.length > 0) {
             rows = viewData;

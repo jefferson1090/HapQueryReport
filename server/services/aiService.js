@@ -4,6 +4,7 @@ const learningService = require('./learningService');
 const knowledgeService = require('./knowledgeService');
 const neuralService = require('./neuralService');
 const agentService = require('./agentService');
+const chatService = require('./chatService'); // Imported for state management
 
 class AiService {
 
@@ -166,10 +167,47 @@ class AiService {
             session.payload = null;
             session.status = 'IDLE';
             session.columnOverride = null; // Reset override
+            // [NEW] Clear ChatService State
+            chatService.clearConversationState(userId);
             console.log(`[SESSION] Context cleared for user ${userId}`);
             return { text: null, action: 'silent_ack' };
         }
 
+        // --- 1.1b HANDLE PENDING FLOW CHECK (Smart Continuation) ---
+        // If user is in the middle of a flow (e.g. AWAITING_COLUMN), and types something that looks like a new request,
+        // we should ask if they want to abandon the current flow.
+        const currentState = chatService.getConversationState(userId);
+        if (currentState && (currentState.step === 'AWAITING_COLUMN_OR_VALUE' || currentState.step === 'AWAITING_VALUE')) {
+            const isSystemCommand = message.startsWith('[') || message.startsWith('Buscar nestas colunas');
+            const isConfirmation = message.match(/^(sim|ok|confirmo|yes|s|certo|continuar|não|nao|no|cancelar|pare)/i);
+
+            // If it's NOT a system command AND NOT a confirmation/continuation answer
+            if (!isSystemCommand && !isConfirmation) {
+                // Check if user wants to reset
+                if (message.match(/^(novo|nova|inicio|reset|cancelar|parar|sair)/i)) {
+                    chatService.clearConversationState(userId);
+                    return { text: "Fluxo anterior cancelado. Como posso ajudar agora?", action: 'chat' };
+                }
+
+                // Ask for clarification
+                const pendingTable = currentState.context.table || 'Tabela';
+                return {
+                    text: `Você tem uma busca pendente na tabela **${pendingTable}**. Deseja continuar com ela? \n(Responda **Sim** para continuar ou **Não** para iniciar uma nova busca)`,
+                    action: 'ask_continuation', // Frontend can handle this specifically or just chat
+                    data: { pendingState: currentState }
+                };
+            }
+
+            // If user says "NO" to continuation (handled here or in generic match above?)
+            // If message is "não", we should probably clear.
+            if (message.match(/^(não|nao|no|cancelar)/i)) {
+                chatService.clearConversationState(userId);
+                return { text: "Entendido. Busca cancelada. O que deseja fazer?", action: 'chat' };
+            }
+        }
+
+        // --- 1.2 HANDLE DEEP ANALYSIS TRIGGER (SmartAnalysisPanel) ---
+        // Context Setting
         if (message.startsWith('[SYSTEM: SET_CONTEXT]')) {
             try {
                 const payload = JSON.parse(message.replace('[SYSTEM: SET_CONTEXT]', '').trim());
@@ -183,35 +221,588 @@ class AiService {
             }
         }
 
-        // --- 1.2 HANDLE PENDING CONFIRMATIONS ---
-        if (session.status === 'AWAITING_CONFIRMATION') {
-            const lowerMsg = message.trim().toLowerCase();
-            if (['sim', 'yes', 's', 'y', 'confirmar', 'ok'].includes(lowerMsg)) {
-                const pendingData = session.payload;
-                session.status = 'IDLE';
-                session.payload = null;
+        // Update Search (Live Edit)
+        if (message.startsWith('[SYSTEM: UPDATE_SEARCH]')) {
+            const newValue = message.replace('[SYSTEM: UPDATE_SEARCH]', '').trim();
+            console.log(`[FLOW] Update Search requested: ${newValue}`);
 
-                if (pendingData.action === 'drop_table') {
-                    return await this.executeAction({
-                        action: 'drop_table',
-                        data: pendingData.data
-                    }, userId);
+            // Retrieve last context
+            if (session.lastPayload && session.lastTable) {
+                const newPayload = {
+                    ...session.lastPayload,
+                    value: newValue,
+                    table_name: session.lastTable
+                };
+                return await this.performFindRecord(newPayload, userId);
+            } else {
+                return { text: "⚠️ Não foi possível atualizar a busca (Contexto perdido). Por favor, inicie uma nova busca.", action: 'chat' };
+            }
+        }
+
+        // Deep Analysis Trigger
+        if (message.startsWith('Analise a tabela')) {
+            const tableName = message.replace('Analise a tabela', '').trim();
+            console.log(`[FLOW] Deep Analysis requested for: ${tableName}`);
+
+            try {
+                // 1. Fetch Columns
+                const columns = await db.getColumns(tableName);
+
+                // 2. Identify Context (What was the user looking for?)
+                const state = chatService.getConversationState(userId);
+                const context = state?.context || {};
+                const userQuery = context.initial_input || context.suggested_column || "";
+
+                console.log(`[FLOW] Context for analysis:`, context);
+
+                // 3. Perform Match & Value Extraction
+                let searchTerm = null;
+                const queryParts = userQuery.toUpperCase().split(/[\s,]+/);
+
+                const enrichedColumns = columns.map(col => {
+                    const colName = (col.COLUMN_NAME || col.name || "").toUpperCase();
+                    let isMatch = false;
+
+                    // Direct checks
+                    if (context.suggested_column && colName === context.suggested_column.toUpperCase()) isMatch = true;
+
+                    // Token intersection check (Fuzzy match)
+                    // If column name alias matches parts of the query (e.g. "EMPRESA" in "CD_EMPRESA_PLANO")
+                    const colParts = colName.split(/[_]+/);
+                    const matchCount = colParts.filter(p => queryParts.includes(p)).length;
+
+                    if (matchCount > 0) {
+                        isMatch = true;
+                        // [NEW] Heuristic: If this column matches words in the query, the REST of the query might be the value.
+                        // We accumulate "matched tokens" to subtract later? 
+                        // Simpler: If we find a strong match, we try to isolate the numeric/value part of the query.
+                    }
+
+                    // Priority columns if no specific match found yet
+                    if (!isMatch && ['NOME', 'DESCRICAO', 'TITULO', 'CPF', 'CNPJ', 'ID', 'CODIGO'].some(k => colName.includes(k))) {
+                        // Only if we really have no clue? Let's be conservative.
+                        // isMatch = true; // Don't auto-match everything, it pollutes logic.
+                    }
+
+                    return { ...col, suggested: isMatch, matchScore: matchCount };
+                });
+
+                // [NEW] Advanced Value Extraction
+                // Remove words that matched columns, leave the rest as "Value"
+                const matchedColNames = enrichedColumns.filter(c => c.suggested).map(c => c.COLUMN_NAME || c.name);
+                let residualQuery = userQuery;
+
+                // 1. Specific Pattern Extraction (Strongest)
+                const valueMatch = userQuery.match(/(?:cpf|cnpj|id|código|code|identidade|rg|valor|matricula|plano)[:\s]+([0-9.\-\/]+)/i);
+                if (valueMatch) {
+                    searchTerm = valueMatch[1].trim();
+                } else {
+                    // 2. Residual Extraction
+                    // Remove matched tokens
+                    matchedColNames.forEach(cName => {
+                        const parts = cName.split('_');
+                        parts.forEach(p => {
+                            if (p.length > 2) { // Only remove significant words
+                                const regex = new RegExp(`\\b${p}\\b`, 'gi');
+                                residualQuery = residualQuery.replace(regex, '');
+                            }
+                        });
+                    });
+
+                    // Remove common stop words
+                    residualQuery = residualQuery.replace(/\b(da|de|do|em|na|no|tabela|buscar|procurar|encontrar|onde|igual|a)\b/gi, '');
+                    // Clean up
+                    searchTerm = residualQuery.replace(/[^\w\s\-,.]/gi, '').trim();
+                }
+
+                // Cleanup: If the searchTerm is basically empty or just noise, ignore it
+                if (searchTerm && searchTerm.length < 2 && !/^\d+$/.test(searchTerm)) {
+                    searchTerm = null;
+                }
+
+                // If the userQuery was "empresa plano 15", and we matched "empresa" and "plano", residual is "15".
+                // searchTerm should be "15".
+
+                // Update State - FORCE update context to avoid stale "initial_input" from previous turns if this was a fresh start
+                // How do we know if it's a fresh start? 
+                // The prompt message "Analise a tabela" implies a new focus.
+                chatService.setConversationState(userId, {
+                    step: 'AWAITING_COLUMN_OR_VALUE',
+                    context: { ...context, table: tableName }
+                    // We don't clear initial_input here because it's the source of truth for the current analysis
+                });
+
+                return {
+                    text: `Analisei a tabela **${tableName}**.${searchTerm ? ` Detectei busca por: **"${searchTerm}"**` : ''}`,
+                    action: 'column_selection_v2',
+                    data: enrichedColumns.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0)), // Sort by relevance
+                    searchTerm: searchTerm
+                };
+
+            } catch (e) {
+                console.error("Deep Analysis Failed:", e);
+                return { text: "Falha ao analisar tabela: " + e.message, action: 'chat' };
+            }
+        }
+
+        // --- 1.3 HANDLE COLUMN CONFIRMATION & SEARCH ---
+        if (message.startsWith('Buscar nestas colunas:')) {
+            const rawCols = message.replace('Buscar nestas colunas:', '').trim();
+            console.log(`[FLOW] Column Search requested: ${rawCols}`);
+
+            try {
+                // 1. Get Table Context
+                const state = chatService.getConversationState(userId);
+                // Fallback: Check session.context.table OR session.lastTable (legacy)
+                const tableName = state?.context?.table || session.lastTable || session.context?.table;
+
+                if (!tableName) {
+                    return { text: "⚠️ Desculpe, perdi a referência da tabela. Por favor, selecione a tabela novamente.", action: 'chat' };
+                }
+
+                // 2. Parse Columns and Search Term
+                // Format expected: "Col1, Col2 | FILTER: searchTerm"
+                let columnsPart = rawCols;
+                let searchTerm = null;
+
+                if (rawCols.includes('| FILTER:')) {
+                    const parts = rawCols.split('| FILTER:');
+                    columnsPart = parts[0].trim();
+                    searchTerm = parts[1].trim();
+                }
+
+                const columns = columnsPart.split(',').map(c => c.trim()).filter(c => c);
+                if (columns.length === 0) {
+                    return { text: "⚠️ Nenhuma coluna identificada.", action: 'chat' };
+                }
+
+                // 3. Construct Query with Type Intelligence
+                // Fetch column metadata to know types
+                const tableColumns = await db.getColumns(tableName);
+                const safeTable = tableName.replace(/[^a-zA-Z0-9_.]/g, ''); // Allow dots for schema.table
+
+                let whereClause = "";
+                let useLimit = true; // [NEW] Control LIMIT usage
+
+                if (searchTerm) {
+                    const cleanTerm = searchTerm.replace(/'/g, "''").trim();
+                    const isNumericSearch = /^[0-9,.\s]+$/.test(cleanTerm);
+
+                    const conditions = columns.map(colName => {
+                        const colMeta = tableColumns.find(c => c.name === colName || c.COLUMN_NAME === colName);
+                        // Case-insensitive find to be safe
+                        const colMetaSafe = colMeta || tableColumns.find(c => c.name.toUpperCase() === colName.toUpperCase() || c.COLUMN_NAME.toUpperCase() === colName.toUpperCase());
+
+                        const isNumericCol = colMetaSafe && (colMetaSafe.DATA_TYPE === 'NUMBER' || colMetaSafe.type === 'NUMBER');
+
+                        if (isNumericCol && isNumericSearch) {
+                            // If user provides specific IDs, we DO NOT limit rows.
+                            useLimit = false;
+
+                            // Clean term for numeric usage (remove non-digits/dots/commas)
+                            // If it matches a list pattern "1, 2, 3"
+                            if (cleanTerm.includes(',') || cleanTerm.includes(' ')) {
+                                const numbers = cleanTerm.split(/[, ]+/).map(n => n.replace(/[^0-9.]/g, '')).filter(n => n);
+                                return `${colName} IN (${numbers.join(', ')})`;
+                            } else {
+                                const num = cleanTerm.replace(/[^0-9.]/g, '');
+                                return `${colName} = ${num}`;
+                            }
+                        } else {
+                            // Text search default - wrap column in UPPER for case-insensitive search if needed
+                            // Note: Oracle's UPPER is safe for numbers too, but less efficient.
+                            return `UPPER(${colName}) LIKE UPPER('%${cleanTerm}%')`;
+                        }
+                    });
+
+                    whereClause = `WHERE ${conditions.join(' OR ')}`;
+                }
+
+                const limitClause = useLimit ? "FETCH NEXT 100 ROWS ONLY" : "";
+                const query = `SELECT * FROM ${safeTable} ${whereClause} ${limitClause}`;
+
+                console.log(`[FLOW] Executing Query: ${query}`);
+
+                // 4. Execute
+                const result = await db.executeQuery(query);
+
+                return {
+                    text: `Encontrei **${result.rows.length} registros** com as colunas selecionadas em **${tableName}**.`,
+                    action: 'show_data',
+                    data: {
+                        tableName: tableName,
+                        metaData: result.metaData ? result.metaData.map(c => ({ name: c.name, type: c.dbType?.name || 'VARCHAR' })) : columns.map(c => ({ name: c.toUpperCase(), type: 'VARCHAR2' })),
+                        columns: result.metaData ? result.metaData.map(c => ({ name: c.name, type: c.dbType?.name || 'VARCHAR' })) : columns.map(c => ({ name: c.toUpperCase(), type: 'VARCHAR2' })), // [NEW] Legacy Fallback
+                        rows: result.rows
+                    }
+                };
+
+            } catch (e) {
+                console.error("Column Search Failed:", e);
+                return { text: "Falha ao consultar dados: " + e.message, action: 'chat' };
+            }
+        }
+
+        // --- 1.1b HANDLE CONVERSATIONAL FIND FLOW (STATE MACHINE) ---
+        const state = chatService.getConversationState(userId);
+
+        // A. INITIAL TRIGGER
+        if (message === '[SYSTEM_INIT_FIND_FLOW]') {
+            console.log(`[FLOW: INIT] User ${userId} started find record flow.`);
+            chatService.setConversationState(userId, { step: 'AWAITING_TABLE', context: {} });
+            return {
+                text: "O que você deseja encontrar? (Ex: 'Cliente 123' ou 'Contrato X')",
+                action: 'chat' // Just a prompt
+            };
+        }
+
+        // B. STATE: AWAITING_TABLE
+        if (state && state.step === 'AWAITING_TABLE') {
+            console.log(`[FLOW: AWAITING_TABLE] Processing input: ${message}`);
+
+            // 1. NLP Extraction (Intelligent parsing)
+            let intentData = { table: null, column: null, value: null };
+
+            if (this.groq) {
+                try {
+                    const intentPrompt = `
+                        Analise a frase de busca: "${message}".
+                        Extraia os conceitos em JSON (sem markdown):
+                        {
+                            "table": "nome provável da tabela ou conceito (ex: cliente)",
+                            "column": "nome da coluna ou conceito (ex: contrato, cpf)",
+                            "value": "valor da busca (ex: 123, Maria)",
+                            "is_explicit_table": boolean (true se o usuário citou 'tabela' explicitamente)
+                        }
+                    `;
+                    const extracted = await this.promptLLM(intentPrompt);
+                    const jsonStr = extracted.replace(/```json/g, '').replace(/```/g, '').trim();
+                    intentData = JSON.parse(jsonStr);
+                    console.log("[FLOW] NLP Intent:", intentData);
+                } catch (e) {
+                    console.warn("[FLOW] NLP specific parsing failed, falling back to basic extraction.", e);
+                    // Fallback basic extraction
+                    // [FIX] Allow spaces for multi-word tables (e.g. "tabela empresa conveniada")
+                    // Stop at obvious delimiters like "onde", "com", "que" if needed, or just grab the phrase.
+                    const tableMatch = message.match(/(?:tabela|de|em)\s+([a-zA-Z0-9_$#\.\s]+?)(?:\s+(?:onde|com|que|cujo)|$)/i);
+                    intentData.table = tableMatch ? tableMatch[1].trim() : message.trim();
                 }
             } else {
-                session.status = 'IDLE';
-                session.payload = null;
+                intentData.table = message.trim();
+            }
+
+            // 2. Resolve Table
+            let tables = [];
+            // A. Try explicit table search first
+            if (intentData.table && intentData.table !== 'null') {
+                tables = await db.findObjects(intentData.table);
+            }
+
+            // B. If no table found, but we have a column concept (Reverse Lookup)
+            // Example: "Find contract 123" -> Table is null, Column is "contract"
+            if (tables.length === 0 && intentData.column && intentData.column !== 'null') {
+                console.log(`[FLOW] Reverse Lookup for column: ${intentData.column}`);
+                const reverseTables = await db.findTablesByColumn(intentData.column);
+                if (reverseTables.length > 0) {
+                    tables = reverseTables;
+                    // We trust these tables contain the column, so we might want to hint that.
+                }
+            }
+
+            // 3. Handle Results
+            if (tables.length === 0) {
                 return {
-                    text: "🆗 Ação cancelada. O que gostaria de fazer agora?",
-                    action: "text_response"
+                    text: `Não encontrei tabela ou coluna relacionada a "${intentData.table || intentData.column || message}". Tente ser mais específico, ex: "Contrato 123 na tabela Vendas".`,
+                    action: 'chat'
+                };
+            } else if (tables.length === 1) {
+                // Exact Match
+                const selectedTable = tables[0].full_name || tables[0].object_name;
+
+                // If we also extracted a VALUE, we might be able to jump ahead?
+                // For now, let's Stick to Protocol but Pre-Fill context
+                chatService.setConversationState(userId, {
+                    step: 'AWAITING_COLUMN_OR_VALUE',
+                    context: {
+                        table: selectedTable,
+                        initial_input: message,
+                        suggested_column: intentData.column,
+                        suggested_value: intentData.value
+                    }
+                });
+
+                // Check if we can auto-suggest the column confirmation
+                let responseText = `Encontrei a tabela **${selectedTable}**.`;
+                if (intentData.column && intentData.value) {
+                    responseText += ` Deseja buscar **${intentData.value}** na coluna **${intentData.column}**? (Responda Sim ou informe a coluna correta)`;
+                } else {
+                    responseText += ` Qual coluna deseja filtrar?`;
+                }
+
+                return {
+                    text: responseText,
+                    action: 'column_selection_v2',
+                    data: await db.getColumns(selectedTable)
+                };
+
+            } else {
+                // Ambiguous - [NEW] Confidence-Based Logic
+
+                // 1. Calculate Scores
+                const candidates = tables.map(t => {
+                    const score = this.calculateMatchScore(intentData.table, t.object_name);
+                    return { ...t, score };
+                }).sort((a, b) => b.score - a.score);
+
+                const topCandidate = candidates[0];
+                const highConfidenceCandidates = candidates.filter(c => c.score >= 0.9);
+
+                // 2. Decision Matrix
+                // A. Clear Winner (Score >= 0.93 [User Req])
+                if (topCandidate.score >= 0.93 && (candidates.length === 1 || (candidates[1] && topCandidate.score - candidates[1].score > 0.3))) {
+                    // Treat as exact match (Auto-JUMP)
+                    return this.handleTableSelection(userId, topCandidate.object_name, intentData);
+                }
+
+                // B. Small Set of High Confidence (<= 3 items with Score >= 0.83)
+                const showableCandidates = candidates.filter(c => c.score >= 0.83).slice(0, 3);
+
+                if (showableCandidates.length > 0 && showableCandidates.length <= 3) {
+                    chatService.setConversationState(userId, {
+                        step: 'RESOLVING_TABLE',
+                        context: { initial_input: message }
+                    });
+
+                    return {
+                        text: `Encontrei **${showableCandidates.length}** tabelas com alta relevância para "${intentData.table}". Qual delas?`,
+                        action: 'table_selection_v2',
+                        data: showableCandidates.map(t => ({
+                            owner: t.owner,
+                            table_name: t.object_name,
+                            full_name: t.full_name,
+                            comments: t.comments || `Confiança: ${(t.score * 100).toFixed(0)}%`
+                        }))
+                    };
+                }
+
+                // C. Too Many or Low Confidence -> ASK (The "Think" Loop)
+                // Use LLM to generate a smart clarifying question based on the top candidates
+                const topNames = candidates.slice(0, 5).map(c => c.object_name).join(', ');
+
+                return {
+                    text: `Encontrei **${tables.length}** tabelas relacionadas a "${intentData.table}", mas não tenho certeza qual você quer (Ex: ${topNames}...). \n\nPoderia ser mais específico? Diga o **nome completo** ou um **campo** que essa tabela deve ter.`,
+                    action: 'chat'
                 };
             }
         }
+
+        // C. STATE: RESOLVING_TABLE (User clicked a table pill or typed specific name)
+        if (state && state.step === 'RESOLVING_TABLE') {
+            // [NEW] 1. Rejection Handler
+            if (message.match(/^(não|nao|nenhuma|errado|incorreto|not)/i)) {
+                chatService.clearConversationState(userId);
+                return {
+                    text: "Entendido. Aparentemente não encontrei a tabela certa. 😓\n\nPoderia me dizer o **nome correto** ou um **termo diferente** para eu buscar?",
+                    action: 'chat'
+                };
+            }
+
+            // Assume input is the table name selected/typed
+            // If it came from button, it might be [SELECTION_TABLE] X.
+            // Let's assume plain text for now, or check for specific protocol.
+
+            let selectedTable = message.trim();
+            if (message.startsWith('[SYSTEM_SELECTION_TABLE]')) {
+                selectedTable = message.replace('[SYSTEM_SELECTION_TABLE]', '').trim();
+            } else if (message.startsWith('[SELECTION_TABLE]')) {
+                selectedTable = message.replace('[SELECTION_TABLE]', '').trim();
+            }
+
+            // Verify
+            const cols = await db.getColumns(selectedTable);
+            if (cols.length > 0) {
+                // [NEW] Use helper
+                return this.handleTableSelection(userId, selectedTable, state.context);
+            } else {
+                return { text: `Não consegui ler a tabela ${selectedTable}. Tente outra.`, action: 'chat' };
+            }
+        }
+    }
+
+    // [NEW] Helper for Match Scoring
+    calculateMatchScore(term, tableName) {
+        if (!term || !tableName) return 0;
+        const cleanTerm = term.toUpperCase().replace(/[^A-Z0-9\s]/g, '').trim(); // Keep spaces for tokenization
+        const cleanTable = tableName.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+        let score = 0.0;
+
+        // 1. Base String Score (Exact or Containment)
+        if (cleanTable === cleanTerm.replace(/\s/g, '')) {
+            score = 1.0;
+        } else if (cleanTable.includes(cleanTerm.replace(/\s/g, ''))) {
+            // Contiguous match (e.g. "PESSOA" in "TB_PESSOA")
+            const ratio = cleanTerm.length / cleanTable.length;
+            score = 0.6 + (ratio * 0.4);
+        } else {
+            // 1.1 Token-Based Matching (New Requirement: "empresa conveniada" -> "TB_EMPRESA_CONVENIADA")
+            const tokens = cleanTerm.split(/\s+/).filter(t => t.length > 2); // Ignore 'da', 'de'
+            if (tokens.length > 1) {
+                let matches = 0;
+                tokens.forEach(token => {
+                    if (cleanTable.includes(token)) matches++;
+                });
+
+                // If ALL tokens match, high confidence
+                if (matches === tokens.length) {
+                    score = 0.95; // Very strong signal
+                } else if (matches > 0) {
+                    // Partial token match
+                    score = 0.5 + (matches / tokens.length * 0.4);
+                }
+            } else if (tokens.length === 1) {
+                // Single word fallback
+                if (cleanTable.includes(tokens[0])) {
+                    score = 0.5;
+                }
+            }
+        }
+
+        // 2. [NEW] Neural Memory Boost
+        try {
+            const activations = neuralService.activate(term);
+            const memoryHit = activations.find(node => node.id === tableName.toUpperCase());
+            if (memoryHit) {
+                console.log(`[NEURAL] Memory Hit: ${term} -> ${tableName} (Weight: ${memoryHit.relevance})`);
+                // Add significant boost
+                score += memoryHit.relevance;
+            }
+        } catch (e) {
+            console.warn("[NEURAL] Validation failed:", e);
+        }
+
+        return Math.min(score, 2.0);
+    }
+
+    // [NEW] Helper for Transitioning to Column Selection
+    async handleTableSelection(userId, tableName, contextData) {
+        // [NEW] Teach Neural Network (Success Memory)
+        if (contextData.initial_input) {
+            // Learn: Initial Term -> Selected Table
+            // Extract the "Concept" from the initial input if possible, or use the whole short phrase
+            // Simple heuristic: If input is short (< 30 chars), treat as Term.
+            const term = contextData.initial_input.trim();
+            if (term.length < 30) {
+                neuralService.addEdge(term, tableName, 1.0, 'user_defined');
+                console.log(`[NEURAL] Learned: "${term}" -> ${tableName}`);
+            }
+        }
+
+        // Fetch Columns
+        const cols = await db.getColumns(tableName);
+
+        chatService.setConversationState(userId, {
+            step: 'AWAITING_COLUMN_OR_VALUE',
+            context: {
+                table: tableName,
+                initial_input: contextData.initial_input,
+                suggested_column: contextData.suggested_column || contextData.column,
+                suggested_value: contextData.suggested_value || contextData.value
+            }
+        });
+
+        let responseText = `Tabela **${tableName}** selecionada.`;
+        if (contextData.column && contextData.value) {
+            responseText += ` Deseja buscar **${contextData.value}** na coluna **${contextData.column}**?`;
+        } else {
+            responseText += ` Qual coluna deseja filtrar?`;
+        }
+
+        return {
+            text: responseText,
+            action: 'column_selection_v2',
+            data: cols.map(c => c.name) // Simple list, deep analysis happens if they select 'Analise a tabela'
+        };
+
+        // D. STATE: AWAITING_COLUMN_OR_VALUE
+        if (state && state.step === 'AWAITING_COLUMN_OR_VALUE') {
+            const table = state.context.table;
+            const suggestedCol = state.context.suggested_column;
+            const suggestedVal = state.context.suggested_value;
+
+            let input = message.trim();
+
+            // Handle Auto-Confirmation logic
+            // If we suggested "Search 123 in Contract?" and user says "Sim"
+            if (suggestedCol && suggestedVal && (input.match(/^(sim|ok|confirmo|yes|s|certo)/i))) {
+                // Fast-track to execution
+                chatService.setConversationState(userId, {
+                    step: 'AWAITING_VALUE',
+                    context: { ...state.context, column: suggestedCol, value: suggestedVal } // Pre-fill value
+                });
+                // We recursively call logic or just verify column here? 
+                // Let's verify column to be safe
+                input = suggestedCol;
+            }
+
+            let col = input;
+            if (message.startsWith('[SELECTION_COLUMN]')) {
+                col = message.replace('[SELECTION_COLUMN]', '').trim();
+            }
+
+            // Check if it's a valid column
+            const cols = await db.getColumns(table);
+            const validCol = cols.find(c => c.name.toUpperCase() === col.toUpperCase());
+
+            // If not exact match, try fuzzy if user typed a name
+            let bestMatch = validCol;
+            if (!bestMatch && !message.startsWith('[SELECTION_COLUMN]')) {
+                bestMatch = cols.find(c => c.name.toUpperCase().includes(col.toUpperCase()));
+            }
+
+            if (bestMatch) {
+                // Column Identified.
+                // If we ALREADY have a value (from one-shot), use it.
+                if (suggestedVal && (input.match(/^(sim|ok)/i) || bestMatch.name.toUpperCase().includes(suggestedCol?.toUpperCase()))) {
+                    // Proceed directly to search
+                    // We skip AWAITING_VALUE step if we have it
+                    return this.performSearch(userId, table, bestMatch.name, suggestedVal);
+                }
+
+                chatService.setConversationState(userId, {
+                    step: 'AWAITING_VALUE',
+                    context: { ...state.context, column: bestMatch.name }
+                });
+                return {
+                    text: `Busca pela coluna **${bestMatch.name}**. Qual o valor?`,
+                    action: 'chat'
+                };
+            } else {
+                // Not a column? Maybe it's the value and user expects us to guess the column?
+                // Complex. For V1, force column selection if loop.
+                // Or try LLM helper to guess column "WHERE X = message"
+                return {
+                    text: `Coluna "${col}" não encontrada em ${table}. Selecione abaixo:`,
+                    action: 'column_selection_v2',
+                    data: cols.map(c => c.name)
+                };
+            }
+        }
+
+        // E. STATE: AWAITING_VALUE
+        if (state && state.step === 'AWAITING_VALUE') {
+            const { table, column } = state.context;
+            const value = message.trim();
+            return this.performSearch(userId, table, column, value);
+        }
+
+        // --- END CONVERSATIONAL FLOW ---
 
 
         // --- 1.1 HANDLE LEARNING RESPONSES (Phase 1) ---
         if (session.status === 'AWAITING_TABLE_SELECTION') {
             // User selected a table. Learn connection: originalTerm -> selectedTable
-            const selectedTable = message.match(/(?:Consultar tabela|Use a tabela)\s+([a-zA-Z0-9_$.]+)/i)?.[1]?.trim().toUpperCase();
+            const selectedTable = message.match(/(?:Consultar tabela|Use a tabela|\[SYSTEM_SELECTION_TABLE\])\s+([a-zA-Z0-9_$.]+)/i)?.[1]?.trim().toUpperCase();
             const { originalTerm, originalData } = session.payload;
 
             // 1. TEACH NEURAL NETWORK
@@ -242,7 +833,7 @@ class AiService {
 
             // Regex to extract column from standard UI messages (singular or plural start)
             let selectedCol = null;
-            const colMatch = message.match(/(?:coluna|colunas)\s+([a-zA-Z0-9_$#]+)/i);
+            const colMatch = message.match(/(?:coluna|colunas|\[SELECTION_COLUMN\])\s+([a-zA-Z0-9_$#]+)/i);
             if (colMatch) selectedCol = colMatch[1].toUpperCase();
 
             const { originalTerm, originalData, tableName, mode } = session.payload;
@@ -326,6 +917,16 @@ class AiService {
         // --- 3. RETURN RESULT DIRECTLY ---
         // If the result already has 'text' and 'action', it's a finished response.
         return result;
+    }
+
+    // Helper Method
+    async performSearch(userId, table, column, value) {
+        chatService.clearConversationState(userId);
+        return await this.executeAction({
+            action: 'find_record',
+            data: { table_name: table, column_name: column, value: value },
+            text: `Buscando **${value}** em **${table}.${column}**...`
+        }, userId);
     }
 
     async processWithGroq(message, history, userId) {
@@ -694,14 +1295,15 @@ class AiService {
 
             return await this.executeAction({
                 action: 'column_override',
-                data: { columnName: newCol },
-                text: `[Modo Correção] Entendido. Vou usar a coluna **${newCol}** na próxima busca.`
+                data: { column_name: newCol }, // We'll infer table from session or ask
+                text: `[Correção] Entendido. Vamos focar na coluna **${newCol}**.`
             }, userId);
         }
 
+        // [FIX] Default Fallback for Local Mode (Regex failed)
         return {
-            text: "🤖 [Modo Local] Não entendi. Tente usar formatos padrão como 'Buscar tabelas de X'.",
-            action: null
+            text: "Não entendi o comando. No modo offline, tente usar:\n- 'Buscar [valor] em [tabela]'\n- 'Listar tabelas [termo]'\n- 'Estrutura da tabela [nome]'",
+            action: 'chat'
         };
     }
 
@@ -1041,7 +1643,10 @@ class AiService {
     // Helper to resolve column names (Fuzzy, Abbrev, Exact)
     resolveColumn(name, columns) {
         if (!name) return null;
-        const n = name.toUpperCase();
+        let n = name.toUpperCase();
+
+        // [NEW] Remove stopwords (da, de, do)
+        n = n.replace(/\b(DA|DE|DO|DOS|DAS|O|A|EM)\b/g, '').replace(/\s+/g, '_').replace(/^_+|_+$/g, '');
 
         // 1. Exact Match
         let match = columns.find(c => c.COLUMN_NAME === n);
@@ -1055,7 +1660,8 @@ class AiService {
             'CODIGO': ['CD', 'COD', 'CODE'],
             'VALOR': ['VL', 'VAL'],
             'OBS': ['TX', 'DS', 'OBSERVACAO'],
-            'STATUS': ['FL', 'ST', 'SIT', 'SITUACAO']
+            'STATUS': ['FL', 'ST', 'SIT', 'SITUACAO'],
+            'EMPRESA': ['EMP', 'EMPRESA'] // Added explicit mapping if needed
         };
 
         // Check keys first (e.g. if user said "NM")
@@ -1064,7 +1670,7 @@ class AiService {
         // Check replacements
         for (const [key, prefixes] of Object.entries(commonMap)) {
             if (n.includes(key)) {
-                // User said "NOME FANTASIA". Try replacing NOME with NM -> "NM FANTASIA"
+                // User said "NOME FANTASIA". Try replacing NOME with NM -> "NM_FANTASIA"
                 // Check each prefix
                 for (const p of prefixes) {
                     const testName = n.replace(key, p).replace(/\s+/g, '_'); // "NM_FANTASIA"
@@ -1106,8 +1712,6 @@ class AiService {
         session.lastAction = 'find_record';
         session.lastPayload = { ...data, column_name: columnName };
         session.lastTable = tableName;
-
-        if (!tableName) return { text: "Por favor, informe o nome da tabela." };
 
         if (!tableName) return { text: "Por favor, informe o nome da tabela." };
 
@@ -1173,26 +1777,13 @@ class AiService {
                 targetCol = this.resolveColumn(columnName, columns);
 
                 if (!targetCol) {
-                    // Fuzzy Search for candidates to suggest
-                    const candidates = columns.filter(c =>
-                        c.COLUMN_NAME.includes(columnName) ||
-                        columnName.includes(c.COLUMN_NAME)
-                    ).map(c => c.COLUMN_NAME);
-
-                    if (candidates.length > 0) {
-                        return {
-                            text: `Não encontrei a coluna **"${columnName}"** em **${tableName}**. Você quis dizer alguma dessas?`,
-                            action: 'clarification',
-                            data: {
-                                question: `Qual coluna você quer usar?`,
-                                options: candidates.slice(0, 5)
-                            }
-                        };
-                    }
-
+                    // Fallback: If we can't find the specific column, SHOW THE LIST
+                    // as requested by user ("exibir a lista das colunas para o usuário selecionar")
+                    // [UX] Explicitly mention failure and ensure NO column is auto-selected
                     return {
-                        text: `Não encontrei a coluna **"${columnName}"** na tabela **${tableName}**. Por favor, verifique o nome.`,
-                        action: 'chat' // Should we list all columns? Maybe too big.
+                        text: `Identifiquei a tabela **${tableName}**, mas não consegui associar o termo "**${columnName}**" a nenhuma coluna específica.\n\nPor favor, selecione manualmente na lista abaixo:`,
+                        action: 'column_selection_v2',
+                        data: columns.map(c => ({ ...c, suggested: false })) // Force uncheck all
                     };
                 }
             } else {
@@ -1217,27 +1808,11 @@ class AiService {
                     targetCol = stringCols[0];
                 } else {
                     // AMBIGUITY: Multiple possibilities. ASK THE USER.
-                    const options = [
-                        ...semanticCols.map(c => c.COLUMN_NAME),
-                        ...stringCols.slice(0, 5).map(c => c.COLUMN_NAME)
-                    ];
-
-                    // Deduplicate
-                    const uniqueOptions = [...new Set(options)].slice(0, 6);
-
-                    if (uniqueOptions.length > 0) {
-                        return {
-                            text: `Em qual coluna da tabela **${tableName}** devo buscar o valor **"${values[0]}"**?`,
-                            action: 'clarification',
-                            data: {
-                                question: `Escolha a coluna para busca:`,
-                                options: uniqueOptions
-                            }
-                        };
-                    }
-
-                    // Fallback if no obvious columns (rare)
-                    targetCol = columns[0];
+                    return {
+                        text: `Encontrei a tabela **${tableName}**, mas há várias colunas possíveis.\nPor favor, selecione onde devo buscar **"${values[0]}"**:`,
+                        action: 'column_selection_v2',
+                        data: columns.map(c => c.name)
+                    };
                 }
             }
 

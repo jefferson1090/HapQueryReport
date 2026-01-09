@@ -20,6 +20,8 @@ import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import AiChat from './AiChat'; // V3 Chat Component
 import { MessageSquare } from 'lucide-react';
+import SmartAnalysisPanel from './SmartAnalysisPanel'; // [NEW] Smart Analysis Panel
+
 
 // DATA SOURCES CONFIGURATION
 const CARGA_OPTS = [
@@ -383,6 +385,13 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
     const [isLoadingTableColumns, setIsLoadingTableColumns] = useState(false);
     const [isChatOpen, setIsChatOpen] = useState(false); // V3 Chat Toggle
 
+    // [NEW] Smart Analysis Mode State
+    // This replaces the separate 'activeTab === find-record' logic
+    const [smartAnalysisMode, setSmartAnalysisMode] = useState(false);
+    const [analysisData, setAnalysisData] = useState(null);
+
+
+
 
     // REF PROXY REMOVED - Direct Access Restored
     useEffect(() => {
@@ -437,6 +446,19 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
             window.removeEventListener('hap-draft-table', handleDraftTable);
         };
     }, []);
+
+    // [NEW] Smart Resolver Listener (inside AiBuilder now)
+    const handleSmartResolver = useCallback((e) => {
+        console.log("AiBuilder received Smart Resolver event:", e.detail);
+        setAnalysisData(e.detail);
+        setSmartAnalysisMode(true);
+        setActiveView('smart_analysis'); // Use a pseudo-view or just rely on smartAnalysisMode
+    }, []);
+
+    useEffect(() => {
+        window.addEventListener('hap-show-smart-resolver', handleSmartResolver);
+        return () => window.removeEventListener('hap-show-smart-resolver', handleSmartResolver);
+    }, [handleSmartResolver]);
 
     // Persistence Effect
     useEffect(() => {
@@ -799,6 +821,23 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
                     } else {
                         setViewData(data.data);
                     }
+                } else if (data.action === 'table_selection_v2') {
+                    // New V2 Flow: Inline Table Selection (using same UI as search results)
+                    if (Array.isArray(data.data)) {
+                        const tables = data.data.map(t => ({
+                            owner: t.owner || (t.full_name && t.full_name.includes('.') ? t.full_name.split('.')[0] : 'SUGESTÃO'),
+                            table_name: t.table_name || (t.full_name && t.full_name.includes('.') ? t.full_name.split('.')[1] : t.full_name || t),
+                            full_name: t.full_name || t,
+                            comments: t.comments || 'Sugerida pela IA'
+                        }));
+                        setAvailableTables(tables);
+                        setActiveView('table_selection'); // Reuse or create specific view
+                        setViewData(tables);
+                    }
+                } else if (data.action === 'column_selection_v2') {
+                    // New V2 Flow: Inline Column Selection
+                    setActiveView('column_selection');
+                    setViewData(data.data);
                 } else if (data.action === 'agent_report') {
                     setActiveView('agent_report');
                     setViewData(data.data);
@@ -4752,8 +4791,8 @@ From vw_empresa_conveniada_cad e
 
                                                 <button
                                                     onClick={() => {
-                                                        // Send selection back to AI Sidebar using event
-                                                        const msg = `Selecionar a tabela ${table.full_name || table.table_name}. Continue a análise.`;
+                                                        // Send selection back to AI Sidebar using hidden system event
+                                                        const msg = `[SYSTEM_SELECTION_TABLE] ${table.full_name || table.table_name}`;
                                                         window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', {
                                                             detail: { text: msg, autoSend: true }
                                                         }));
@@ -4763,7 +4802,7 @@ From vw_empresa_conveniada_cad e
                                                     }}
                                                     className="w-full py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold text-xs transition-colors flex items-center justify-center gap-2 shadow-sm shadow-green-200"
                                                 >
-                                                    Selecionar Tabela →
+                                                    Exibir Dados
                                                 </button>
                                             </motion.div>
                                         ))}
@@ -5578,7 +5617,49 @@ From vw_empresa_conveniada_cad e
                 {/* Body */}
                 <div className={`flex-1 overflow-hidden relative ${activeView === 'welcome' ? 'bg-gray-50 flex flex-col justify-center' : 'bg-white'}`}>
 
-                    {activeView === 'welcome' && (
+                    {/* [NEW] SMART ANALYSIS PANEL OVERRIDE */}
+                    {smartAnalysisMode ? (
+                        <SmartAnalysisPanel
+                            resolverData={analysisData}
+                            resultData={viewData}
+                            isActive={true}
+                            onAction={(action, data) => {
+                                if (action === 'select_table') {
+                                    window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', {
+                                        detail: { text: `Analise a tabela ${data.full_name}`, autoSend: true }
+                                    }));
+                                    const payload = Array.isArray(data) ? data.join(', ') : data;
+                                    window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', {
+                                        detail: { text: `Buscar nestas colunas: ${payload}`, autoSend: true }
+                                    }));
+                                } else if (action === 'update_search_value') {
+                                    // [NEW] Trigger search with new value
+                                    window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', {
+                                        detail: {
+                                            text: `[SYSTEM: UPDATE_SEARCH] ${data.value}`,
+                                            autoSend: true,
+                                            invisible: true
+                                        }
+                                    }));
+                                } else if (action === 'close') {
+                                    window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', {
+                                        detail: { text: '[SYSTEM: CLEAR_CONTEXT]', autoSend: true, invisible: true } // Internal reset
+                                    }));
+                                    setSmartAnalysisMode(false);
+                                    setActiveView('welcome');
+                                    setViewData(null);
+                                } else if (action === 'close_results') {
+                                    // Just clear the results, but keep analysisData (columns) open
+                                    // Don't fully reset context, just the "result" part
+                                    setViewData(null);
+                                    // Ideally we tell backend to step back? 
+                                    // But frontend state management is enough to "go back" visually.
+                                }
+                            }}
+                        />
+                    ) : null}
+
+                    {activeView === 'welcome' && !smartAnalysisMode && (
                         <StartScreen
                             ref={startScreenRef}
                             menuState={menuState}
@@ -5665,7 +5746,7 @@ From vw_empresa_conveniada_cad e
                         />
                     )}
                     {activeView === 'agent_report' && viewData && renderRoutineReport()}
-                    {activeView === 'data' && viewData && (
+                    {activeView === 'data' && viewData && !smartAnalysisMode && (
                         <div className="flex flex-col h-full bg-white">
                             {/* Header with Close Button */}
                             <div className="p-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center shadow-sm z-20">

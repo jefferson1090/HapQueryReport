@@ -60,9 +60,11 @@ const AiChat = ({ isVisible, onClose }) => {
             textareaRef.current.style.height = 'auto';
         }
 
-        // 1. Optimistic UI: Add User Message
-        const tempUserMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
-        setMessages(prev => [...prev, tempUserMsg]);
+        // 1. Optimistic UI: Add User Message (Only if not a system command)
+        if (!text.startsWith('[SYSTEM_')) {
+            const tempUserMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
+            setMessages(prev => [...prev, tempUserMsg]);
+        }
         setIsLoading(true);
 
         try {
@@ -127,6 +129,21 @@ const AiChat = ({ isVisible, onClose }) => {
 
                     aiContent += "\n\nEncontrei algumas opções parecidas. Selecione uma ao lado. 👉";
                 }
+            } else if (data.action === 'table_selection_v2' && Array.isArray(data.data)) {
+                setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent('hap-show-smart-resolver', {
+                        detail: { type: 'table', data: data.data, contextText: data.text, searchTerm: data.searchTerm }
+                    }));
+                }, 100);
+                aiContent = data.text || "Selecione a tabela desejada na tela principal... 🖥️";
+
+            } else if (data.action === 'column_selection_v2' && Array.isArray(data.data)) {
+                setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent('hap-show-smart-resolver', {
+                        detail: { type: 'column', data: data.data, contextText: data.text, searchTerm: data.searchTerm }
+                    }));
+                }, 100);
+                aiContent = data.text || "Selecione a coluna desejada na tela principal... 🖥️";
             } else if (data.action === 'describe_table' && data.data) {
 
                 const { tableName, columns } = data.data;

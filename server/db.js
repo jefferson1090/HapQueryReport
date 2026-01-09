@@ -176,7 +176,10 @@ async function findObjects(term, connectionParams = null) {
         }
 
         // 2. Fuzzy Match (Fallback)
-        const fuzzyParams = { term: `%${term.toUpperCase()}%` };
+        // [FIX] Replace spaces with % to handle "empresa conveniada" -> "EMPRESA%CONVENIADA" (matches TB_EMPRESA_CONVENIADA)
+        const cleanTerm = term.toUpperCase().replace(/\s+/g, '%');
+        const fuzzyParams = { term: `%${cleanTerm}%` };
+
         const fuzzyResult = await conn.execute(
             `${baseQuery} AND UPPER(OBJECT_NAME) LIKE :term ORDER BY OBJECT_TYPE, (CASE WHEN OWNER IN ('INCORPORA', 'HUMASTER') THEN 0 ELSE 1 END), OWNER, OBJECT_NAME`,
             fuzzyParams
@@ -194,6 +197,48 @@ async function findObjects(term, connectionParams = null) {
     }
 }
 
+async function findTablesByColumn(columnName, connectionParams = null) {
+    let conn;
+    try {
+        const term = columnName ? columnName.trim().toUpperCase() : '';
+        if (!term) return [];
+
+        conn = await getConnection(connectionParams);
+
+        // Blocklist for system schemas
+        const ownerBlocklist = `
+            'SYS', 'SYSTEM', 'OUTLN', 'DBSNMP', 'APPQOSSYS', 'WMSYS', 'CTXSYS', 
+            'XDB', 'ORDDATA', 'ORDSYS', 'MDSYS', 'OLAPSYS', 'LBACSYS', 'DVSYS', 
+            'GSMADMIN_INTERNAL', 'APEX_040000', 'APEX_030200', 'AUDSYS'
+        `;
+
+        // Find tables that have a column similar to the term
+        const query = `
+            SELECT DISTINCT OWNER, TABLE_NAME 
+            FROM ALL_TAB_COLUMNS 
+            WHERE UPPER(COLUMN_NAME) LIKE :term
+            AND OWNER NOT IN (${ownerBlocklist})
+            FETCH NEXT 20 ROWS ONLY
+        `;
+
+        // Try exact match first, then fuzzy
+        let result = await conn.execute(query, { term: term });
+
+        if (result.rows.length === 0) {
+            result = await conn.execute(query, { term: `%${term}%` });
+        }
+
+        return result.rows.map(row => ({
+            owner: row[0],
+            table_name: row[1],
+            full_name: `${row[0]}.${row[1]}`
+        }));
+
+    } finally {
+        if (conn) await conn.close();
+    }
+}
+
 async function getColumns(tableNameInput, connectionParams = null) {
     let conn;
     try {
@@ -202,11 +247,12 @@ async function getColumns(tableNameInput, connectionParams = null) {
             [owner, tableName] = tableNameInput.split('.');
         } else {
             // Fallback if no owner provided
-            // Use user from connection params if available, else fallback
-            const currentUser = (connectionParams && connectionParams.user) ? connectionParams.user.toUpperCase() : (lastConnectionParams ? lastConnectionParams.user.toUpperCase() : 'USER');
-            owner = currentUser;
+            // Allow searching across all schemas if not specific
+            owner = null;
             tableName = tableNameInput;
         }
+
+        console.log(`[DB] getColumns for: ${tableName}, Owner: ${owner || 'ANY'}`);
 
         conn = await getConnection(connectionParams);
 
@@ -273,14 +319,30 @@ async function getColumns(tableNameInput, connectionParams = null) {
             finalRows = finalRows.filter(r => r.OWNER === firstOwner);
         }
 
+        if (finalRows.length > 0) {
+            console.log("[DB] First Row Sample:", finalRows[0]);
+        }
+
         // Map to ensure uppercase keys (just in case) and add view definition if exists
-        const structure = finalRows.map(row => ({
-            COLUMN_NAME: row.COLUMN_NAME,
-            DATA_TYPE: row.DATA_TYPE,
-            DATA_LENGTH: row.DATA_LENGTH,
-            NULLABLE: row.NULLABLE,
-            DATA_DEFAULT: row.DATA_DEFAULT
-        }));
+        // Handle case sensitivity issues from driver AND Array format fallback
+        const structure = finalRows.map(row => {
+            if (Array.isArray(row)) {
+                return {
+                    COLUMN_NAME: row[0],
+                    DATA_TYPE: row[1],
+                    DATA_LENGTH: row[2],
+                    NULLABLE: row[3],
+                    DATA_DEFAULT: row[4]
+                };
+            }
+            return {
+                COLUMN_NAME: row.COLUMN_NAME || row.column_name,
+                DATA_TYPE: row.DATA_TYPE || row.data_type,
+                DATA_LENGTH: row.DATA_LENGTH || row.data_length,
+                NULLABLE: row.NULLABLE || row.nullable,
+                DATA_DEFAULT: row.DATA_DEFAULT || row.data_default
+            };
+        });
 
         if (viewText) {
             structure.viewDefinition = viewText;
@@ -648,6 +710,7 @@ module.exports = {
     execute,
     oracledb,
     findObjects,
+    findTablesByColumn,
     getSchemaDictionary,
     getExplainPlan
 };

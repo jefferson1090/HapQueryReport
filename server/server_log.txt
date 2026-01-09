@@ -1517,3 +1517,124 @@ connect ECONNREFUSED 127.0.0.1:1521
 [2026-01-06T18:59:59.440Z] Connection successful for user: c_stenio
 [2026-01-06T19:04:44.037Z] Connection successful for user: c_stenio
 [2026-01-06T19:09:56.487Z] Connection successful for user: c_stenio
+[2026-01-07T13:58:00.786Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T13:58:02.531Z] [DB] Pool created successfully.
+[2026-01-07T13:58:02.534Z] Connection successful for user: c_stenio
+[2026-01-07T14:36:27.407Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T14:36:29.564Z] [DB] Pool created successfully.
+[2026-01-07T14:36:29.565Z] Connection successful for user: c_stenio
+[2026-01-07T14:44:09.482Z] Connection successful for user: c_stenio
+[2026-01-07T14:51:57.936Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T14:51:59.676Z] [DB] Pool created successfully.
+[2026-01-07T14:51:59.678Z] Connection successful for user: c_stenio
+[2026-01-07T14:55:13.329Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T14:55:15.389Z] [DB] Pool created successfully.
+[2026-01-07T14:55:15.392Z] Connection successful for user: c_stenio
+[2026-01-07T15:00:31.004Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T15:00:33.078Z] [DB] Pool created successfully.
+[2026-01-07T15:00:33.080Z] Connection successful for user: c_stenio
+[2026-01-07T15:10:11.513Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T15:10:13.507Z] [DB] Pool created successfully.
+[2026-01-07T15:10:13.509Z] Connection successful for user: c_stenio
+[2026-01-07T15:14:52.926Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T15:14:54.404Z] [DB] Pool created successfully.
+[2026-01-07T15:14:54.405Z] Connection successful for user: c_stenio
+[2026-01-07T15:51:41.941Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T15:51:43.796Z] [DB] Pool created successfully.
+[2026-01-07T15:51:43.797Z] Connection successful for user: c_stenio
+[2026-01-07T16:38:37.007Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T16:38:38.510Z] [DB] Pool created successfully.
+[2026-01-07T16:38:38.511Z] Connection successful for user: c_stenio
+[2026-01-07T16:54:00.471Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T16:54:02.138Z] [DB] Pool created successfully.
+[2026-01-07T16:54:02.139Z] Connection successful for user: c_stenio
+[2026-01-07T16:59:17.409Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T16:59:19.198Z] [DB] Pool created successfully.
+[2026-01-07T16:59:19.200Z] Connection successful for user: c_stenio
+[2026-01-07T17:01:40.236Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T17:01:41.815Z] [DB] Pool created successfully.
+[2026-01-07T17:01:41.817Z] Connection successful for user: c_stenio
+[2026-01-07T17:05:04.577Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T17:05:06.203Z] [DB] Pool created successfully.
+[2026-01-07T17:05:06.205Z] Connection successful for user: c_stenio
+[2026-01-07T17:07:31.545Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T17:07:33.581Z] [DB] Pool created successfully.
+[2026-01-07T17:07:33.583Z] Connection successful for user: c_stenio
+[2026-01-07T17:12:55.791Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T17:12:57.347Z] [DB] Pool created successfully.
+[2026-01-07T17:12:57.349Z] Connection successful for user: c_stenio
+[2026-01-07T17:17:01.368Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T17:17:02.941Z] [DB] Pool created successfully.
+[2026-01-07T17:17:02.943Z] Connection successful for user: c_stenio
+[2026-01-07T17:21:11.325Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T17:21:13.038Z] [DB] Pool created successfully.
+[2026-01-07T17:21:13.042Z] Connection successful for user: c_stenio
+[2026-01-07T17:24:53.282Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T17:24:55.134Z] [DB] Pool created successfully.
+[2026-01-07T17:24:55.136Z] Connection successful for user: c_stenio
+[2026-01-07T17:26:10.651Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T17:26:12.686Z] [DB] Pool created successfully.
+[2026-01-07T17:26:12.688Z] Connection successful for user: c_stenio
+[2026-01-07T18:39:27.159Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T18:39:28.780Z] [DB] Pool created successfully.
+[2026-01-07T18:39:28.782Z] Connection successful for user: c_stenio
+[2026-01-07T18:46:42.975Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T18:46:44.531Z] [DB] Pool created successfully.
+[2026-01-07T18:46:44.533Z] Connection successful for user: c_stenio
+[2026-01-07T19:13:18.333Z] Connection successful for user: c_stenio
+[2026-01-07T19:17:28.518Z] Connection successful for user: c_stenio
+[2026-01-07T19:29:09.531Z] Connection successful for user: c_stenio
+[2026-01-07T19:30:22.642Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T19:30:24.347Z] [DB] Pool created successfully.
+[2026-01-07T19:30:24.349Z] Connection successful for user: c_stenio
+[2026-01-07T19:31:02.831Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T19:31:05.007Z] [DB] Pool created successfully.
+[2026-01-07T19:31:05.010Z] Connection successful for user: c_stenio
+[2026-01-07T19:33:23.255Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T19:33:24.778Z] [DB] Pool created successfully.
+[2026-01-07T19:33:24.780Z] Connection successful for user: c_stenio
+[2026-01-07T19:57:57.277Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T19:57:58.888Z] [DB] Pool created successfully.
+[2026-01-07T19:57:58.891Z] Connection successful for user: c_stenio
+[2026-01-07T20:00:40.214Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T20:00:41.724Z] [DB] Pool created successfully.
+[2026-01-07T20:00:41.726Z] Connection successful for user: c_stenio
+[2026-01-07T20:08:48.775Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-07T20:08:50.323Z] [DB] Pool created successfully.
+[2026-01-07T20:08:50.324Z] Connection successful for user: c_stenio
+[2026-01-08T18:53:34.456Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-08T18:53:35.671Z] [DB] Pool created successfully.
+[2026-01-08T18:53:35.674Z] Connection successful for user: c_stenio
+[2026-01-08T18:58:26.465Z] Connection successful for user: c_stenio
+[2026-01-08T20:29:12.330Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-08T20:29:13.492Z] [DB] Pool created successfully.
+[2026-01-08T20:29:13.493Z] Connection successful for user: c_stenio
+[2026-01-08T20:33:38.911Z] Connection successful for user: c_stenio
+[2026-01-08T20:36:59.365Z] Connection successful for user: c_stenio
+[2026-01-08T20:47:55.456Z] Connection successful for user: c_stenio
+[2026-01-08T20:55:18.463Z] Connection successful for user: c_stenio
+[2026-01-08T21:00:49.112Z] Connection successful for user: c_stenio
+[2026-01-08T21:09:08.181Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-08T21:09:09.294Z] [DB] Pool created successfully.
+[2026-01-08T21:09:09.296Z] Connection successful for user: c_stenio
+[2026-01-08T21:16:31.526Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-08T21:16:32.842Z] [DB] Pool created successfully.
+[2026-01-08T21:16:32.844Z] Connection successful for user: c_stenio
+[2026-01-08T21:21:38.691Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-08T21:21:40.336Z] [DB] Pool created successfully.
+[2026-01-08T21:21:40.338Z] Connection successful for user: c_stenio
+[2026-01-08T21:22:52.095Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-08T21:22:53.255Z] [DB] Pool created successfully.
+[2026-01-08T21:22:53.257Z] Connection successful for user: c_stenio
+[2026-01-08T21:31:07.611Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-08T21:31:09.544Z] [DB] Pool created successfully.
+[2026-01-08T21:31:09.546Z] Connection successful for user: c_stenio
+[2026-01-08T21:35:00.362Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-08T21:35:01.928Z] [DB] Pool created successfully.
+[2026-01-08T21:35:01.929Z] Connection successful for user: c_stenio
+[2026-01-08T21:36:55.228Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-08T21:36:56.421Z] [DB] Pool created successfully.
+[2026-01-08T21:36:56.423Z] Connection successful for user: c_stenio
+[2026-01-08T21:53:32.646Z] [DB] Creating new connection pool for: c_stenio_orahml01.hapvida.com.br:1521/haphml
+[2026-01-08T21:53:33.793Z] [DB] Pool created successfully.
+[2026-01-08T21:53:33.795Z] Connection successful for user: c_stenio
