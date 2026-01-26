@@ -1,0 +1,349 @@
+
+> hap-query-report-server@3.0.10 predist
+> npm run clean && npm run copy-client
+
+
+> hap-query-report-server@3.0.10 clean
+> node -e "const fs = require('fs'); fs.rmSync('dist', { recursive: true, force: true });"
+
+
+> hap-query-report-server@3.0.10 copy-client
+> powershell -ExecutionPolicy Bypass -File "./scripts/copy_assets.ps1"
+
+Building Client at: C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\scripts\..\..\client
+
+> hap-query-report-client@3.0.10 prebuild
+> npm run clean
+
+
+> hap-query-report-client@3.0.10 clean
+> node -e "const fs = require('fs'); fs.rmSync('dist', { recursive: true, force: true });"
+
+
+> hap-query-report-client@3.0.10 build
+> vite build
+
+[36mvite v7.2.6 [32mbuilding client environment for production...[36m[39m
+transforming...
+[33m[plugin vite:esbuild] src/App.jsx: [33mThis case clause will never be evaluated because it duplicates an earlier case clause[33m
+495 |                  case 'db_structure': prompt = "Exibir estrutura da tabela [NOME_DA_TABELA]"; break;
+496 |                  case 'db_data': prompt = "Ver dados da tabela [NOME_DA_TABELA]"; break;
+497 |                  case 'db_data': prompt = "Ver dados da tabela [NOME_DA_TABELA]"; break;
+    |                       ^
+498 |                  // case 'db_find': prompt = "Buscar o registro onde [CONDIÇÃO] na tabela [NOME_DA_TABELA]"; break; //...
+499 |              }
+[39m
+[32m✓[39m 5161 modules transformed.
+[33mnode_modules/vm-browserify/index.js (110:11): Use of eval in "node_modules/vm-browserify/index.js" is strongly discouraged as it poses security risks and may cause issues with minification.[39m
+rendering chunks...
+computing gzip size...
+[2mdist/[22m[32mindex.html                           [39m[1m[2m    0.47 kB[22m[1m[22m[2m │ gzip:     0.31 kB[22m
+[2mdist/[22m[32massets/hap_logo_v2-CKt1StAR.png      [39m[1m[2m   46.11 kB[22m[1m[22m
+[2mdist/[22m[32massets/hap_logo_v4-CuOd1_Iw.png      [39m[1m[2m   49.80 kB[22m[1m[22m
+[2mdist/[22m[32massets/hap_splash_text-DOYBKtUX.png  [39m[1m[2m   50.32 kB[22m[1m[22m
+[2mdist/[22m[32massets/hap_logo_sql-Bny97A2y.png     [39m[1m[2m  180.23 kB[22m[1m[22m
+[2mdist/[22m[32massets/hap_splash_icon-fIQBhgWE.png  [39m[1m[2m  191.90 kB[22m[1m[22m
+[2mdist/[22m[35massets/index-g4ivvZmI.css            [39m[1m[2m  142.63 kB[22m[1m[22m[2m │ gzip:    21.66 kB[22m
+[2mdist/[22m[36massets/SqlRunner-Cc2tUrGb.js         [39m[1m[33m  764.52 kB[39m[22m[2m │ gzip:   229.21 kB[22m
+[2mdist/[22m[36massets/index-lK18_phY.js             [39m[1m[33m6,271.93 kB[39m[22m[2m │ gzip: 1,776.51 kB[22m
+[33m
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
+[32m✓ built in 33.58s[39m
+Checking Source: C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\scripts\..\..\client\dist
+Preparing Destination: C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\scripts\..\public
+Copying assets...
+Copy complete.
+
+> hap-query-report-server@3.0.10 dist
+> npx electron-builder
+
+  • electron-builder  version=24.13.3 os=10.0.26200
+  • loaded configuration  file=package.json ("build" field)
+  • effective config  config=directories:
+  output: dist
+  buildResources: build
+appId: com.hap.queryreport
+productName: Hap-Assistente-de-Dados
+npmRebuild: false
+extraResources:
+  - filter:
+      - instantclient/**/*
+files:
+  - filter:
+      - '**/*'
+      - '!dist/**/*'
+      - '!uploads/**/*'
+      - '!server_log.txt'
+      - '!oracle-builder.exe'
+      - '!deploy.ps1'
+      - '!start_app.bat'
+publish:
+  provider: github
+  owner: jefferson1090
+  repo: HapQueryReport
+win:
+  target: nsis
+  icon: icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  runAfterFinish: false
+  include: installer.nsh
+
+  • description is missed in the package.json  appPackageFile=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\package.json
+  • @electron/rebuild not required if you use electron-builder, please consider to remove excess dependency from devDependencies
+
+To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
+  • skipped dependencies rebuild  reason=npmRebuild is set to false
+  • packaging       platform=win32 arch=x64 electron=28.3.3 appOutDir=dist\win-unpacked
+  • spawning        command=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\app-builder-bin\win\x64\app-builder.exe unpack-electron --configuration [{"platform":"win32","arch":"x64","version":"28.3.3"}] --output C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\win-unpacked --distMacOsAppName Electron.app
+  • map async       taskCount=2
+  • map async       taskCount=1
+  • map async       taskCount=73
+  • exited          command=app-builder.exe code=0 pid=32660
+  • spawning        command=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\app-builder-bin\win\x64\app-builder.exe node-dep-tree --dir C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server
+  • unresolved deps  unresolved=lodash.get@streamparser/json nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=engine.iosocket.io-adaptersocket.io-parserbase64idcors nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=ms nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=base64idcookiecorsengine.io-parser nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=ms nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=ms nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=@socket.io/component-emitter nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=ms nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=zip-streamarchiver-utilsasyncreaddir-globtar-stream nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=eventsprocessstring_decoderabort-controller nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=base64-jsieee754 nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=compress-commonsarchiver-utils nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=eventsprocessstring_decoderabort-controller nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=ieee754base64-js nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=crc-32crc32-streamis-streamnormalize-path nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=abort-controllereventsprocessstring_decoder nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=base64-jsieee754 nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=crc-32 nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=eventsprocessstring_decoderabort-controller nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=base64-jsieee754 nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=graceful-fsis-streamlazystreamlodashnormalize-path nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=package-json-from-distpath-scurryforeground-childjackspeak nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=brace-expansion nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=minipass nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=string-width-cjsstrip-ansi-cjswrap-ansi-cjs nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=strip-ansieastasianwidth nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=string-widthstrip-ansi nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=abort-controllereventsprocessstring_decoder nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=base64-jsieee754 nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=process-nextick-argsutil-deprecatecore-util-isinheritsisarray nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=safe-buffer nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=raw-bodytype-isbytesdebugon-finishedqscontent-typehttp-errors nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=safer-buffer nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=http-errorsunpipebytes nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=safer-buffer nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=form-data-encoderformdata-nodeabort-controlleragentkeepalive nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=whatwg-url nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=mkdirpobject-assignxtendappend-fieldbusboyconcat-stream nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=node-domexception nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=on-headerssafe-buffervarybytescompressible nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=lodash.escaperegexplodash.isequaltiny-typed-emitterjs-yamllazy-val nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=debugsax nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • unresolved deps  unresolved=graceful-fsjsonfileuniversalify nodeModuleDir=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules round=0
+  • exited          command=app-builder.exe code=0 pid=31808 out=[{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules","deps":[{"name":"@google/generative-ai","version":"0.24.1"},{"name":"@isaacs/cliui","version":"8.0.2"},{"name":"@pkgjs/parseargs","version":"0.11.0","optional":true},{"name":"@socket.io/component-emitter","version":"3.1.2"},{"name":"@streamparser/json","version":"0.0.6"},{"name":"@supabase/auth-js","version":"2.88.0"},{"name":"@supabase/functions-js","version":"2.88.0"},{"name":"@supabase/postgrest-js","version":"2.88.0"},{"name":"@supabase/realtime-js","version":"2.88.0"},{"name":"@supabase/storage-js","version":"2.88.0"},{"name":"@supabase/supabase-js","version":"2.88.0"},{"name":"abort-controller","version":"3.0.0"},{"name":"accepts","version":"2.0.0"},{"name":"agentkeepalive","version":"4.6.0"},{"name":"ansi-regex","version":"5.0.1"},{"name":"ansi-styles","version":"4.3.0"},{"name":"append-field","version":"1.0.0"},{"name":"archiver","version":"7.0.1"},{"name":"archiver-utils","version":"5.0.2"},{"name":"argparse","version":"2.0.1"},{"name":"async","version":"3.2.6"},{"name":"b4a","version":"1.7.3"},{"name":"balanced-match","version":"1.0.2"},{"name":"bare-events","version":"2.8.2"},{"name":"base64-js","version":"1.5.1"},{"name":"base64id","version":"2.0.0"},{"name":"body-parser","version":"2.2.1"},{"name":"brace-expansion","version":"2.0.2"},{"name":"buffer-from","version":"1.1.2"},{"name":"busboy","version":"1.6.0"},{"name":"bytes","version":"3.1.2"},{"name":"call-bind-apply-helpers","version":"1.0.2"},{"name":"call-bound","version":"1.0.4"},{"name":"color-convert","version":"2.0.1"},{"name":"color-name","version":"1.1.4"},{"name":"compress-commons","version":"6.0.2"},{"name":"compressible","version":"2.0.18"},{"name":"compression","version":"1.8.1"},{"name":"concat-stream","version":"2.0.0"},{"name":"content-disposition","version":"1.0.1"},{"name":"content-type","version":"1.0.5"},{"name":"cookie","version":"0.7.2"},{"name":"cookie-signature","version":"1.2.2"},{"name":"core-util-is","version":"1.0.2"},{"name":"cors","version":"2.8.5"},{"name":"crc-32","version":"1.2.2"},{"name":"crc32-stream","version":"6.0.0"},{"name":"cross-spawn","version":"7.0.6"},{"name":"csv-parser","version":"3.2.0"},{"name":"data-uri-to-buffer","version":"4.0.1"},{"name":"debug","version":"4.4.3"},{"name":"depd","version":"2.0.0"},{"name":"dotenv","version":"17.2.3"},{"name":"dunder-proto","version":"1.0.1"},{"name":"eastasianwidth","version":"0.2.0"},{"name":"ee-first","version":"1.1.1"},{"name":"electron-log","version":"5.4.3"},{"name":"electron-updater","version":"6.6.2"},{"name":"emoji-regex","version":"8.0.0"},{"name":"encodeurl","version":"2.0.0"},{"name":"engine.io","version":"6.6.4"},{"name":"engine.io-parser","version":"5.2.3"},{"name":"es-define-property","version":"1.0.1"},{"name":"es-errors","version":"1.3.0"},{"name":"es-object-atoms","version":"1.1.1"},{"name":"escape-html","version":"1.0.3"},{"name":"etag","version":"1.8.1"},{"name":"event-target-shim","version":"5.0.1"},{"name":"events","version":"3.3.0"},{"name":"events-universal","version":"1.0.1"},{"name":"express","version":"5.2.1"},{"name":"fast-fifo","version":"1.3.2"},{"name":"fetch-blob","version":"3.2.0"},{"name":"finalhandler","version":"2.1.1"},{"name":"foreground-child","version":"3.3.1"},{"name":"form-data-encoder","version":"1.7.2"},{"name":"formdata-node","version":"4.4.1"},{"name":"formdata-polyfill","version":"4.0.10"},{"name":"forwarded","version":"0.2.0"},{"name":"fresh","version":"2.0.0"},{"name":"fs-extra","version":"11.3.2"},{"name":"function-bind","version":"1.1.2"},{"name":"get-intrinsic","version":"1.3.0"},{"name":"get-proto","version":"1.0.1"},{"name":"gopd","version":"1.2.0"},{"name":"graceful-fs","version":"4.2.11"},{"name":"groq-sdk","version":"0.37.0"},{"name":"has-symbols","version":"1.1.0"},{"name":"hasown","version":"2.0.2"},{"name":"http-errors","version":"2.0.1"},{"name":"humanize-ms","version":"1.2.1"},{"name":"iceberg-js","version":"0.8.1"},{"name":"ieee754","version":"1.2.1"},{"name":"inherits","version":"2.0.4"},{"name":"ipaddr.js","version":"1.9.1"},{"name":"is-fullwidth-code-point","version":"3.0.0"},{"name":"is-promise","version":"4.0.0"},{"name":"is-stream","version":"2.0.1"},{"name":"isarray","version":"1.0.0"},{"name":"isexe","version":"2.0.0"},{"name":"jackspeak","version":"3.4.3"},{"name":"js-yaml","version":"4.1.1"},{"name":"json2csv","version":"6.0.0-alpha.2"},{"name":"jsonfile","version":"6.2.0"},{"name":"lazy-val","version":"1.0.5"},{"name":"lazystream","version":"1.0.1"},{"name":"lodash","version":"4.17.21"},{"name":"lodash.escaperegexp","version":"4.1.2"},{"name":"lodash.get","version":"4.4.2"},{"name":"lodash.isequal","version":"4.5.0"},{"name":"math-intrinsics","version":"1.1.0"},{"name":"media-typer","version":"1.1.0"},{"name":"merge-descriptors","version":"2.0.0"},{"name":"mime-db","version":"1.54.0"},{"name":"mime-types","version":"3.0.2"},{"name":"minimatch","version":"5.1.6"},{"name":"minimist","version":"1.2.8"},{"name":"minipass","version":"5.0.0"},{"name":"mkdirp","version":"0.5.6"},{"name":"ms","version":"2.1.3"},{"name":"multer","version":"2.0.2"},{"name":"negotiator","version":"1.0.0"},{"name":"node-domexception","version":"1.0.0"},{"name":"node-fetch","version":"3.3.2"},{"name":"normalize-path","version":"3.0.0"},{"name":"object-assign","version":"4.1.1"},{"name":"object-inspect","version":"1.13.4"},{"name":"on-finished","version":"2.4.1"},{"name":"on-headers","version":"1.1.0"},{"name":"once","version":"1.4.0"},{"name":"oracledb","version":"6.10.0"},{"name":"package-json-from-dist","version":"1.0.1"},{"name":"parseurl","version":"1.3.3"},{"name":"path-key","version":"3.1.1"},{"name":"path-scurry","version":"1.11.1"},{"name":"path-to-regexp","version":"8.3.0"},{"name":"process","version":"0.11.10"},{"name":"process-nextick-args","version":"2.0.1"},{"name":"proxy-addr","version":"2.0.7"},{"name":"qs","version":"6.14.0"},{"name":"range-parser","version":"1.2.1"},{"name":"raw-body","version":"3.0.2"},{"name":"readable-stream","version":"3.6.2"},{"name":"readdir-glob","version":"1.1.3"},{"name":"router","version":"2.2.0"},{"name":"safe-buffer","version":"5.2.1"},{"name":"safer-buffer","version":"2.1.2"},{"name":"sax","version":"1.4.3"},{"name":"send","version":"1.2.0"},{"name":"serve-static","version":"2.2.0"},{"name":"setprototypeof","version":"1.2.0"},{"name":"shebang-command","version":"2.0.0"},{"name":"shebang-regex","version":"3.0.0"},{"name":"side-channel","version":"1.1.0"},{"name":"side-channel-list","version":"1.0.0"},{"name":"side-channel-map","version":"1.0.1"},{"name":"side-channel-weakmap","version":"1.0.2"},{"name":"signal-exit","version":"4.1.0"},{"name":"socket.io","version":"4.8.1"},{"name":"socket.io-adapter","version":"2.5.5"},{"name":"socket.io-parser","version":"4.2.4"},{"name":"statuses","version":"2.0.2"},{"name":"streamsearch","version":"1.1.0"},{"name":"streamx","version":"2.23.0"},{"name":"string-width","version":"4.2.3"},{"name":"string-width-cjs","version":"4.2.3"},{"name":"string_decoder","version":"1.3.0"},{"name":"strip-ansi","version":"6.0.1"},{"name":"strip-ansi-cjs","version":"6.0.1"},{"name":"tar-stream","version":"3.1.7"},{"name":"text-decoder","version":"1.2.3"},{"name":"tiny-typed-emitter","version":"2.1.0"},{"name":"toidentifier","version":"1.0.1"},{"name":"tr46","version":"0.0.3"},{"name":"tslib","version":"2.8.1"},{"name":"type-is","version":"2.0.1"},{"name":"typedarray","version":"0.0.6"},{"name":"universalify","version":"2.0.1"},{"name":"unpipe","version":"1.0.0"},{"name":"util-deprecate","version":"1.0.2"},{"name":"vary","version":"1.1.2"},{"name":"web-streams-polyfill","version":"4.0.0-beta.3"},{"name":"webidl-conversions","version":"3.0.1"},{"name":"whatwg-url","version":"5.0.0"},{"name":"which","version":"2.0.2"},{"name":"wrap-ansi-cjs","version":"7.0.0"},{"name":"wrappy","version":"1.0.2"},{"name":"ws","version":"8.18.3"},{"name":"xtend","version":"4.0.2"},{"name":"zip-stream","version":"6.0.1"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\archiver\\node_modules","deps":[{"name":"buffer","version":"6.0.3"},{"name":"buffer-crc32","version":"1.0.0"},{"name":"readable-stream","version":"4.7.0"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\archiver-utils\\node_modules","deps":[{"name":"buffer","version":"6.0.3"},{"name":"glob","version":"10.5.0"},{"name":"minimatch","version":"9.0.5"},{"name":"minipass","version":"7.1.2"},{"name":"readable-stream","version":"4.7.0"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\body-parser\\node_modules","deps":[{"name":"iconv-lite","version":"0.7.0"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\compress-commons\\node_modules","deps":[{"name":"buffer","version":"6.0.3"},{"name":"readable-stream","version":"4.7.0"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\compression\\node_modules","deps":[{"name":"debug","version":"2.6.9"},{"name":"ms","version":"2.0.0"},{"name":"negotiator","version":"0.6.4"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\crc32-stream\\node_modules","deps":[{"name":"buffer","version":"6.0.3"},{"name":"readable-stream","version":"4.7.0"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\electron-updater\\node_modules","deps":[{"name":"builder-util-runtime","version":"9.3.1"},{"name":"fs-extra","version":"10.1.0"},{"name":"semver","version":"7.7.3"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\engine.io\\node_modules","deps":[{"name":"accepts","version":"1.3.8"},{"name":"debug","version":"4.3.7"},{"name":"mime-db","version":"1.52.0"},{"name":"mime-types","version":"2.1.35"},{"name":"negotiator","version":"0.6.3"},{"name":"ws","version":"8.17.1"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\fetch-blob\\node_modules","deps":[{"name":"web-streams-polyfill","version":"3.3.3"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\groq-sdk\\node_modules","deps":[{"name":"node-fetch","version":"2.7.0"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\json2csv\\node_modules","deps":[{"name":"commander","version":"6.2.1"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\lazystream\\node_modules","deps":[{"name":"readable-stream","version":"2.3.8"},{"name":"safe-buffer","version":"5.1.2"},{"name":"string_decoder","version":"1.1.1"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\multer\\node_modules","deps":[{"name":"media-typer","version":"0.3.0"},{"name":"mime-db","version":"1.52.0"},{"name":"mime-types","version":"2.1.35"},{"name":"type-is","version":"1.6.18"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\path-scurry\\node_modules","deps":[{"name":"lru-cache","version":"10.4.3"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\raw-body\\node_modules","deps":[{"name":"iconv-lite","version":"0.7.0"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\socket.io\\node_modules","deps":[{"name":"accepts","version":"1.3.8"},{"name":"debug","version":"4.3.7"},{"name":"mime-db","version":"1.52.0"},{"name":"mime-types","version":"2.1.35"},{"name":"negotiator","version":"0.6.3"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\socket.io-adapter\\node_modules","deps":[{"name":"debug","version":"4.3.7"},{"name":"ws","version":"8.17.1"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\socket.io-parser\\node_modules","deps":[{"name":"debug","version":"4.3.7"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\zip-stream\\node_modules","deps":[{"name":"buffer","version":"6.0.3"},{"name":"readable-stream","version":"4.7.0"}]},{"dir":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\node_modules\\@isaacs\\cliui\\node_modules","deps":[{"name":"ansi-regex","version":"6.2.2"},{"name":"ansi-styles","version":"6.2.3"},{"name":"emoji-regex","version":"9.2.2"},{"name":"string-width","version":"5.1.2"},{"name":"strip-ansi","version":"7.1.2"},{"name":"wrap-ansi","version":"8.1.0"}]}]
+  • copying files using pattern  matcher=from: C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server, to: C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\win-unpacked\resources, patterns: instantclient/**/*
+  • copying         src=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server destination=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\win-unpacked\resources
+  • spawning        command=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\app-builder-bin\win\x64\app-builder.exe icon --format ico --root C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\build --root C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server --out C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\.icon-ico --input icon.png
+  • path doesn't exist  path=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\build\icon.png
+  • path resolved   path=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\icon.png outputFormat=ico
+  • exited          command=app-builder.exe code=0 pid=26960 out={"icons":[{"file":"C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\dist\\.icon-ico\\icon.ico","size":0}],"isFallback":false}
+  • spawning        command=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\app-builder-bin\win\x64\app-builder.exe rcedit --args ["C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\dist\\win-unpacked\\Hap-Assistente-de-Dados.exe","--set-version-string","FileDescription","Hap-Assistente-de-Dados","--set-version-string","ProductName","Hap-Assistente-de-Dados","--set-version-string","LegalCopyright","Copyright © 2026 Hap-Assistente-de-Dados","--set-file-version","3.0.10","--set-product-version","3.0.10.0","--set-version-string","InternalName","Hap-Assistente-de-Dados","--set-version-string","OriginalFilename","","--set-icon","C:\\Users\\jeffe\\.gemini\\antigravity\\scratch\\oracle-lowcode\\server\\dist\\.icon-ico\\icon.ico"]
+  • found existing  path=c:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\eb-cache\winCodeSign\winCodeSign-2.6.0
+  • execute command  command='c:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\eb-cache\winCodeSign\winCodeSign-2.6.0\rcedit-x64.exe' 'C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\win-unpacked\Hap-Assistente-de-Dados.exe' --set-version-string FileDescription Hap-Assistente-de-Dados --set-version-string ProductName Hap-Assistente-de-Dados --set-version-string LegalCopyright 'Copyright © 2026 Hap-Assistente-de-Dados' --set-file-version 3.0.10 --set-product-version 3.0.10.0 --set-version-string InternalName Hap-Assistente-de-Dados --set-version-string OriginalFilename '' --set-icon 'C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\.icon-ico\icon.ico'
+                     workingDirectory=
+  • command executed  executable=c:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\eb-cache\winCodeSign\winCodeSign-2.6.0\rcedit-x64.exe
+  • exited          command=app-builder.exe code=0 pid=20376
+wine&sign: 1s 685ms
+  • building        target=nsis file=dist\Hap-Assistente-de-Dados Setup 3.0.10.exe archs=x64 oneClick=false perMachine=false
+  • spawning        command=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\app-builder-bin\win\x64\app-builder.exe download-artifact --name nsis-3.0.4.1 --url https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis-3.0.4.1/nsis-3.0.4.1.7z --sha512 VKMiizYdmNdJOWpRGz4trl4lD++BvYP2irAXpMilheUP0pc93iKlWAoP843Vlraj8YG19CVn0j+dCo/hURz9+Q==
+  • found existing  path=c:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\eb-cache\nsis\nsis-3.0.4.1
+  • exited          command=app-builder.exe code=0 pid=25084 out=c:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\eb-cache\nsis\nsis-3.0.4.1
+  • executing       file=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\7zip-bin\win\x64\7za.exe args=a -bd -mx=9 -md=1m -mtc=off -ms=off -mtm=off -mta=off C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\hap-query-report-server-3.0.10-x64.nsis.7z . -xr!*.avi -xr!*.mov -xr!*.m4v -xr!*.mp4 -xr!*.m4p -xr!*.qt -xr!*.mkv -xr!*.webm -xr!*.vmdk cwd=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\win-unpacked
+nsis package, x64: 48s 461ms
+  • executing       file=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\7zip-bin\win\x64\7za.exe args=l C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\hap-query-report-server-3.0.10-x64.nsis.7z
+  • executed        file=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\7zip-bin\win\x64\7za.exe stdout=
+7-Zip (a) 21.07 (x64) : Copyright (c) 1999-2021 Igor Pavlov : 2021-12-26
+                      Scanning the drive for archives:
+1 file, 153324207 bytes (147 MiB)
+                      Listing archive: C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\hap-query-report-server-3.0.10-x64.nsis.7z
+                      --
+Path = C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\hap-query-report-server-3.0.10-x64.nsis.7z
+Type = 7z
+Physical Size = 153324207
+Headers Size = 2080
+Method = LZMA2:20 LZMA:20 BCJ2
+Solid = -
+Blocks = 102
+                         Date      Time    Attr         Size   Compressed  Name
+------------------- ----- ------------ ------------  ------------------------
+                    D....            0            0  locales
+                    D....            0            0  resources
+                    D....            0            0  resources\instantclient
+                    D....            0            0  resources\instantclient\network
+                    D....            0            0  resources\instantclient\network\admin
+                    ....A       167733       156819  chrome_100_percent.pak
+                    ....A       227823       212845  chrome_200_percent.pak
+                    ....A     10717392      3447363  icudtl.dat
+                    ....A         1096          690  LICENSE.electron.txt
+                    ....A      9142459       261363  LICENSES.chromium.html
+                    ....A       475987       116318  locales\af.pak
+                    ....A       774206       131765  locales\am.pak
+                    ....A       848943       135951  locales\ar.pak
+                    ....A       881843       131565  locales\bg.pak
+                    ....A      1138948       137152  locales\bn.pak
+                    ....A       536688       119847  locales\ca.pak
+                    ....A       552003       128979  locales\cs.pak
+                    ....A       499433       117223  locales\da.pak
+                    ....A       534385       123708  locales\de.pak
+                    ....A       966750       138579  locales\el.pak
+                    ....A       434881       108639  locales\en-GB.pak
+                    ....A       438820       108805  locales\en-US.pak
+                    ....A       528171       119531  locales\es-419.pak
+                    ....A       528159       119127  locales\es.pak
+                    ....A       479354       119781  locales\et.pak
+                    ....A       786229       128098  locales\fa.pak
+                    ....A       489527       119545  locales\fi.pak
+                    ....A       554334       119788  locales\fil.pak
+                    ....A       572576       124201  locales\fr.pak
+                    ....A      1117670       135956  locales\gu.pak
+                    ....A       688870       125370  locales\he.pak
+                    ....A      1176726       140641  locales\hi.pak
+                    ....A       533826       124792  locales\hr.pak
+                    ....A       574850       130830  locales\hu.pak
+                    ....A       473577       108812  locales\id.pak
+                    ....A       521539       118012  locales\it.pak
+                    ....A       637276       114474  locales\ja.pak
+                    ....A      1280837       137872  locales\kn.pak
+                    ....A       538740       111064  locales\ko.pak
+                    ....A       578461       127368  locales\lt.pak
+                    ....A       577630       128416  locales\lv.pak
+                    ....A      1332459       141483  locales\ml.pak
+                    ....A      1094665       133105  locales\mr.pak
+                    ....A       496447       110633  locales\ms.pak
+                    ....A       482576       114784  locales\nb.pak
+                    ....A       496419       117522  locales\nl.pak
+                    ....A       556829       129737  locales\pl.pak
+                    ....A       523253       119458  locales\pt-BR.pak
+                    ....A       524567       118090  locales\pt-PT.pak
+                    ....A       543759       121454  locales\ro.pak
+                    ....A       893079       137547  locales\ru.pak
+                    ....A       561212       131815  locales\sk.pak
+                    ....A       539150       124733  locales\sl.pak
+                    ....A       830811       131576  locales\sr.pak
+                    ....A       484580       114738  locales\sv.pak
+                    ....A       510585       117593  locales\sw.pak
+                    ....A      1320024       137104  locales\ta.pak
+                    ....A      1220352       137587  locales\te.pak
+                    ....A      1027321       120824  locales\th.pak
+                    ....A       521272       119003  locales\tr.pak
+                    ....A       891667       135927  locales\uk.pak
+                    ....A       780171       128094  locales\ur.pak
+                    ....A       616935       118527  locales\vi.pak
+                    ....A       445903       110416  locales\zh-CN.pak
+                    ....A       441078       108956  locales\zh-TW.pak
+                    ....A          112          107  resources\app-update.yml
+                    ....A    194506774     48562209  resources\app.asar
+                    ....A        40424         6349  resources\instantclient\adrci.sym
+                    ....A         5903         2409  resources\instantclient\BASIC_LITE_LICENSE
+                    ....A         1756          905  resources\instantclient\BASIC_LITE_README
+                    ....A        72768        10453  resources\instantclient\genezi.sym
+                    ....A          522          263  resources\instantclient\network\admin\README
+                    ....A       793072        75311  resources\instantclient\oci.sym
+                    ....A        71424         9578  resources\instantclient\ocijdbc21.sym
+                    ....A       127840        18846  resources\instantclient\ociw32.sym
+                    ....A      5153068      4787017  resources\instantclient\ojdbc8.jar
+                    ....A      2097312       214855  resources\instantclient\orannzsbb.sym
+                    ....A      1181096        66323  resources\instantclient\oraocci21.sym
+                    ....A      1048224        62953  resources\instantclient\oraocci21d.sym
+                    ....A     15420344      1668004  resources\instantclient\oraociicus.sym
+                    ....A        63624         8608  resources\instantclient\orasql.sym
+                    ....A      1805644      1658193  resources\instantclient\ucp.jar
+                    ....A        40424         6350  resources\instantclient\uidrvci.sym
+                    ....A        31869        29918  resources\instantclient\xstreams.jar
+                    ....A      5331889      5248181  resources.pak
+                    ....A       276794        45597  snapshot_blob.bin
+                    ....A       642377       111070  v8_context_snapshot.bin
+                    ....A          106           96  vk_swiftshader_icd.json
+                    ....A      4916712      1561634  d3dcompiler_47.dll
+                    ....A      2877440       939718  ffmpeg.dll
+                    ....A    176827392     52895356  Hap-Assistente-de-Dados.exe
+                    ....A       478208       165898  libEGL.dll
+                    ....A      7808512      2151345  libGLESv2.dll
+                    ....A       107520        49095  resources\elevate.exe
+                    ....A        32256        12553  resources\instantclient\adrci.exe
+                    ....A        76288        24607  resources\instantclient\genezi.exe
+                    ....A       817152       161764  resources\instantclient\oci.dll
+                    ....A       192000        63604  resources\instantclient\ocijdbc21.dll
+                    ....A       634368       212082  resources\instantclient\ociw32.dll
+                    ....A      3805184      1523784  resources\instantclient\orannzsbb.dll
+                    ....A      1095680       193122  resources\instantclient\oraocci21.dll
+                    ....A      1076736       199518  resources\instantclient\oraocci21d.dll
+                    ....A     76917248     18024425  resources\instantclient\oraociicus.dll
+                    ....A       237568        93489  resources\instantclient\orasql.dll
+                    ....A        32256        12546  resources\instantclient\uidrvci.exe
+                    ....A      5238784      1267094  vk_swiftshader.dll
+                    ....A       947200       264903  vulkan-1.dll
+------------------- ----- ------------ ------------  ------------------------
+                             570944726    153322127  102 files, 5 folders
+
+  • spawning        command=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\app-builder-bin\win\x64\app-builder.exe download-artifact --name nsis-resources-3.4.1 --url https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis-resources-3.4.1/nsis-resources-3.4.1.7z --sha512 Dqd6g+2buwwvoG1Vyf6BHR1b+25QMmPcwZx40atOT57gH27rkjOei1L0JTldxZu4NFoEmW4kJgZ3DlSWVON3+Q==
+  • found existing  path=c:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\eb-cache\nsis\nsis-resources-3.4.1
+  • exited          command=app-builder.exe code=0 pid=27940 out=c:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\eb-cache\nsis\nsis-resources-3.4.1
+  • spawning        command=c:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\eb-cache\nsis\nsis-3.0.4.1\Bin\makensis.exe -WX -INPUTCHARSET UTF8 -DAPP_ID=com.hap.queryreport -DAPP_GUID=0c694a6a-666e-5874-8c07-dd17052b36f6 -DUNINSTALL_APP_KEY=0c694a6a-666e-5874-8c07-dd17052b36f6 -DPRODUCT_NAME=Hap-Assistente-de-Dados -DPRODUCT_FILENAME=Hap-Assistente-de-Dados -DAPP_FILENAME=Hap-Assistente-de-Dados -DAPP_DESCRIPTION= -DVERSION=3.0.10 -DPROJECT_DIR=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server -DBUILD_RESOURCES_DIR=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\build -DAPP_PACKAGE_NAME=hap-query-report-server -DMUI_ICON=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\.icon-ico\icon.ico -DMUI_UNICON=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\.icon-ico\icon.ico -DAPP_64=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\hap-query-report-server-3.0.10-x64.nsis.7z -DAPP_64_NAME=hap-query-report-server-3.0.10-x64.nsis.7z -DAPP_64_HASH=0F8862FBD9BEEF161773F98A360778AD40537BB4DC5BA94ECA39DD0D2FD0276CD1E874EF246F4036D4748A3CCA8166759C6D6E42487B0BBE253901E90DA52338 -DAPP_64_UNPACKED_SIZE=557564 -DAPP_INSTALLER_STORE_FILE=hap-query-report-server-updater\installer.exe -DCOMPRESSION_METHOD=7z -DHIDE_RUN_AFTER_FINISH -DMULTIUSER_INSTALLMODE_ALLOW_ELEVATION -DINSTALL_MODE_PER_ALL_USERS_REQUIRED -DallowToChangeInstallationDirectory -DSHORTCUT_NAME=Hap-Assistente-de-Dados -DUNINSTALL_DISPLAY_NAME=Hap-Assistente-de-Dados 3.0.10 -DMUI_WELCOMEFINISHPAGE_BITMAP=${NSISDIR}\Contrib\Graphics\Wizard\nsis3-metro.bmp -DMUI_UNWELCOMEFINISHPAGE_BITMAP=${NSISDIR}\Contrib\Graphics\Wizard\nsis3-metro.bmp -DESTIMATED_SIZE=557563 -DCOMPRESS=auto -DBUILD_UNINSTALLER -DUNINSTALLER_OUT_FILE=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\__uninstaller-nsis-hap-query-report-server.exe -XOutFile "C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\Hap-Assistente-de-Dados Setup 3.0.10.exe" -XVIProductVersion 3.0.10.0 -XVIAddVersionKey /LANG=1033 ProductName "Hap-Assistente-de-Dados" -XVIAddVersionKey /LANG=1033 ProductVersion "3.0.10" -XVIAddVersionKey /LANG=1033 LegalCopyright "Copyright © 2026 Hap-Assistente-de-Dados" -XVIAddVersionKey /LANG=1033 FileDescription "" -XVIAddVersionKey /LANG=1033 FileVersion "3.0.10" -XUnicode true -XSetCompressor zlib - cwd=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\app-builder-lib\templates\nsis
+Command line defined: "APP_ID=com.hap.queryreport"
+Command line defined: "APP_GUID=0c694a6a-666e-5874-8c07-dd17052b36f6"
+Command line defined: "UNINSTALL_APP_KEY=0c694a6a-666e-5874-8c07-dd17052b36f6"
+Command line defined: "PRODUCT_NAME=Hap-Assistente-de-Dados"
+Command line defined: "PRODUCT_FILENAME=Hap-Assistente-de-Dados"
+Command line defined: "APP_FILENAME=Hap-Assistente-de-Dados"
+Command line defined: "APP_DESCRIPTION="
+Command line defined: "VERSION=3.0.10"
+Command line defined: "PROJECT_DIR=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server"
+Command line defined: "BUILD_RESOURCES_DIR=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\build"
+Command line defined: "APP_PACKAGE_NAME=hap-query-report-server"
+Command line defined: "MUI_ICON=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\.icon-ico\icon.ico"
+Command line defined: "MUI_UNICON=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\.icon-ico\icon.ico"
+Command line defined: "APP_64=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\hap-query-report-server-3.0.10-x64.nsis.7z"
+Command line defined: "APP_64_NAME=hap-query-report-server-3.0.10-x64.nsis.7z"
+Command line defined: "APP_64_HASH=0F8862FBD9BEEF161773F98A360778AD40537BB4DC5BA94ECA39DD0D2FD0276CD1E874EF246F4036D4748A3CCA8166759C6D6E42487B0BBE253901E90DA52338"
+Command line defined: "APP_64_UNPACKED_SIZE=557564"
+Command line defined: "APP_INSTALLER_STORE_FILE=hap-query-report-server-updater\installer.exe"
+Command line defined: "COMPRESSION_METHOD=7z"
+Command line defined: "HIDE_RUN_AFTER_FINISH"
+Command line defined: "MULTIUSER_INSTALLMODE_ALLOW_ELEVATION"
+Command line defined: "INSTALL_MODE_PER_ALL_USERS_REQUIRED"
+Command line defined: "allowToChangeInstallationDirectory"
+Command line defined: "SHORTCUT_NAME=Hap-Assistente-de-Dados"
+Command line defined: "UNINSTALL_DISPLAY_NAME=Hap-Assistente-de-Dados 3.0.10"
+Command line defined: "MUI_WELCOMEFINISHPAGE_BITMAP=${NSISDIR}\Contrib\Graphics\Wizard\nsis3-metro.bmp"
+Command line defined: "MUI_UNWELCOMEFINISHPAGE_BITMAP=${NSISDIR}\Contrib\Graphics\Wizard\nsis3-metro.bmp"
+Command line defined: "ESTIMATED_SIZE=557563"
+Command line defined: "COMPRESS=auto"
+Command line defined: "BUILD_UNINSTALLER"
+Command line defined: "UNINSTALLER_OUT_FILE=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\dist\__uninstaller-nsis-hap-query-report-server.exe"
+Processing config: c:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\eb-cache\nsis\nsis-3.0.4.1\nsisconf.nsh
+Processing script file: "<stdin>" (UTF8)
+Error: can't define a macro inside a macro!
+!include: error in script: "C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\installer.nsh" on line 3
+Error in script "<stdin>" on line 75 -- aborting creation process
+  • exited          command=makensis.exe code=1 pid=13316
+  ⨯ c:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\eb-cache\nsis\nsis-3.0.4.1\Bin\makensis.exe process failed ERR_ELECTRON_BUILDER_CANNOT_EXECUTE
+Exit code:
+1  failedTask=build stackTrace=Error: c:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\eb-cache\nsis\nsis-3.0.4.1\Bin\makensis.exe process failed ERR_ELECTRON_BUILDER_CANNOT_EXECUTE
+Exit code:
+1
+    at ChildProcess.<anonymous> (C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\builder-util\src\util.ts:252:14)
+    at Object.onceWrapper (node:events:633:26)
+    at ChildProcess.emit (node:events:518:28)
+    at ChildProcess.cp.emit (C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\node_modules\cross-spawn\lib\enoent.js:34:29)
+    at maybeClose (node:internal/child_process:1101:16)
+    at Process.ChildProcess._handle.onexit (node:internal/child_process:304:5)

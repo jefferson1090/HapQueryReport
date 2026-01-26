@@ -868,6 +868,7 @@ function App() {
                                                 isVisible={activeTab === 'query-builder'}
                                                 connection={connection}
                                                 savedQueries={savedSqlQueries}
+                                                user={chatUser}
                                             />
                                         )}
                                     </ErrorBoundary>

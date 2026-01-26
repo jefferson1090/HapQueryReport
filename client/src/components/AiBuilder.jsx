@@ -338,7 +338,7 @@ const DataView = ({ viewData, dataFilters, setDataFilters, dataSort, setDataSort
     );
 };
 
-const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref) => {
+const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries, user }, ref) => {
     const { theme } = useContext(ThemeContext);
     const { apiUrl } = useApi();
 
@@ -1420,13 +1420,20 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
                 // Check if loaded SQL has the mandatory column
                 const hasOperatorColumn = parsedSqlData?.columns?.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO');
 
-                if (hasOperatorColumn && !cargaValue) {
+                // Bypass if it's a Custom Card (Include Table)
+                const isCustomCard = selectedCard?.isCustom;
+
+                if (hasOperatorColumn && !cargaValue && !isCustomCard) {
                     alert('⚠️ Atenção: Para este relatório, o filtro de Operadora é OBRIGATÓRIO.');
                     return;
                 }
             }
 
-            if (!cargaValue && activeFilters.length === 0) {
+            // Relaxed Validation: Allow empty filters ONLY for Custom SQL Mode (SIGO Include Table)
+            // If it is regular Carga OR System SQL Report, we require validation.
+            const isCustomSigo = sqlMode && selectedCard?.isCustom;
+
+            if (!cargaValue && activeFilters.length === 0 && !isCustomSigo) {
                 console.error('[DEBUG] CargaValue is empty and no filters!');
                 alert('Falha: Selecione uma operadora ou adicione um filtro.');
                 return;
@@ -1695,6 +1702,55 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
             setParsedSqlData(null);
             setSqlMode(true);
             setSelectedCard(card);
+
+            // [FIX] For Custom SIGO Cards (Simple Table), fetch columns directly instead of parsing "SELECT *"
+            // This ensures we have the metadata (columns) to populate the filter dropdown and trigger the Operator Panel if needed.
+            if (card.isCustom && card.tableName && card.type === 'SQL') {
+                try {
+                    const colRes = await fetch(`${apiUrl}/api/columns/${card.tableName}`);
+                    if (colRes.ok) {
+                        const colsRaw = await colRes.json();
+                        // Mock the parser structure with real DB columns
+                        const columns = colsRaw.map(c => ({
+                            name: c.COLUMN_NAME,
+                            alias: c.COLUMN_NAME,
+                            dataType: c.DATA_TYPE,
+                            type: 'column'
+                        }));
+
+                        const data = {
+                            columns: columns,
+                            title: card.title,
+                            originalSql: card.content
+                        };
+
+                        setTimeout(() => {
+                            setParsedSqlData(data);
+
+                            // Populate UI Columns with Type Heuristics
+                            const uiColumns = columns.map(c => {
+                                const n = c.name.toUpperCase();
+                                let t = c.dataType || 'VARCHAR2';
+                                if (!c.dataType || c.dataType === 'VARCHAR2') {
+                                    if (n.startsWith('NU_') || n.startsWith('QT_') || n.startsWith('VL_') || n.startsWith('NR_')) t = 'NUMBER';
+                                    else if (n.startsWith('DT_') || n.startsWith('DATA_') || n.endsWith('_DT') || n.endsWith('_DATA')) t = 'DATE';
+                                }
+                                if (n.startsWith('CD_') || n.startsWith('ID_')) t = 'VARCHAR2';
+                                return { name: c.name, type: t };
+                            });
+                            setTableColumns(uiColumns);
+                            setFieldEquivalences({}); // No special sql options for raw table
+
+                            setIsParsingSql(false);
+                            setMenuState('carga_input');
+                            fetchSigoOperators();
+                        }, 1000);
+                        return;
+                    }
+                } catch (e) {
+                    console.error("Failed to load custom table columns, falling back to parser", e);
+                }
+            }
 
             try {
                 const response = await fetch(`${apiUrl}/api/parse-sql`, {
@@ -2383,13 +2439,19 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
                 setCustomCargaCards(updatedCards);
             } else {
                 // Create new card
+                const isSigoMode = menuState === 'sigo_menu';
+
                 const newCard = {
                     id: `custom_${Date.now()}`,
                     title: newCardName,
                     tableName: newCardTable.full_name,
                     icon: '📄', // Default icon
                     target: 'carga_input',
-                    isCustom: true
+                    isCustom: true,
+                    // If in SIGO mode, save as SQL type with auto-generated SELECT
+                    type: isSigoMode ? 'SQL' : 'EXTRACTION',
+                    sql: isSigoMode ? `SELECT * FROM ${newCardTable.full_name}` : undefined,
+                    content: isSigoMode ? `SELECT * FROM ${newCardTable.full_name}` : undefined // Fix for 'SQL Content empty' error
                 };
                 setCustomCargaCards([...customCargaCards, newCard]);
             }
@@ -2401,6 +2463,7 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries }, ref
             setNewCardTable(null);
             setAddCardStep('search');
         };
+
 
         // --- RENDER HELPERS ---
         const handleMD = (e, index) => {
@@ -2887,12 +2950,12 @@ From vw_empresa_conveniada_cad e
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         sql: `
-                        SELECT owner, table_name 
-                        FROM all_tables 
-                        WHERE owner = 'INCORPORA' 
-                           OR (owner = 'HUMASTER' AND table_name LIKE 'TT_%')
-                        ORDER BY table_name ASC
-                    `
+                SELECT owner, table_name 
+                FROM all_tables 
+                WHERE owner = '${(connection?.user || 'INCORPORA').toUpperCase()}' 
+                   OR owner = 'HUMASTER'
+                ORDER BY table_name ASC
+            `
                     })
                 });
                 const data = await response.json();
@@ -3021,7 +3084,9 @@ From vw_empresa_conveniada_cad e
             const ctxGroupBy = contextOverride?.groupBy !== undefined ? contextOverride.groupBy : null;
 
             // Allow if we have value OR active filters (for SQL Mode mainly)
-            if (!ctxCargaValue && ctxActiveFilters.length === 0) return;
+            // EXCEPTION: Custom SIGO Cards (Include Table) can run without filters (SELECT * FROM TABLE)
+            const isCustomSigoCheck = ctxSqlMode && ctxSelectedCard?.isCustom;
+            if (!ctxCargaValue && ctxActiveFilters.length === 0 && !isCustomSigoCheck) return;
 
             // Lock check using Ref to prevent double-firing from scroll events
             // Only enforce lock for "Load More" to prevent scroll bounce.
@@ -3083,25 +3148,38 @@ From vw_empresa_conveniada_cad e
                 let whereClauses = [];
 
                 // Main Operator Filter (Legacy/Specific to Incorpora)
-                if ((isIncorpora || ctxSqlMode) && ctxCargaValue && ctxCargaValue !== '%') { // Allow for SIGO too
-                    // For SIGO, "cd_operadora" might not exist or be different.
-                    const targetField = ctxSqlMode ? 'CD_EMPRESA_PLANO' : 'cd_operadora';
+                const isCustomSigo = ctxSqlMode && ctxSelectedCard?.isCustom;
+                const hasOperatorCol = ctxParsedSqlData?.columns?.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO') ||
+                    tableColumns.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO');
 
-                    if (ctxCargaValue.includes(',')) {
-                        const listVals = ctxCargaValue.split(',').map(v => v.trim()).filter(v => v !== '');
-                        const uniqueList = [...new Set(listVals)];
+                // Apply filter IF:
+                // 1. Not a custom SIGO card (Standard behavior) OR
+                // 2. Is a custom SIGO card AND it actually has the column
+                if ((isIncorpora || ctxSqlMode) && ctxCargaValue && ctxCargaValue !== '%') {
 
-                        if (uniqueList.length > 1000) {
-                            // Tuple Logic for Main Carga > 1000
-                            const tuples = uniqueList.map(v => `('${v.replace(/'/g, "''")}', '0')`).join(',');
-                            whereClauses.push(`(${targetField}, '0') IN (${tuples})`);
-                        } else {
-                            // Standard
-                            const ops = uniqueList.map(v => `'${v.replace(/'/g, "''")}'`).join(',');
-                            whereClauses.push(`${targetField} IN (${ops})`);
-                        }
+                    // Skip if Custom SIGO card and column is missing
+                    if (isCustomSigo && !hasOperatorCol) {
+                        console.log('[CARGA] Skipping CD_EMPRESA_PLANO filter: Column missing in Custom Card.');
                     } else {
-                        whereClauses.push(`${targetField} = '${ctxCargaValue.replace(/'/g, "''")}'`);
+                        // For SIGO, "cd_operadora" might not exist or be different.
+                        const targetField = ctxSqlMode ? 'CD_EMPRESA_PLANO' : 'cd_operadora';
+
+                        if (ctxCargaValue.includes(',')) {
+                            const listVals = ctxCargaValue.split(',').map(v => v.trim()).filter(v => v !== '');
+                            const uniqueList = [...new Set(listVals)];
+
+                            if (uniqueList.length > 1000) {
+                                // Tuple Logic for Main Carga > 1000
+                                const tuples = uniqueList.map(v => `('${v.replace(/'/g, "''")}', '0')`).join(',');
+                                whereClauses.push(`(${targetField}, '0') IN (${tuples})`);
+                            } else {
+                                // Standard
+                                const ops = uniqueList.map(v => `'${v.replace(/'/g, "''")}'`).join(',');
+                                whereClauses.push(`${targetField} IN (${ops})`);
+                            }
+                        } else {
+                            whereClauses.push(`${targetField} = '${ctxCargaValue.replace(/'/g, "''")}'`);
+                        }
                     }
                 }
 
@@ -3623,6 +3701,43 @@ From vw_empresa_conveniada_cad e
                         <h1 className="text-4xl font-extrabold text-gray-900 mb-2 tracking-tight">
                             Extração de Dados
                         </h1>
+                        <div className="flex justify-center gap-2 mb-4">
+                            {/* Navigation Buttons - Global Location */}
+                            {(menuState === 'sigo_menu' || menuState === 'extraction_carga' || menuState === 'extraction' || menuState === 'dashboard_selection') && (
+                                <>
+                                    <motion.button
+                                        onClick={() => {
+                                            if (menuState === 'carga_result') {
+                                                setMenuState('carga_input');
+                                            } else if (menuState === 'carga_input') {
+                                                setMenuState('extraction_carga');
+                                            } else {
+                                                setMenuState('extraction');
+                                            }
+                                        }}
+                                        whileHover={{ scale: 1.05 }}
+                                        whileTap={{ scale: 0.95 }}
+                                        className="px-4 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-600 shadow-sm hover:border-blue-300 hover:text-blue-600 transition-all flex items-center gap-2"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
+                                        Voltar
+                                    </motion.button>
+                                    <motion.button
+                                        onClick={() => {
+                                            setMenuState('root');
+                                            setSqlMode(false);
+                                            setParsedSqlData(null);
+                                        }}
+                                        whileHover={{ scale: 1.05 }}
+                                        whileTap={{ scale: 0.95 }}
+                                        className="px-4 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-600 shadow-sm hover:border-blue-300 hover:text-blue-600 transition-all flex items-center gap-2"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                                        Voltar para Início
+                                    </motion.button>
+                                </>
+                            )}
+                        </div>
                         <p className="text-lg text-gray-500">
                             {menuState === 'root' && 'Escolha um atalho ou digite sua pergunta ao lado.'}
                             {menuState === 'extraction' && 'Selecione o tipo de extração.'}
@@ -3649,12 +3764,7 @@ From vw_empresa_conveniada_cad e
                                 exit={{ opacity: 0, y: -20 }}
                                 className="flex flex-col items-center"
                             >
-                                <motion.button
-                                    onClick={() => setMenuState('root')}
-                                    className="mb-8 self-start text-gray-400 hover:text-gray-600 flex items-center gap-2 text-sm font-bold uppercase tracking-wider"
-                                >
-                                    ← Voltar
-                                </motion.button>
+
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-2xl">
                                     {/* Carga de Dados Dashboard */}
@@ -3695,7 +3805,7 @@ From vw_empresa_conveniada_cad e
                         {menuState === 'root' && (
                             <div className="flex-1 h-full overflow-hidden">
                                 <CommandCenter
-                                    userName={connection?.user?.split(' ')[0] || 'Usuário'} // Simple formatting
+                                    userName={user?.username || connection?.user?.split(' ')[0] || 'Usuário'}
                                     onNavigate={handleHubNavigation}
                                     recentActivity={savedQueries?.slice(0, 5).map(q => ({
                                         id: q.id,
@@ -3716,14 +3826,7 @@ From vw_empresa_conveniada_cad e
                                 exit={{ opacity: 0 }}
                                 className="flex flex-col items-center"
                             >
-                                <motion.button
-                                    onClick={() => setMenuState('root')}
-                                    className="mb-8 self-start text-gray-400 hover:text-gray-600 flex items-center gap-2 text-sm font-bold uppercase tracking-wider"
-                                    initial={{ x: -20, opacity: 0 }}
-                                    animate={{ x: 0, opacity: 1 }}
-                                >
-                                    ← Voltar
-                                </motion.button>
+
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-2xl">
                                     {EXTRACTION_OPTS.map((opt, i) => (
@@ -3772,23 +3875,14 @@ From vw_empresa_conveniada_cad e
 
                                 <div className="relative z-10 w-full max-w-5xl flex flex-col gap-8">
 
-                                    {/* Header Section */}
+                                    {/* Header Section Removed - Buttons Moved Global */}
                                     <div className="flex items-center justify-between px-6">
-                                        <motion.button
-                                            onClick={() => setMenuState('extraction')}
-                                            whileHover={{ x: -4 }}
-                                            className="group flex items-center justify-center w-10 h-10 text-gray-500 hover:text-gray-800 transition-colors bg-white/50 backdrop-blur-sm rounded-full border border-gray-200 hover:border-gray-300 shadow-sm"
-                                            title="Voltar"
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
-                                        </motion.button>
-
                                         <div className="text-right">
                                         </div>
                                     </div>
 
                                     {/* Cards Container */}
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-5xl">
 
                                         {/* T2212 Card - Standard Design */}
                                         <motion.div
@@ -3846,6 +3940,24 @@ From vw_empresa_conveniada_cad e
                                         ))}
 
                                     </div>
+
+                                    {/* Add New SIGO Table Button */}
+                                    <div className="flex justify-center w-full mt-4">
+                                        <motion.button
+                                            whileHover={{ scale: 1.02 }}
+                                            whileTap={{ scale: 0.98 }}
+                                            onClick={() => {
+                                                setAddCardStep('search');
+                                                setNewCardTable(null);
+                                                setNewCardName('');
+                                                fetchAvailableTables();
+                                                setIsAddCardModalOpen(true);
+                                            }}
+                                            className="px-6 py-3 bg-blue-50 text-blue-600 rounded-xl font-bold border border-blue-100 hover:bg-blue-100 hover:border-blue-200 transition-all shadow-sm flex items-center gap-2"
+                                        >
+                                            <span className="text-xl">+</span> Incluir Tabela
+                                        </motion.button>
+                                    </div>
                                 </div>
                             </motion.div>
                         )}
@@ -3858,14 +3970,7 @@ From vw_empresa_conveniada_cad e
                                 exit={{ opacity: 0, x: -50 }}
                                 className="flex flex-col items-center"
                             >
-                                <motion.button
-                                    onClick={() => setMenuState('extraction')}
-                                    className="mb-8 self-start text-gray-400 hover:text-gray-600 flex items-center gap-2 text-sm font-bold uppercase tracking-wider"
-                                    initial={{ x: -20, opacity: 0 }}
-                                    animate={{ x: 0, opacity: 1 }}
-                                >
-                                    ← Voltar
-                                </motion.button>
+                                {/* Buttons Moved Global */}
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-4xl">
                                     {/* Hidden Input for SIGO moved to sigo_menu */}
@@ -3977,20 +4082,42 @@ From vw_empresa_conveniada_cad e
                                     {/* Header Moderno (Compacto) */}
                                     <div className="px-6 py-4 border-b border-gray-100/50 flex justify-between items-center bg-white flex-shrink-0">
                                         <div className="flex items-center gap-4">
-                                            <motion.button
-                                                whileHover={{ x: -2, backgroundColor: '#EFF6FF' }}
-                                                whileTap={{ scale: 0.95 }}
-                                                onClick={() => {
-                                                    if (sqlMode) {
-                                                        setMenuState('sigo_menu');
-                                                    } else {
-                                                        setMenuState('extraction_carga');
-                                                    }
-                                                }}
-                                                className="w-8 h-8 rounded-full border border-gray-200 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:border-blue-200 transition-colors bg-white shadow-sm"
-                                            >
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
-                                            </motion.button>
+
+                                            {/* Navigation Buttons Group (Updated) */}
+                                            <div className="flex items-center gap-2">
+                                                {/* Back Button */}
+                                                <motion.button
+                                                    whileHover={{ scale: 1.02, backgroundColor: '#EFF6FF' }}
+                                                    whileTap={{ scale: 0.98 }}
+                                                    onClick={() => {
+                                                        if (sqlMode) {
+                                                            setMenuState('sigo_menu');
+                                                        } else {
+                                                            setMenuState('extraction_carga');
+                                                        }
+                                                    }}
+                                                    className="px-4 py-2 rounded-xl border border-gray-200 flex items-center justify-center gap-2 text-gray-600 hover:text-blue-600 hover:border-blue-200 transition-colors bg-white shadow-sm font-bold text-xs uppercase tracking-wide"
+                                                >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
+                                                    Voltar
+                                                </motion.button>
+
+                                                {/* Home Button */}
+                                                <motion.button
+                                                    whileHover={{ scale: 1.02, backgroundColor: '#EFF6FF' }}
+                                                    whileTap={{ scale: 0.98 }}
+                                                    onClick={() => {
+                                                        setMenuState('root');
+                                                        setSqlMode(false); // Reset context
+                                                        setParsedSqlData(null);
+                                                    }}
+                                                    className="px-4 py-2 rounded-xl border border-gray-200 flex items-center justify-center gap-2 text-gray-600 hover:text-blue-600 hover:border-blue-200 transition-colors bg-white shadow-sm font-bold text-xs uppercase tracking-wide"
+                                                >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                                                    Voltar para Início
+                                                </motion.button>
+                                            </div>
+
                                             <div>
                                                 <h2 className="text-xl font-extrabold text-gray-800 tracking-tight flex items-center gap-2">
                                                     {(sqlMode || parsedSqlData) ? 'Filtro de Extração' : 'Filtro de Carga'}
@@ -4011,146 +4138,158 @@ From vw_empresa_conveniada_cad e
 
                                     <div className="flex-1 p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 overflow-hidden">
 
-                                        {/* LEFT COL: OPERATOR SELECTION (Expanded to 5) */}
-                                        <div className="lg:col-span-5 flex flex-col h-full gap-3 min-h-0 relative">
+                                        {/* Determine Sidebar Visibility */}
+                                        {(() => {
+                                            const hasOperatorField = !sqlMode || (parsedSqlData?.columns?.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO'));
 
-                                            {/* Validation Alert */}
-                                            {(() => {
-                                                const hasOperatorField = !sqlMode || (parsedSqlData?.columns?.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO'));
-                                                if (!hasOperatorField) {
-                                                    return (
-                                                        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3 shadow-sm mb-2">
-                                                            <span className="text-xl">⚠️</span>
-                                                            <div>
-                                                                <h4 className="font-bold text-amber-800 text-sm">Filtro de Operadora Desabilitado</h4>
-                                                                <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-                                                                    O SQL importado não possui o campo obrigatório <code className="font-mono bg-amber-100 px-1 rounded">CD_EMPRESA_PLANO</code>.
-                                                                </p>
+                                            // Conditional Rendering: Only render sidebar if field exists
+                                            return hasOperatorField ? (
+                                                <>
+                                                    {/* LEFT COL: OPERATOR SELECTION (Expanded to 5) */}
+                                                    <div className="lg:col-span-5 flex flex-col h-full gap-3 min-h-0 relative">
+
+                                                        {/* Validation Alert */}
+                                                        {(() => {
+                                                            const hasOperatorField = !sqlMode || (parsedSqlData?.columns?.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO'));
+                                                            if (!hasOperatorField) {
+                                                                return (
+                                                                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3 shadow-sm mb-2">
+                                                                        <span className="text-xl">⚠️</span>
+                                                                        <div>
+                                                                            <h4 className="font-bold text-amber-800 text-sm">Filtro de Operadora Desabilitado</h4>
+                                                                            <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                                                                                O SQL importado não possui o campo obrigatório <code className="font-mono bg-amber-100 px-1 rounded">CD_EMPRESA_PLANO</code>.
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            }
+                                                            return null;
+                                                        })()}
+
+                                                        {/* Overlay for disabled state */}
+                                                        {(() => {
+                                                            const hasOperatorField = !sqlMode || (parsedSqlData?.columns?.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO'));
+                                                            return !hasOperatorField && (
+                                                                <div className="absolute inset-0 bg-gray-50/50 backdrop-blur-[1px] z-20 rounded-3xl cursor-not-allowed"></div>
+                                                            );
+                                                        })()}
+
+
+                                                        {/* Search Bar */}
+                                                        <div className="relative group flex-shrink-0">
+                                                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                                                <svg className="h-5 w-5 text-gray-400 group-focus-within:text-blue-500 transition-colors" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                                            </div>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Filtrar operadoras..."
+                                                                className="w-full pl-11 pr-4 py-3 bg-gray-50 border-none rounded-2xl text-sm font-semibold text-gray-700 outline-none ring-1 ring-gray-100 focus:ring-2 focus:ring-blue-500/30 focus:bg-white transition-all placeholder-gray-400 shadow-inner"
+                                                                onChange={(e) => {
+                                                                    const term = e.target.value.toLowerCase();
+                                                                    const items = document.querySelectorAll('.operator-item');
+                                                                    items.forEach(item => {
+                                                                        const text = item.textContent.toLowerCase();
+                                                                        item.style.display = text.includes(term) ? 'flex' : 'none';
+                                                                    });
+                                                                }}
+                                                            />
+                                                        </div>
+
+                                                        {/* List Container */}
+                                                        <div className="flex-1 bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden flex flex-col min-h-0">
+                                                            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+
+                                                                {/* Button: All Operators */}
+                                                                <motion.button
+                                                                    whileHover={{ scale: 1.02, backgroundColor: cargaValue === '%' ? '#2563EB' : '#F8FAFC' }}
+                                                                    whileTap={{ scale: 0.98 }}
+                                                                    onClick={() => {
+                                                                        setCargaValue('%');
+                                                                        setIsManualOperator(false);
+                                                                    }}
+                                                                    className={`w-full group operator-item p-3 rounded-xl flex items-center gap-3 transition-all border ${cargaValue === '%' ? 'bg-blue-600 border-blue-500 shadow-md' : 'bg-white border-transparent hover:border-gray-200'}`}
+                                                                >
+                                                                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black text-lg shadow-sm transition-colors ${cargaValue === '%' ? 'bg-white text-blue-600' : 'bg-gradient-to-br from-gray-100 to-gray-200 text-gray-400 group-hover:from-blue-100 group-hover:to-blue-50 group-hover:text-blue-500'}`}>
+                                                                        ∞
+                                                                    </div>
+                                                                    <div className="flex-1 text-left">
+                                                                        <span className={`block text-xs font-bold ${cargaValue === '%' ? 'text-white' : 'text-gray-700 group-hover:text-gray-900'}`}>TODAS AS OPERADORAS</span>
+                                                                        <span className={`text-[10px] font-semibold tracking-wide ${cargaValue === '%' ? 'text-blue-200' : 'text-gray-400'}`}>CARGA COMPLETA</span>
+                                                                    </div>
+                                                                    {cargaValue === '%' && <motion.div layoutId="active-dot" className="w-2 h-2 rounded-full bg-white" />}
+                                                                </motion.button>
+
+                                                                <div className="my-2 border-t border-gray-100 mx-2"></div>
+
+                                                                {/* Operator List */}
+                                                                {operatorList.map(op => {
+                                                                    const currentId = String(op.id);
+                                                                    const selectedIds = cargaValue ? cargaValue.split(',').map(s => s.trim()) : [];
+                                                                    const isSelected = selectedIds.includes(currentId);
+
+                                                                    return (
+                                                                        <motion.button
+                                                                            key={op.id}
+                                                                            layout
+                                                                            onClick={() => {
+                                                                                let newIds;
+                                                                                if (isSelected) {
+                                                                                    newIds = selectedIds.filter(id => id !== currentId);
+                                                                                } else {
+                                                                                    // If '%' was selected, clear it first
+                                                                                    const validIds = selectedIds.filter(id => id !== '%');
+                                                                                    newIds = [...validIds, currentId];
+                                                                                }
+                                                                                setCargaValue(newIds.join(', '));
+                                                                                setIsManualOperator(false);
+                                                                            }}
+                                                                            className={`w-full group operator-item p-2 rounded-xl flex items-center gap-3 transition-all border relative overflow-hidden ${isSelected ? 'bg-indigo-50 border-indigo-200 shadow-sm ring-1 ring-indigo-200' : 'bg-white border-transparent hover:bg-gray-50'}`}
+                                                                        >
+                                                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-[10px] font-mono transition-colors ${isSelected ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'}`}>
+                                                                                {op.id}
+                                                                            </div>
+                                                                            <div className="flex-1 text-left z-10">
+                                                                                <span className={`block text-xs font-bold truncate transition-colors ${isSelected ? 'text-indigo-900' : 'text-gray-600 group-hover:text-gray-900'}`}>{op.name}</span>
+                                                                            </div>
+                                                                            {isSelected && (
+                                                                                <motion.div
+                                                                                    layoutId={`active-indicator-${op.id}`} // Unique layoutId
+                                                                                    className="absolute inset-y-0 left-0 w-1 bg-indigo-600 rounded-l-xl"
+                                                                                />
+                                                                            )}
+                                                                        </motion.button>
+                                                                    );
+                                                                })}
+                                                            </div>
+
+                                                            {/* Manual Switch */}
+                                                            <div className="p-4 bg-gray-50 border-t border-gray-100 flex-shrink-0">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setIsManualOperator(!isManualOperator);
+                                                                        setCargaValue('');
+                                                                    }}
+                                                                    className={`w-full py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 border ${isManualOperator ? 'bg-gray-900 text-white border-gray-800 shadow-lg' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:text-gray-700'}`}
+                                                                >
+                                                                    {isManualOperator ? (
+                                                                        <><span>📋</span> Voltar para Lista Visual</>
+                                                                    ) : (
+                                                                        <><span>⌨️</span> Outras Operadoras</>
+                                                                    )}
+                                                                </button>
                                                             </div>
                                                         </div>
-                                                    );
-                                                }
-                                                return null;
-                                            })()}
-
-                                            {/* Overlay for disabled state */}
-                                            {(() => {
-                                                const hasOperatorField = !sqlMode || (parsedSqlData?.columns?.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO'));
-                                                return !hasOperatorField && (
-                                                    <div className="absolute inset-0 bg-gray-50/50 backdrop-blur-[1px] z-20 rounded-3xl cursor-not-allowed"></div>
-                                                );
-                                            })()}
+                                                    </div>
 
 
-                                            {/* Search Bar */}
-                                            <div className="relative group flex-shrink-0">
-                                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                                    <svg className="h-5 w-5 text-gray-400 group-focus-within:text-blue-500 transition-colors" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                                                </div>
-                                                <input
-                                                    type="text"
-                                                    placeholder="Filtrar operadoras..."
-                                                    className="w-full pl-11 pr-4 py-3 bg-gray-50 border-none rounded-2xl text-sm font-semibold text-gray-700 outline-none ring-1 ring-gray-100 focus:ring-2 focus:ring-blue-500/30 focus:bg-white transition-all placeholder-gray-400 shadow-inner"
-                                                    onChange={(e) => {
-                                                        const term = e.target.value.toLowerCase();
-                                                        const items = document.querySelectorAll('.operator-item');
-                                                        items.forEach(item => {
-                                                            const text = item.textContent.toLowerCase();
-                                                            item.style.display = text.includes(term) ? 'flex' : 'none';
-                                                        });
-                                                    }}
-                                                />
-                                            </div>
-
-                                            {/* List Container */}
-                                            <div className="flex-1 bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden flex flex-col min-h-0">
-                                                <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-
-                                                    {/* Button: All Operators */}
-                                                    <motion.button
-                                                        whileHover={{ scale: 1.02, backgroundColor: cargaValue === '%' ? '#2563EB' : '#F8FAFC' }}
-                                                        whileTap={{ scale: 0.98 }}
-                                                        onClick={() => {
-                                                            setCargaValue('%');
-                                                            setIsManualOperator(false);
-                                                        }}
-                                                        className={`w-full group operator-item p-3 rounded-xl flex items-center gap-3 transition-all border ${cargaValue === '%' ? 'bg-blue-600 border-blue-500 shadow-md' : 'bg-white border-transparent hover:border-gray-200'}`}
-                                                    >
-                                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black text-lg shadow-sm transition-colors ${cargaValue === '%' ? 'bg-white text-blue-600' : 'bg-gradient-to-br from-gray-100 to-gray-200 text-gray-400 group-hover:from-blue-100 group-hover:to-blue-50 group-hover:text-blue-500'}`}>
-                                                            ∞
-                                                        </div>
-                                                        <div className="flex-1 text-left">
-                                                            <span className={`block text-xs font-bold ${cargaValue === '%' ? 'text-white' : 'text-gray-700 group-hover:text-gray-900'}`}>TODAS AS OPERADORAS</span>
-                                                            <span className={`text-[10px] font-semibold tracking-wide ${cargaValue === '%' ? 'text-blue-200' : 'text-gray-400'}`}>CARGA COMPLETA</span>
-                                                        </div>
-                                                        {cargaValue === '%' && <motion.div layoutId="active-dot" className="w-2 h-2 rounded-full bg-white" />}
-                                                    </motion.button>
-
-                                                    <div className="my-2 border-t border-gray-100 mx-2"></div>
-
-                                                    {/* Operator List */}
-                                                    {operatorList.map(op => {
-                                                        const currentId = String(op.id);
-                                                        const selectedIds = cargaValue ? cargaValue.split(',').map(s => s.trim()) : [];
-                                                        const isSelected = selectedIds.includes(currentId);
-
-                                                        return (
-                                                            <motion.button
-                                                                key={op.id}
-                                                                layout
-                                                                onClick={() => {
-                                                                    let newIds;
-                                                                    if (isSelected) {
-                                                                        newIds = selectedIds.filter(id => id !== currentId);
-                                                                    } else {
-                                                                        // If '%' was selected, clear it first
-                                                                        const validIds = selectedIds.filter(id => id !== '%');
-                                                                        newIds = [...validIds, currentId];
-                                                                    }
-                                                                    setCargaValue(newIds.join(', '));
-                                                                    setIsManualOperator(false);
-                                                                }}
-                                                                className={`w-full group operator-item p-2 rounded-xl flex items-center gap-3 transition-all border relative overflow-hidden ${isSelected ? 'bg-indigo-50 border-indigo-200 shadow-sm ring-1 ring-indigo-200' : 'bg-white border-transparent hover:bg-gray-50'}`}
-                                                            >
-                                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-[10px] font-mono transition-colors ${isSelected ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500 group-hover:bg-white group-hover:shadow-sm'}`}>
-                                                                    {op.id}
-                                                                </div>
-                                                                <div className="flex-1 text-left z-10">
-                                                                    <span className={`block text-xs font-bold truncate transition-colors ${isSelected ? 'text-indigo-900' : 'text-gray-600 group-hover:text-gray-900'}`}>{op.name}</span>
-                                                                </div>
-                                                                {isSelected && (
-                                                                    <motion.div
-                                                                        layoutId={`active-indicator-${op.id}`} // Unique layoutId
-                                                                        className="absolute inset-y-0 left-0 w-1 bg-indigo-600 rounded-l-xl"
-                                                                    />
-                                                                )}
-                                                            </motion.button>
-                                                        );
-                                                    })}
-                                                </div>
-
-                                                {/* Manual Switch */}
-                                                <div className="p-4 bg-gray-50 border-t border-gray-100 flex-shrink-0">
-                                                    <button
-                                                        onClick={() => {
-                                                            setIsManualOperator(!isManualOperator);
-                                                            setCargaValue('');
-                                                        }}
-                                                        className={`w-full py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 border ${isManualOperator ? 'bg-gray-900 text-white border-gray-800 shadow-lg' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:text-gray-700'}`}
-                                                    >
-                                                        {isManualOperator ? (
-                                                            <><span>📋</span> Voltar para Lista Visual</>
-                                                        ) : (
-                                                            <><span>⌨️</span> Outras Operadoras</>
-                                                        )}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
+                                                </>
+                                            ) : null; // Sidebar hidden
+                                        })()}
 
                                         {/* RIGHT COL: CONFIG & EXECUTE */}
-                                        {/* RIGHT COL: CONFIG & EXECUTE (Reduced to 7) */}
-                                        <div className="lg:col-span-7 flex flex-col h-full gap-4 min-h-0">
+                                        {/* RIGHT COL: CONFIG & EXECUTE (Adaptive Width) */}
+                                        <div className={`${(!sqlMode || (parsedSqlData?.columns?.some(c => c.name.toUpperCase() === 'CD_EMPRESA_PLANO'))) ? 'lg:col-span-7' : 'lg:col-span-12'} flex flex-col h-full gap-4 min-h-0`}>
 
                                             {/* MANUAL INPUT AREA */}
                                             <AnimatePresence>
@@ -4350,7 +4489,7 @@ From vw_empresa_conveniada_cad e
                                             <div className="flex-shrink-0">
                                                 <button
                                                     onClick={handleManualExecute}
-                                                    disabled={(!cargaValue && activeFilters.length === 0) || executionLoading}
+                                                    disabled={((!cargaValue && activeFilters.length === 0) && !(sqlMode && selectedCard?.isCustom)) || executionLoading}
                                                     className="w-full py-3 rounded-xl relative overflow-hidden group disabled:opacity-50 disabled:grayscale transition-all hover:scale-[1.01] active:scale-[0.99] shadow-lg hover:shadow-xl hover:shadow-indigo-500/20"
                                                 >
                                                     <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 group-hover:bg-size-200 transition-all duration-500"></div>
@@ -4376,458 +4515,464 @@ From vw_empresa_conveniada_cad e
                                         </div>
                                     </div>
                                 </div>
-                            </motion.div>
+                            </motion.div >
                         )}
 
                         {/* CARGA RESULTS VIEW */}
-                        {menuState === 'carga_result' && (
-                            <motion.div
-                                key="carga-result"
-                                initial={{ opacity: 0, scale: 0.95 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.95 }}
-                                className="flex flex-col w-full h-full"
-                            >
-                                <div className="p-4 bg-white border-b border-gray-200 flex justify-between items-center shadow-sm sticky top-0 z-30">
-                                    <div className="flex items-center gap-4">
-                                        <button
-                                            onClick={() => setMenuState('carga_input')}
-                                            className="text-gray-400 hover:text-gray-600 flex items-center gap-2 text-xs font-bold uppercase tracking-wider transition-colors bg-gray-50 px-3 py-2 rounded-lg hover:bg-gray-100"
-                                        >
-                                            ← Voltar
-                                        </button>
+                        {
+                            menuState === 'carga_result' && (
+                                <motion.div
+                                    key="carga-result"
+                                    initial={{ opacity: 0, scale: 0.95 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.95 }}
+                                    className="flex flex-col w-full h-full"
+                                >
+                                    <div className="p-4 bg-white border-b border-gray-200 flex justify-between items-center shadow-sm sticky top-0 z-30">
+                                        <div className="flex items-center gap-4">
+                                            <button
+                                                onClick={() => setMenuState('carga_input')}
+                                                className="text-gray-400 hover:text-gray-600 flex items-center gap-2 text-xs font-bold uppercase tracking-wider transition-colors bg-gray-50 px-3 py-2 rounded-lg hover:bg-gray-100"
+                                            >
+                                                ← Voltar
+                                            </button>
 
-                                        <div>
-                                            <h2 className="text-lg font-black text-gray-800 tracking-tight flex items-center gap-2">
-                                                {sqlMode ? 'Resultado da Extração' : (selectedCard?.title || 'Resultado da Carga')}
-                                            </h2>
-                                            <div className="flex items-center gap-3 text-xs">
-                                                <span className="text-gray-400 font-mono" title={exportTableName}>
-                                                    {sqlMode ? (parsedSqlData?.title || selectedCard?.title || 'Script SQL') : exportTableName}
-                                                </span>
-                                                {totalRecords > 0 && (
-                                                    <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">
-                                                        {totalRecords.toLocaleString()} registros
+                                            <div>
+                                                <h2 className="text-lg font-black text-gray-800 tracking-tight flex items-center gap-2">
+                                                    {sqlMode ? 'Resultado da Extração' : (selectedCard?.title || 'Resultado da Carga')}
+                                                </h2>
+                                                <div className="flex items-center gap-3 text-xs">
+                                                    <span className="text-gray-400 font-mono" title={exportTableName}>
+                                                        {sqlMode ? (parsedSqlData?.title || selectedCard?.title || 'Script SQL') : exportTableName}
                                                     </span>
-                                                )}
+                                                    {totalRecords > 0 && (
+                                                        <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">
+                                                            {totalRecords.toLocaleString()} registros
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-3">
+                                            {/* Missing Items Alert */}
+                                            {Object.keys(missingItems).length > 0 && (
+                                                <button
+                                                    onClick={() => setIsMissingItemsModalOpen(true)}
+                                                    className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors animate-pulse"
+                                                >
+                                                    <span className="text-lg">⚠️</span>
+                                                    <span className="font-bold text-xs">{Object.values(missingItems).flat().length} Ausentes</span>
+                                                </button>
+                                            )}
+
+                                            <button
+                                                onClick={toggleFilters}
+                                                className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-sm border ${showFilters ? 'bg-blue-600 text-white border-blue-600 shadow-blue-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                                                Filtros
+                                                {activeFilters.length > 0 && <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded-full ${showFilters ? 'bg-white text-blue-600' : 'bg-blue-100 text-blue-600'}`}>{activeFilters.length}</span>}
+                                            </button>
+
+                                            <div className="h-6 w-px bg-gray-200 mx-1"></div>
+
+                                            <div className="h-6 w-px bg-gray-200 mx-1"></div>
+
+                                            {/* Dashboard Button */}
+                                            <button
+                                                onClick={() => setIsDashboardOpen(true)}
+                                                disabled={executionLoading || !executionResult || executionResult.error}
+                                                className="px-3 py-2 bg-white border border-gray-200 rounded-xl hover:border-purple-500 hover:text-purple-700 hover:bg-purple-50 transition-all shadow-sm flex items-center gap-2 text-xs font-bold text-gray-600 disabled:opacity-50 disabled:grayscale group"
+                                                title="Criar Dashboard"
+                                            >
+                                                <span className="text-sm group-hover:scale-110 transition-transform">📊</span> Dashboard
+                                            </button>
+
+                                            {/* Export Buttons */}
+                                            <button
+                                                onClick={() => handleExport('xlsx')}
+                                                disabled={executionLoading || !executionResult || executionResult.error}
+                                                className="px-3 py-2 bg-white border border-gray-200 rounded-xl hover:border-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 transition-all shadow-sm flex items-center gap-2 text-xs font-bold text-gray-600 disabled:opacity-50 disabled:grayscale group"
+                                                title="Exportar Excel"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600 group-hover:scale-110 transition-transform"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                                                Excel
+                                            </button>
+                                            <button
+                                                onClick={() => handleExport('csv')}
+                                                disabled={executionLoading || !executionResult || executionResult.error}
+                                                className="px-3 py-2 bg-white border border-gray-200 rounded-xl hover:border-blue-500 hover:text-blue-700 hover:bg-blue-50 transition-all shadow-sm flex items-center gap-2 text-xs font-bold text-gray-600 disabled:opacity-50 disabled:grayscale group"
+                                                title="Exportar CSV"
+                                            >
+                                                <span className="text-sm group-hover:scale-110 transition-transform">📄</span> CSV
+                                            </button>
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center gap-3">
-                                        {/* Missing Items Alert */}
-                                        {Object.keys(missingItems).length > 0 && (
-                                            <button
-                                                onClick={() => setIsMissingItemsModalOpen(true)}
-                                                className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors animate-pulse"
+
+
+                                    {/* Filters Drawer (In-place) */}
+                                    <AnimatePresence>
+                                        {showFilters && (
+                                            <motion.div
+                                                initial={{ height: 0, opacity: 0 }}
+                                                animate={{ height: 'auto', opacity: 1 }}
+                                                exit={{ height: 0, opacity: 0 }}
+                                                className="bg-gray-50 border-b border-gray-200 overflow-hidden"
                                             >
-                                                <span className="text-lg">⚠️</span>
-                                                <span className="font-bold text-xs">{Object.values(missingItems).flat().length} Ausentes</span>
-                                            </button>
-                                        )}
+                                                <div className="p-4 bg-gray-50">
+                                                    <div className="flex justify-between items-center mb-4">
+                                                        <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest">Editar Filtros Ativos</h4>
+                                                        <button onClick={toggleFilters} className="text-xs text-blue-600 hover:underline">Fechar Sem Aplicar</button>
+                                                    </div>
 
-                                        <button
-                                            onClick={toggleFilters}
-                                            className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-sm border ${showFilters ? 'bg-blue-600 text-white border-blue-600 shadow-blue-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
-                                            Filtros
-                                            {activeFilters.length > 0 && <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded-full ${showFilters ? 'bg-white text-blue-600' : 'bg-blue-100 text-blue-600'}`}>{activeFilters.length}</span>}
-                                        </button>
+                                                    <div className="space-y-3 mb-4">
+                                                        {activeFilters.map((filter) => (
+                                                            <div key={filter.id} className="flex gap-2 items-center bg-white p-2 rounded-lg border border-gray-200 shadow-sm animate-in fade-in slide-in-from-left-2">
+                                                                {/* Column Select */}
+                                                                <select
+                                                                    value={filter.column}
+                                                                    onChange={(e) => handleFilterValueChange(filter.id, 'column', e.target.value)}
+                                                                    className="flex-1 p-2 text-xs border border-gray-200 rounded-lg bg-gray-50 focus:bg-white transition-colors outline-none focus:ring-2 focus:ring-blue-100"
+                                                                >
+                                                                    <option value="">Campo...</option>
+                                                                    {tableColumns.map(c => (
+                                                                        <option key={c.name} value={c.name}>{c.name}</option>
+                                                                    ))}
+                                                                </select>
 
-                                        <div className="h-6 w-px bg-gray-200 mx-1"></div>
+                                                                {/* Operator Select */}
+                                                                <select
+                                                                    value={filter.operator}
+                                                                    onChange={(e) => handleFilterValueChange(filter.id, 'operator', e.target.value)}
+                                                                    className="w-[110px] p-2 text-xs border border-gray-200 rounded-lg bg-gray-50 focus:bg-white transition-colors outline-none focus:ring-2 focus:ring-blue-100 uppercase font-bold text-gray-600"
+                                                                >
+                                                                    {(() => {
+                                                                        const colObj = tableColumns.find(c => c.name === filter.column);
+                                                                        const ops = getOperatorsForType(colObj?.type);
+                                                                        return ops.map(op => (
+                                                                            <option key={op.value} value={op.value}>{op.label}</option>
+                                                                        ));
+                                                                    })()}
+                                                                </select>
 
-                                        <div className="h-6 w-px bg-gray-200 mx-1"></div>
-
-                                        {/* Dashboard Button */}
-                                        <button
-                                            onClick={() => setIsDashboardOpen(true)}
-                                            disabled={executionLoading || !executionResult || executionResult.error}
-                                            className="px-3 py-2 bg-white border border-gray-200 rounded-xl hover:border-purple-500 hover:text-purple-700 hover:bg-purple-50 transition-all shadow-sm flex items-center gap-2 text-xs font-bold text-gray-600 disabled:opacity-50 disabled:grayscale group"
-                                            title="Criar Dashboard"
-                                        >
-                                            <span className="text-sm group-hover:scale-110 transition-transform">📊</span> Dashboard
-                                        </button>
-
-                                        {/* Export Buttons */}
-                                        <button
-                                            onClick={() => handleExport('xlsx')}
-                                            disabled={executionLoading || !executionResult || executionResult.error}
-                                            className="px-3 py-2 bg-white border border-gray-200 rounded-xl hover:border-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 transition-all shadow-sm flex items-center gap-2 text-xs font-bold text-gray-600 disabled:opacity-50 disabled:grayscale group"
-                                            title="Exportar Excel"
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600 group-hover:scale-110 transition-transform"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                                            Excel
-                                        </button>
-                                        <button
-                                            onClick={() => handleExport('csv')}
-                                            disabled={executionLoading || !executionResult || executionResult.error}
-                                            className="px-3 py-2 bg-white border border-gray-200 rounded-xl hover:border-blue-500 hover:text-blue-700 hover:bg-blue-50 transition-all shadow-sm flex items-center gap-2 text-xs font-bold text-gray-600 disabled:opacity-50 disabled:grayscale group"
-                                            title="Exportar CSV"
-                                        >
-                                            <span className="text-sm group-hover:scale-110 transition-transform">📄</span> CSV
-                                        </button>
-                                    </div>
-                                </div>
-
-
-
-                                {/* Filters Drawer (In-place) */}
-                                <AnimatePresence>
-                                    {showFilters && (
-                                        <motion.div
-                                            initial={{ height: 0, opacity: 0 }}
-                                            animate={{ height: 'auto', opacity: 1 }}
-                                            exit={{ height: 0, opacity: 0 }}
-                                            className="bg-gray-50 border-b border-gray-200 overflow-hidden"
-                                        >
-                                            <div className="p-4 bg-gray-50">
-                                                <div className="flex justify-between items-center mb-4">
-                                                    <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest">Editar Filtros Ativos</h4>
-                                                    <button onClick={toggleFilters} className="text-xs text-blue-600 hover:underline">Fechar Sem Aplicar</button>
-                                                </div>
-
-                                                <div className="space-y-3 mb-4">
-                                                    {activeFilters.map((filter) => (
-                                                        <div key={filter.id} className="flex gap-2 items-center bg-white p-2 rounded-lg border border-gray-200 shadow-sm animate-in fade-in slide-in-from-left-2">
-                                                            {/* Column Select */}
-                                                            <select
-                                                                value={filter.column}
-                                                                onChange={(e) => handleFilterValueChange(filter.id, 'column', e.target.value)}
-                                                                className="flex-1 p-2 text-xs border border-gray-200 rounded-lg bg-gray-50 focus:bg-white transition-colors outline-none focus:ring-2 focus:ring-blue-100"
-                                                            >
-                                                                <option value="">Campo...</option>
-                                                                {tableColumns.map(c => (
-                                                                    <option key={c.name} value={c.name}>{c.name}</option>
-                                                                ))}
-                                                            </select>
-
-                                                            {/* Operator Select */}
-                                                            <select
-                                                                value={filter.operator}
-                                                                onChange={(e) => handleFilterValueChange(filter.id, 'operator', e.target.value)}
-                                                                className="w-[110px] p-2 text-xs border border-gray-200 rounded-lg bg-gray-50 focus:bg-white transition-colors outline-none focus:ring-2 focus:ring-blue-100 uppercase font-bold text-gray-600"
-                                                            >
-                                                                {(() => {
-                                                                    const colObj = tableColumns.find(c => c.name === filter.column);
-                                                                    const ops = getOperatorsForType(colObj?.type);
-                                                                    return ops.map(op => (
-                                                                        <option key={op.value} value={op.value}>{op.label}</option>
-                                                                    ));
-                                                                })()}
-                                                            </select>
-
-                                                            {/* Value Input */}
-                                                            {/* Value Input */}
-                                                            <div className="flex-1">
-                                                                {filter.operator === 'between' || filter.operator === 'between_date' ? (
-                                                                    <div className="flex gap-1">
+                                                                {/* Value Input */}
+                                                                {/* Value Input */}
+                                                                <div className="flex-1">
+                                                                    {filter.operator === 'between' || filter.operator === 'between_date' ? (
+                                                                        <div className="flex gap-1">
+                                                                            <input
+                                                                                type={filter.operator.includes('date') ? 'text' : 'text'}
+                                                                                value={filter.value}
+                                                                                onChange={(e) => handleFilterValueChange(filter.id, 'value', e.target.value, filter.operator.includes('date') ? 'DATE' : 'VARCHAR')}
+                                                                                className="w-full p-2 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-100"
+                                                                                placeholder={(() => {
+                                                                                    const colType = tableColumns.find(c => c.name === filter.column)?.type?.toUpperCase();
+                                                                                    return colType?.includes('DATE') ? "DD/MM/YYYY" : "Início";
+                                                                                })()}
+                                                                            />
+                                                                            <input
+                                                                                type={filter.operator.includes('date') ? 'text' : 'text'}
+                                                                                value={filter.value2 || ''}
+                                                                                onChange={(e) => handleFilterValueChange(filter.id, 'value2', e.target.value, filter.operator.includes('date') ? 'DATE' : 'VARCHAR')}
+                                                                                className="w-full p-2 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-100"
+                                                                                placeholder={(() => {
+                                                                                    const colType = tableColumns.find(c => c.name === filter.column)?.type?.toUpperCase();
+                                                                                    return colType?.includes('DATE') ? "DD/MM/YYYY" : "Fim";
+                                                                                })()}
+                                                                            />
+                                                                        </div>
+                                                                    ) : filter.operator === 'list' ? (
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                // Logic to edit list. We need to identify WHICH filter we are editing.
+                                                                                // Since setListModalOpen just opens the modal, we need to bind the save action to this specific filter ID.
+                                                                                // For now, let's assume we load the current value into state and open modal.
+                                                                                setListText(filter.value);
+                                                                                setListModalOpen(true);
+                                                                                // We need a way to know we are editing THIS filter when saving.
+                                                                                // Maybe set a state 'editingFilterId'
+                                                                                // But I don't want to add new state if possible. 
+                                                                                // Let's use a ref or just updating listText acts as "buffer" but we need to write back.
+                                                                                // Wait, handleListSave uses 'activeFilters' logic? 
+                                                                                // Let's check handleListSave. It probably adds a NEW filter or updates?
+                                                                                // Logic: setEditingFilterId(filter.id);
+                                                                            }}
+                                                                            className="w-full p-2 text-xs border border-gray-200 rounded-lg bg-yellow-50 text-yellow-700 hover:bg-yellow-100 transition-colors text-left flex justify-between px-3 items-center"
+                                                                        >
+                                                                            <span className="font-bold">
+                                                                                {filter.value ? filter.value.split(',').filter(x => x.trim()).length : 0} Itens
+                                                                            </span>
+                                                                            <span className="text-[10px] uppercase tracking-wider opacity-70">Editar Lista</span>
+                                                                        </button>
+                                                                    ) : null}
+                                                                    {/* Single Input */}
+                                                                    {filter.operator !== 'list' && filter.operator !== 'between' && (
                                                                         <input
-                                                                            type={filter.operator.includes('date') ? 'text' : 'text'}
+                                                                            type="text"
                                                                             value={filter.value}
-                                                                            onChange={(e) => handleFilterValueChange(filter.id, 'value', e.target.value, filter.operator.includes('date') ? 'DATE' : 'VARCHAR')}
+                                                                            onChange={(e) => handleFilterValueChange(filter.id, 'value', e.target.value)}
                                                                             className="w-full p-2 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-100"
                                                                             placeholder={(() => {
                                                                                 const colType = tableColumns.find(c => c.name === filter.column)?.type?.toUpperCase();
-                                                                                return colType?.includes('DATE') ? "DD/MM/YYYY" : "Início";
+                                                                                if (colType?.includes('DATE')) return "DD/MM/YYYY";
+                                                                                return "Valor...";
                                                                             })()}
                                                                         />
-                                                                        <input
-                                                                            type={filter.operator.includes('date') ? 'text' : 'text'}
-                                                                            value={filter.value2 || ''}
-                                                                            onChange={(e) => handleFilterValueChange(filter.id, 'value2', e.target.value, filter.operator.includes('date') ? 'DATE' : 'VARCHAR')}
-                                                                            className="w-full p-2 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-100"
-                                                                            placeholder={(() => {
-                                                                                const colType = tableColumns.find(c => c.name === filter.column)?.type?.toUpperCase();
-                                                                                return colType?.includes('DATE') ? "DD/MM/YYYY" : "Fim";
-                                                                            })()}
-                                                                        />
-                                                                    </div>
-                                                                ) : filter.operator === 'list' ? (
-                                                                    <button
-                                                                        onClick={() => {
-                                                                            // Logic to edit list. We need to identify WHICH filter we are editing.
-                                                                            // Since setListModalOpen just opens the modal, we need to bind the save action to this specific filter ID.
-                                                                            // For now, let's assume we load the current value into state and open modal.
-                                                                            setListText(filter.value);
-                                                                            setListModalOpen(true);
-                                                                            // We need a way to know we are editing THIS filter when saving.
-                                                                            // Maybe set a state 'editingFilterId'
-                                                                            // But I don't want to add new state if possible. 
-                                                                            // Let's use a ref or just updating listText acts as "buffer" but we need to write back.
-                                                                            // Wait, handleListSave uses 'activeFilters' logic? 
-                                                                            // Let's check handleListSave. It probably adds a NEW filter or updates?
-                                                                            // Logic: setEditingFilterId(filter.id);
-                                                                        }}
-                                                                        className="w-full p-2 text-xs border border-gray-200 rounded-lg bg-yellow-50 text-yellow-700 hover:bg-yellow-100 transition-colors text-left flex justify-between px-3 items-center"
-                                                                    >
-                                                                        <span className="font-bold">
-                                                                            {filter.value ? filter.value.split(',').filter(x => x.trim()).length : 0} Itens
-                                                                        </span>
-                                                                        <span className="text-[10px] uppercase tracking-wider opacity-70">Editar Lista</span>
-                                                                    </button>
-                                                                ) : null}
-                                                                {/* Single Input */}
-                                                                {filter.operator !== 'list' && filter.operator !== 'between' && (
-                                                                    <input
-                                                                        type="text"
-                                                                        value={filter.value}
-                                                                        onChange={(e) => handleFilterValueChange(filter.id, 'value', e.target.value)}
-                                                                        className="w-full p-2 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-100"
-                                                                        placeholder={(() => {
-                                                                            const colType = tableColumns.find(c => c.name === filter.column)?.type?.toUpperCase();
-                                                                            if (colType?.includes('DATE')) return "DD/MM/YYYY";
-                                                                            return "Valor...";
-                                                                        })()}
-                                                                    />
+                                                                    )}
+                                                                </div>
+
+                                                                {/* Remove Button */}
+                                                                <button
+                                                                    onClick={() => removeFilterRow(filter.id)}
+                                                                    className="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"
+                                                                    title="Remover filtro"
+                                                                >
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+
+                                                    <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                                                        <button
+                                                            onClick={addFilterRow}
+                                                            className="flex items-center gap-2 text-xs font-bold text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-lg transition-colors"
+                                                        >
+                                                            <span className="text-lg">+</span> Adicionar Filtro
+                                                        </button>
+
+                                                        <button
+                                                            onClick={() => {
+                                                                // Close drawer
+                                                                // Execute search
+                                                                setShowFilters(false);
+                                                                handleCargaExecute(false);
+                                                            }}
+                                                            className="px-6 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-200 transition-all flex items-center gap-2"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                            Aplicar
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+
+                                    {/* Loading State */}
+                                    {executionLoading && !executionResult && (
+                                        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-blue-600 animate-in fade-in zoom-in duration-300">
+                                            <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+                                            <div className="text-center">
+                                                <p className="text-lg font-bold">Processando consulta...</p>
+                                                <p className="text-sm text-blue-400">Isso pode levar alguns segundos dependendo do volume de dados.</p>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Error State */}
+                                    {executionResult && executionResult.error && (
+                                        <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                            <div className="w-24 h-24 bg-red-50 rounded-full flex items-center justify-center shadow-inner">
+                                                <span className="text-4xl">⚠️</span>
+                                            </div>
+                                            <div className="text-center max-w-lg">
+                                                <h3 className="text-xl font-black text-gray-800 mb-2">Ops! Algo deu errado.</h3>
+                                                <p className="text-gray-500 bg-red-50 p-4 rounded-xl border border-red-100 font-mono text-xs text-left overflow-auto max-h-40">
+                                                    {executionResult.error}
+                                                </p>
+                                            </div>
+                                            <button
+                                                onClick={() => handleCargaExecute()}
+                                                className="px-8 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 hover:shadow-lg hover:shadow-red-200 transition-all active:scale-95"
+                                            >
+                                                Tentar Novamente
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {executionResult && !executionResult.error && executionResult.metaData && (
+                                        <div className="flex-1 flex flex-col overflow-hidden">
+                                            {/* Header Row */}
+                                            <div
+                                                className="flex bg-gray-100 border-b border-gray-200 sticky top-0 z-20 overflow-hidden"
+                                                ref={headerRef}
+                                            >
+                                                {columnOrder.map((colIdx) => {
+                                                    const col = executionResult.metaData[colIdx];
+                                                    if (!col) return null; // Safe guard for stale columnOrder
+                                                    return (
+                                                        <div
+                                                            key={colIdx}
+                                                            className={`flex-shrink-0 p-2 text-[10px] font-bold uppercase tracking-wider relative group border-r border-gray-200 last:border-r-0 h-10 flex items-center cursor-pointer hover:bg-gray-200 transition-colors ${sortConfig.key === col.name ? 'text-blue-600 bg-blue-50' : 'text-gray-500'}`}
+                                                            style={{ width: colWidths[colIdx] }}
+                                                            onClick={() => handleSort(col.name)}
+                                                            title="Clique para ordenar"
+                                                        >
+                                                            <div className="truncate flex-1 pr-4 flex items-center gap-1">
+                                                                {col.name}
+                                                                {sortConfig.key === col.name && (
+                                                                    <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
                                                                 )}
                                                             </div>
+                                                            <div
+                                                                className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize opacity-0 group-hover:opacity-100 hover:bg-blue-400 bg-gray-300 transition-all z-30"
+                                                                onMouseDown={(e) => handleMD(e, colIdx)}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            />
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            {/* Rows content */}
+                                            <div className="flex-1 overflow-auto custom-scroll p-0" onScroll={(e) => {
+                                                if (headerRef.current) headerRef.current.scrollLeft = e.target.scrollLeft;
+                                                const { scrollTop, scrollHeight, clientHeight } = e.target;
+                                                if (scrollTop + clientHeight >= scrollHeight - 300 && !isLoadingMore && paginationParams.hasMore) {
+                                                    handleCargaExecute(true);
+                                                }
+                                            }}>
+                                                <div className="inline-block min-w-full">
+                                                    {executionResult.rows.map((row, rIdx) => (
+                                                        <div key={rIdx} className="flex border-b border-gray-50 hover:bg-blue-50/30 transition-colors group">
+                                                            {columnOrder.map((colIdx) => {
+                                                                const col = executionResult.metaData[colIdx];
+                                                                if (!col) return null; // Guard
 
-                                                            {/* Remove Button */}
-                                                            <button
-                                                                onClick={() => removeFilterRow(filter.id)}
-                                                                className="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"
-                                                                title="Remover filtro"
-                                                            >
-                                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                                                            </button>
+                                                                return (
+                                                                    <div
+                                                                        key={`${rIdx}-${colIdx}`}
+                                                                        className="flex-shrink-0 p-2 text-xs text-gray-600 border-r border-gray-50 last:border-r-0 truncate"
+                                                                        style={{ width: colWidths[colIdx] }}
+                                                                        onClick={() => {
+                                                                            const val = row[colIdx];
+                                                                            if (val && String(val).length > 20 && col) {
+                                                                                setViewingContent({ title: col.name, content: String(val) });
+                                                                            }
+                                                                        }}
+                                                                    >
+                                                                        {formatDate(row[colIdx])}
+                                                                    </div>
+                                                                );
+                                                            })}
                                                         </div>
                                                     ))}
-                                                </div>
 
-                                                <div className="flex justify-between items-center pt-2 border-t border-gray-200">
-                                                    <button
-                                                        onClick={addFilterRow}
-                                                        className="flex items-center gap-2 text-xs font-bold text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-lg transition-colors"
-                                                    >
-                                                        <span className="text-lg">+</span> Adicionar Filtro
-                                                    </button>
-
-                                                    <button
-                                                        onClick={() => {
-                                                            // Close drawer
-                                                            // Execute search
-                                                            setShowFilters(false);
-                                                            handleCargaExecute(false);
-                                                        }}
-                                                        className="px-6 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-200 transition-all flex items-center gap-2"
-                                                    >
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                                                        Aplicar
-                                                    </button>
+                                                    {isLoadingMore && (
+                                                        <div className="p-4 flex justify-center bg-gray-50/80">
+                                                            <div className="flex items-center gap-2 text-blue-600 font-bold text-xs">
+                                                                <div className="w-3 h-3 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
+                                                                Carregando mais resultados...
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
-                                        </motion.div>
+                                        </div>
                                     )}
-                                </AnimatePresence>
+                                </motion.div>
+                            )
+                        }
 
-                                {/* Loading State */}
-                                {executionLoading && !executionResult && (
-                                    <div className="flex-1 flex flex-col items-center justify-center gap-4 text-blue-600 animate-in fade-in zoom-in duration-300">
-                                        <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-                                        <div className="text-center">
-                                            <p className="text-lg font-bold">Processando consulta...</p>
-                                            <p className="text-sm text-blue-400">Isso pode levar alguns segundos dependendo do volume de dados.</p>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Error State */}
-                                {executionResult && executionResult.error && (
-                                    <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                                        <div className="w-24 h-24 bg-red-50 rounded-full flex items-center justify-center shadow-inner">
-                                            <span className="text-4xl">⚠️</span>
-                                        </div>
-                                        <div className="text-center max-w-lg">
-                                            <h3 className="text-xl font-black text-gray-800 mb-2">Ops! Algo deu errado.</h3>
-                                            <p className="text-gray-500 bg-red-50 p-4 rounded-xl border border-red-100 font-mono text-xs text-left overflow-auto max-h-40">
-                                                {executionResult.error}
+                        {/* SEARCH RESULTS VIEW (Restored) */}
+                        {
+                            menuState === 'table_search_results' && (
+                                <motion.div
+                                    key="search-results"
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -20 }}
+                                    className="h-full flex flex-col bg-white rounded-3xl overflow-hidden shadow-2xl border border-gray-100"
+                                >
+                                    <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-white shadow-sm sticky top-0 z-10">
+                                        <div>
+                                            <h3 className="text-xl font-black text-gray-800 flex items-center gap-2">
+                                                <span className="text-2xl">🔍</span>
+                                                Tabelas Encontradas
+                                            </h3>
+                                            <p className="text-sm text-gray-500 mt-1">
+                                                Encontrei {availableTables.length} tabelas correspondentes à sua busca.
                                             </p>
                                         </div>
                                         <button
-                                            onClick={() => handleCargaExecute()}
-                                            className="px-8 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 hover:shadow-lg hover:shadow-red-200 transition-all active:scale-95"
+                                            onClick={() => setMenuState('root')}
+                                            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold text-xs transition-colors"
                                         >
-                                            Tentar Novamente
+                                            Voltar ao Início
                                         </button>
                                     </div>
-                                )}
 
-                                {executionResult && !executionResult.error && executionResult.metaData && (
-                                    <div className="flex-1 flex flex-col overflow-hidden">
-                                        {/* Header Row */}
-                                        <div
-                                            className="flex bg-gray-100 border-b border-gray-200 sticky top-0 z-20 overflow-hidden"
-                                            ref={headerRef}
-                                        >
-                                            {columnOrder.map((colIdx) => {
-                                                const col = executionResult.metaData[colIdx];
-                                                if (!col) return null; // Safe guard for stale columnOrder
-                                                return (
-                                                    <div
-                                                        key={colIdx}
-                                                        className={`flex-shrink-0 p-2 text-[10px] font-bold uppercase tracking-wider relative group border-r border-gray-200 last:border-r-0 h-10 flex items-center cursor-pointer hover:bg-gray-200 transition-colors ${sortConfig.key === col.name ? 'text-blue-600 bg-blue-50' : 'text-gray-500'}`}
-                                                        style={{ width: colWidths[colIdx] }}
-                                                        onClick={() => handleSort(col.name)}
-                                                        title="Clique para ordenar"
+                                    <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                            {availableTables.map((table, idx) => (
+                                                <motion.div
+                                                    key={idx}
+                                                    initial={{ opacity: 0, scale: 0.9 }}
+                                                    animate={{ opacity: 1, scale: 1 }}
+                                                    transition={{ delay: idx * 0.05 }}
+                                                    className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md hover:border-blue-300 transition-all group flex flex-col justify-between h-[180px]"
+                                                >
+                                                    <div>
+                                                        <div className="flex items-center gap-3 mb-3">
+                                                            <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
+                                                                📊
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">{table.owner}</span>
+                                                                <h4 className="font-bold text-gray-800 text-sm leading-tight line-clamp-2" title={table.table_name}>
+                                                                    {table.table_name}
+                                                                </h4>
+                                                            </div>
+                                                        </div>
+                                                        <p className="text-xs text-gray-500 line-clamp-3 mb-4 h-10">
+                                                            {table.comments || 'Sem descrição disponível.'}
+                                                        </p>
+                                                    </div>
+
+                                                    <button
+                                                        onClick={() => {
+                                                            // Send selection back to AI Sidebar using hidden system event
+                                                            const msg = `[SYSTEM_SELECTION_TABLE] ${table.full_name || table.table_name}`;
+                                                            window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', {
+                                                                detail: { text: msg, autoSend: true }
+                                                            }));
+                                                            // Switch back to root or clear selection view to show progress in chat?
+                                                            // Let's go to root for now so the user sees the chat sidebar context
+                                                            setMenuState('root');
+                                                        }}
+                                                        className="w-full py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold text-xs transition-colors flex items-center justify-center gap-2 shadow-sm shadow-green-200"
                                                     >
-                                                        <div className="truncate flex-1 pr-4 flex items-center gap-1">
-                                                            {col.name}
-                                                            {sortConfig.key === col.name && (
-                                                                <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
-                                                            )}
-                                                        </div>
-                                                        <div
-                                                            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize opacity-0 group-hover:opacity-100 hover:bg-blue-400 bg-gray-300 transition-all z-30"
-                                                            onMouseDown={(e) => handleMD(e, colIdx)}
-                                                            onClick={(e) => e.stopPropagation()}
-                                                        />
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                        {/* Rows content */}
-                                        <div className="flex-1 overflow-auto custom-scroll p-0" onScroll={(e) => {
-                                            if (headerRef.current) headerRef.current.scrollLeft = e.target.scrollLeft;
-                                            const { scrollTop, scrollHeight, clientHeight } = e.target;
-                                            if (scrollTop + clientHeight >= scrollHeight - 300 && !isLoadingMore && paginationParams.hasMore) {
-                                                handleCargaExecute(true);
-                                            }
-                                        }}>
-                                            <div className="inline-block min-w-full">
-                                                {executionResult.rows.map((row, rIdx) => (
-                                                    <div key={rIdx} className="flex border-b border-gray-50 hover:bg-blue-50/30 transition-colors group">
-                                                        {columnOrder.map((colIdx) => {
-                                                            const col = executionResult.metaData[colIdx];
-                                                            if (!col) return null; // Guard
-
-                                                            return (
-                                                                <div
-                                                                    key={`${rIdx}-${colIdx}`}
-                                                                    className="flex-shrink-0 p-2 text-xs text-gray-600 border-r border-gray-50 last:border-r-0 truncate"
-                                                                    style={{ width: colWidths[colIdx] }}
-                                                                    onClick={() => {
-                                                                        const val = row[colIdx];
-                                                                        if (val && String(val).length > 20 && col) {
-                                                                            setViewingContent({ title: col.name, content: String(val) });
-                                                                        }
-                                                                    }}
-                                                                >
-                                                                    {formatDate(row[colIdx])}
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                ))}
-
-                                                {isLoadingMore && (
-                                                    <div className="p-4 flex justify-center bg-gray-50/80">
-                                                        <div className="flex items-center gap-2 text-blue-600 font-bold text-xs">
-                                                            <div className="w-3 h-3 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
-                                                            Carregando mais resultados...
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
+                                                        Exibir Dados
+                                                    </button>
+                                                </motion.div>
+                                            ))}
                                         </div>
                                     </div>
-                                )}
-                            </motion.div>
-                        )}
+                                </motion.div>
+                            )
+                        }
 
-                        {/* SEARCH RESULTS VIEW (Restored) */}
-                        {menuState === 'table_search_results' && (
-                            <motion.div
-                                key="search-results"
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -20 }}
-                                className="h-full flex flex-col bg-white rounded-3xl overflow-hidden shadow-2xl border border-gray-100"
-                            >
-                                <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-white shadow-sm sticky top-0 z-10">
-                                    <div>
-                                        <h3 className="text-xl font-black text-gray-800 flex items-center gap-2">
-                                            <span className="text-2xl">🔍</span>
-                                            Tabelas Encontradas
-                                        </h3>
-                                        <p className="text-sm text-gray-500 mt-1">
-                                            Encontrei {availableTables.length} tabelas correspondentes à sua busca.
+                        {
+                            menuState === 'connection_required' && (
+                                <motion.div
+                                    key="connection-required"
+                                    initial={{ opacity: 0, y: 30 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -30 }}
+                                    className="flex flex-col items-center w-full max-w-xl mx-auto"
+                                >
+                                    <div className="bg-white p-8 rounded-3xl shadow-xl border border-gray-100 w-full text-center">
+                                        <h3 className="text-2xl font-bold text-gray-800 mb-4">Conexão Necessária</h3>
+                                        <p className="text-gray-500 mb-6">
+                                            Para continuar, por favor, conecte-se ao banco de dados.
                                         </p>
                                     </div>
-                                    <button
-                                        onClick={() => setMenuState('root')}
-                                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold text-xs transition-colors"
-                                    >
-                                        Voltar ao Início
-                                    </button>
-                                </div>
-
-                                <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                        {availableTables.map((table, idx) => (
-                                            <motion.div
-                                                key={idx}
-                                                initial={{ opacity: 0, scale: 0.9 }}
-                                                animate={{ opacity: 1, scale: 1 }}
-                                                transition={{ delay: idx * 0.05 }}
-                                                className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md hover:border-blue-300 transition-all group flex flex-col justify-between h-[180px]"
-                                            >
-                                                <div>
-                                                    <div className="flex items-center gap-3 mb-3">
-                                                        <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
-                                                            📊
-                                                        </div>
-                                                        <div>
-                                                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">{table.owner}</span>
-                                                            <h4 className="font-bold text-gray-800 text-sm leading-tight line-clamp-2" title={table.table_name}>
-                                                                {table.table_name}
-                                                            </h4>
-                                                        </div>
-                                                    </div>
-                                                    <p className="text-xs text-gray-500 line-clamp-3 mb-4 h-10">
-                                                        {table.comments || 'Sem descrição disponível.'}
-                                                    </p>
-                                                </div>
-
-                                                <button
-                                                    onClick={() => {
-                                                        // Send selection back to AI Sidebar using hidden system event
-                                                        const msg = `[SYSTEM_SELECTION_TABLE] ${table.full_name || table.table_name}`;
-                                                        window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', {
-                                                            detail: { text: msg, autoSend: true }
-                                                        }));
-                                                        // Switch back to root or clear selection view to show progress in chat?
-                                                        // Let's go to root for now so the user sees the chat sidebar context
-                                                        setMenuState('root');
-                                                    }}
-                                                    className="w-full py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold text-xs transition-colors flex items-center justify-center gap-2 shadow-sm shadow-green-200"
-                                                >
-                                                    Exibir Dados
-                                                </button>
-                                            </motion.div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </motion.div>
-                        )}
-
-                        {menuState === 'connection_required' && (
-                            <motion.div
-                                key="connection-required"
-                                initial={{ opacity: 0, y: 30 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -30 }}
-                                className="flex flex-col items-center w-full max-w-xl mx-auto"
-                            >
-                                <div className="bg-white p-8 rounded-3xl shadow-xl border border-gray-100 w-full text-center">
-                                    <h3 className="text-2xl font-bold text-gray-800 mb-4">Conexão Necessária</h3>
-                                    <p className="text-gray-500 mb-6">
-                                        Para continuar, por favor, conecte-se ao banco de dados.
-                                    </p>
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
+                                </motion.div>
+                            )
+                        }
+                    </AnimatePresence >
                 </div >
                 {/* Content Inspection Modal */}
                 < AnimatePresence >
@@ -5166,7 +5311,7 @@ From vw_empresa_conveniada_cad e
                                                 <input
                                                     type="text"
                                                     className="w-full p-3 bg-gray-100 border-none rounded-xl focus:ring-2 focus:ring-blue-500 text-sm pl-10"
-                                                    placeholder="Buscar tabela (ex: TB_OPE...)"
+                                                    placeholder="Buscar tabela (ex: TB_USUARIO...)"
                                                     value={tableSearchTerm}
                                                     onChange={(e) => setTableSearchTerm(e.target.value)}
                                                     autoFocus
@@ -5188,7 +5333,16 @@ From vw_empresa_conveniada_cad e
                                                     </div>
                                                 ) : (
                                                     availableTables
-                                                        .filter(t => t.full_name.toLowerCase().includes(tableSearchTerm.toLowerCase()))
+                                                        .filter(t => {
+                                                            if (!tableSearchTerm) return true;
+                                                            if (tableSearchTerm.includes('%')) {
+                                                                // Wildcard Search Logic
+                                                                const pattern = tableSearchTerm.split('%').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+                                                                const regex = new RegExp(pattern, 'i');
+                                                                return regex.test(t.full_name);
+                                                            }
+                                                            return t.full_name.toLowerCase().includes(tableSearchTerm.toLowerCase());
+                                                        })
                                                         .slice(0, 50)
                                                         .map(table => (
                                                             <div

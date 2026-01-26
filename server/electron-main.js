@@ -1,5 +1,10 @@
 delete process.env.ELECTRON_RUN_AS_NODE;
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+
+// Force Cache Clear
+app.commandLine.appendSwitch('disable-http-cache');
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
 console.log('App type:', typeof app);
 const path = require('path');
 const net = require('net');
@@ -346,8 +351,16 @@ autoUpdater.on('update-not-available', (info) => {
 });
 
 autoUpdater.on('error', (err) => {
-    log.error('Error in auto-updater:', err);
-    if (mainWindow) mainWindow.webContents.send('update_error', err.message);
+    // Filter out network errors to avoid scaring the user on startup
+    const msg = err.message || '';
+    if (msg.includes('net') || msg.includes('timeout') || msg.includes('DNS') || msg.includes('network')) {
+        log.warn('Network error during update check (suppressed from UI):', err);
+        // Optionally tell UI it's up to date or interactions restricted, but don't show error state
+        if (mainWindow) mainWindow.webContents.send('update_not_available', { version: 'Offline' });
+    } else {
+        log.error('Error in auto-updater:', err);
+        if (mainWindow) mainWindow.webContents.send('update_error', msg);
+    }
 });
 
 ipcMain.handle('manual-check-update', async () => {
@@ -406,7 +419,13 @@ app.on('ready', async () => {
     // We still query DB to show "New Version Available" banner in UI via chatService
 
     // Prevent English notification, let UI handle it
-    autoUpdater.checkForUpdates();
+    try {
+        autoUpdater.checkForUpdates().catch(err => {
+            log.error("Failed to check for updates on startup:", err);
+        });
+    } catch (e) {
+        log.error("Synchronous error checking for updates:", e);
+    }
 });
 
 ipcMain.on('restart_app', async () => {

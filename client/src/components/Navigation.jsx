@@ -3,7 +3,7 @@ import {
     MessageSquare, Database, Bot, FileInput, Calendar, FolderOpen, FileSpreadsheet,
     Settings, Layout, ArrowLeft, ArrowDown, ArrowUp, ArrowRight, Cloud, RefreshCw, LogOut, Check, Sparkles, Search
 } from 'lucide-react';
-import BackupMenu from './BackupMenu';
+// import BackupMenu from './BackupMenu';
 
 const Navigation = ({
     activeTab,
@@ -40,17 +40,34 @@ const Navigation = ({
     const [isHovered, setIsHovered] = useState(false); // Track hover for scrollbar logic
 
     // Tabs Configuration
-    const tabs = [
-        { id: 'team-chat', icon: MessageSquare, label: 'Chat', color: 'text-indigo-600' },
-        { id: 'sql-runner', icon: Database, label: 'Editor SQL', color: 'text-blue-600' },
-        { id: 'query-builder', icon: Bot, label: 'Construtor AI', color: 'text-violet-600' },
-        { id: 'csv-importer', icon: FileInput, label: 'Importar CSV', color: 'text-emerald-600' },
-        { id: 'reminders', icon: Calendar, label: 'Lembretes', color: 'text-amber-600' },
-        { id: 'docs', icon: FolderOpen, label: 'Docs', color: 'text-slate-600' },
-        { id: 'data-processor', icon: FileSpreadsheet, label: 'Tratar Dados', color: 'text-teal-600' },
+    // Grouped Configuration
+    const tabGroups = [
+        {
+            title: 'AI Studio',
+            items: [
+                { id: 'query-builder', icon: Bot, label: 'Construtor AI', color: 'text-violet-600' },
+                { id: 'team-chat', icon: MessageSquare, label: 'Chat', color: 'text-indigo-600' },
+            ]
+        },
+        {
+            title: 'Dados',
+            items: [
+                { id: 'sql-runner', icon: Database, label: 'Editor SQL', color: 'text-blue-600' },
+                { id: 'data-processor', icon: FileSpreadsheet, label: 'Tratar Dados', color: 'text-teal-600' },
+                { id: 'csv-importer', icon: FileInput, label: 'Importar CSV', color: 'text-emerald-600' },
+            ]
+        },
+        {
+            title: 'Conhecimento',
+            items: [
+                { id: 'docs', icon: FolderOpen, label: 'Docs', color: 'text-slate-600' },
+                { id: 'reminders', icon: Calendar, label: 'Lembretes', color: 'text-amber-600' },
+            ]
+        }
     ];
 
-    // 3D Icon Component
+    // ... (ThreeDIcon and NavItem definitions kept similar but cleaner) ...
+
     const ThreeDIcon = ({ Icon, color, isActive }) => {
         const getShadowColor = () => {
             if (color.includes('indigo')) return 'shadow-indigo-200 border-indigo-100';
@@ -61,9 +78,7 @@ const Navigation = ({
             if (color.includes('teal')) return 'shadow-teal-200 border-teal-100';
             return 'shadow-gray-200 border-gray-100';
         };
-
         const shadowClass = getShadowColor();
-
         return (
             <div className={`
                 relative flex items-center justify-center
@@ -74,20 +89,13 @@ const Navigation = ({
                 ${isActive ? 'scale-110 shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)]' : 'hover:scale-105'}
             `}>
                 <div className={`absolute inset-0 rounded-full border-2 ${shadowClass} opacity-50`}></div>
-                <Icon
-                    size={20}
-                    className={`
-                        z-10 transition-all duration-300
-                        ${isActive ? 'text-gray-900 drop-shadow-sm' : color}
-                    `}
-                />
+                <Icon size={20} className={`z-10 transition-all duration-300 ${isActive ? 'text-gray-900 drop-shadow-sm' : color}`} />
             </div>
         );
     };
 
     const NavItem = ({ tab }) => {
         const isActive = activeTab === tab.id;
-
         return (
             <button
                 onClick={() => onTabChange(tab.id)}
@@ -96,8 +104,8 @@ const Navigation = ({
                     group relative flex items-center justify-start transition-all duration-300 ease-out
                     ${isActive ? 'bg-transparent' : 'bg-transparent'}
                     ${isVertical
-                        ? 'w-full mb-3 h-14 px-3'
-                        : 'h-14 px-3 rounded-lg mr-2 overflow-hidden'
+                        ? 'w-full mb-2 h-12 px-3'
+                        : 'h-12 px-3 rounded-lg mr-2 overflow-hidden'
                     }
                     ${!isVertical
                         ? (isActive ? 'max-w-[200px]' : 'max-w-[56px] hover:max-w-[200px]')
@@ -107,17 +115,9 @@ const Navigation = ({
             >
                 {isVertical && (
                     <div className={`
-                        absolute left-0 w-1.5 bg-green-500 rounded-r-md shadow-sm
+                        absolute left-0 w-1.5 bg-blue-500 rounded-r-md shadow-sm
                         top-1/2 -translate-y-1/2 transition-all duration-300 ease-out
-                        ${isActive ? 'h-12 opacity-100' : 'h-0 opacity-0'}
-                    `}></div>
-                )}
-
-                {!isVertical && (
-                    <div className={`
-                        absolute bottom-1 h-1 bg-green-500 rounded-full shadow-sm
-                        left-1/2 -translate-x-1/2 transition-all duration-300 ease-out
-                        ${isActive ? 'w-12 opacity-100' : 'w-0 opacity-0'}
+                        ${isActive ? 'h-8 opacity-100' : 'h-0 opacity-0'}
                     `}></div>
                 )}
 
@@ -250,29 +250,21 @@ const Navigation = ({
             group bg-white border-gray-200 shadow-sm z-50 transition-all duration-500 ease-in-out
             flex ${isVertical ? 'flex-col w-20 hover:w-64 border-r' : 'flex-row h-16 w-full border-b items-center px-4'}
             ${isVertical ? 'h-full py-6 px-3' : ''}
-            ${/* Apply Animation Override Classes */ ''}
             ${isAnim ? animClass : ''}
         `}>
 
             {/* 1. Brand / Controls */}
             <div className={`
                 flex items-center transition-all duration-300 relative
-                ${isVertical ? 'flex-col mb-8' : 'mr-8'}
+                ${isVertical ? 'flex-col mb-6' : 'mr-4'}
                 ${contentHide ? 'justify-center w-full !mr-0 !mb-0' : ''} 
             `}>
-
                 <button
                     onClick={() => {
                         let next = 'left';
-                        if (position === 'top') {
-                            next = 'left';
-                            setCycleDir('down');
-                        } else if (position === 'bottom') {
-                            next = 'left';
-                            setCycleDir('up');
-                        } else if (position === 'left') {
-                            next = cycleDir === 'down' ? 'bottom' : 'top';
-                        }
+                        if (position === 'top') { next = 'left'; setCycleDir('down'); }
+                        else if (position === 'bottom') { next = 'left'; setCycleDir('up'); }
+                        else if (position === 'left') { next = cycleDir === 'down' ? 'bottom' : 'top'; }
                         handlePositionChange(next);
                     }}
                     className={`
@@ -281,7 +273,6 @@ const Navigation = ({
                     `}
                     title="Mover Barra"
                 >
-                    {/* ICON LOGIC */}
                     {isAnim ? (
                         <>
                             {targetPos === 'bottom' && <ArrowRight size={20} className="absolute" />}
@@ -303,8 +294,8 @@ const Navigation = ({
                     <button
                         onClick={() => onTabChange('query-builder')}
                         className={`
-                            mt-4 p-2 rounded-lg bg-indigo-50 text-indigo-500 hover:bg-indigo-100 transition
-                            ${!isVertical ? 'ml-2 mt-0' : ''}
+                            p-2 rounded-lg bg-indigo-50 text-indigo-500 hover:bg-indigo-100 transition
+                            ${isVertical ? 'mt-4' : 'ml-2'}
                             ${contentHide ? 'hidden opacity-0' : 'block opacity-100'}
                         `}
                         title="Voltar ao Início"
@@ -314,17 +305,36 @@ const Navigation = ({
                 )}
             </div>
 
-            {/* 2. Navigation Items */}
+            {/* 2. Navigation Items (Grouped) */}
             <div className={`
                 flex flex-1 transition-all duration-300
                 ${contentHide ? 'opacity-0 scale-90 pointer-events-none w-0 h-0 overflow-hidden' : 'opacity-100 scale-100'}
                 ${isVertical
                     ? `flex-col w-full no-scrollbar scrollbar-custom ${shouldHideScrollbar ? '!overflow-hidden' : 'overflow-y-auto'}`
-                    : 'items-center overflow-x-auto no-scrollbar'
+                    : 'items-center overflow-x-auto no-scrollbar gap-4'
                 }
             `}>
-                {tabs.map(tab => (
-                    <NavItem key={tab.id} tab={tab} />
+                {tabGroups.map((group, index) => (
+                    <div key={index} className={`
+                        flex ${isVertical ? 'flex-col mb-4' : 'flex-row items-center border-l first:border-l-0 pl-4'}
+                    `}>
+                        {/* Group Header (Vertical Only) */}
+                        {isVertical && (
+                            <div className={`
+                                text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider transition-all duration-300 ml-1
+                                ${isHovered ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 hidden group-hover:block group-hover:opacity-100 group-hover:translate-x-0'}
+                            `}>
+                                {group.title}
+                            </div>
+                        )}
+
+                        {/* Group Items */}
+                        <div className={`flex ${isVertical ? 'flex-col' : 'flex-row items-center'}`}>
+                            {group.items.map(tab => (
+                                <NavItem key={tab.id} tab={tab} />
+                            ))}
+                        </div>
+                    </div>
                 ))}
             </div>
 
@@ -395,13 +405,13 @@ const Navigation = ({
                         </div>
                     )}
                 </div>
-                <BackupMenu
+                {/* <BackupMenu
                     lastBackup={lastBackup}
                     onForceBackup={onForceBackup}
                     isBackingUp={isBackingUp}
                     autoBackupEnabled={autoBackupEnabled}
                     toggleAutoBackup={toggleAutoBackup}
-                />
+                /> */}
                 <button
                     onClick={onCheckUpdates}
                     disabled={updateStatus === 'checking'}

@@ -24,6 +24,46 @@ function CsvImporter({ isVisible, connectionName }) {
     const [editingHistoryIdx, setEditingHistoryIdx] = useState(null);
     const [editingGrantUser, setEditingGrantUser] = useState('');
 
+    // --- Bulk Column Selection State ---
+    const [selectedCols, setSelectedCols] = useState(new Set());
+    const [showColumnManager, setShowColumnManager] = useState(false);
+
+    const toggleColumnSelection = (index) => {
+        const newSelected = new Set(selectedCols);
+        if (newSelected.has(index)) {
+            newSelected.delete(index);
+        } else {
+            newSelected.add(index);
+        }
+        setSelectedCols(newSelected);
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedCols.size === columns.length) {
+            setSelectedCols(new Set());
+        } else {
+            const allIndices = new Set(columns.map((_, i) => i));
+            setSelectedCols(allIndices);
+        }
+    };
+
+    const handleBulkDelete = () => {
+        if (selectedCols.size === 0) return;
+
+        if (!window.confirm(`Tem certeza que deseja excluir as ${selectedCols.size} colunas selecionadas?`)) return;
+
+        // Filter out selected columns
+        const newCols = columns.filter((_, i) => !selectedCols.has(i));
+
+        if (newCols.length === 0) {
+            alert("A tabela precisa ter pelo menos uma coluna.");
+            return;
+        }
+
+        setColumns(newCols);
+        setSelectedCols(new Set()); // Clear selection
+    };
+
     const handleStartEdit = (item, idx) => {
         setEditingHistoryIdx(idx);
         setEditingGrantUser(item.grantUser || '');
@@ -453,7 +493,77 @@ function CsvImporter({ isVisible, connectionName }) {
                         )}
 
                         {step === 2 && (
-                            <div className="flex-1 flex flex-col overflow-hidden">
+                            <div className="flex-1 flex flex-col overflow-hidden relative">
+                                {/* -- MODAL GERENCIAR COLUNAS -- */}
+                                {showColumnManager && (
+                                    <div className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                                        <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl flex flex-col max-h-[90%] animate-in fade-in zoom-in duration-200">
+                                            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                                                <h3 className="font-bold text-gray-700 flex items-center gap-2">
+                                                    <Layout size={18} />
+                                                    Gerenciar Colunas
+                                                </h3>
+                                                <button onClick={() => setShowColumnManager(false)} className="text-gray-400 hover:text-gray-600">
+                                                    <X size={20} />
+                                                </button>
+                                            </div>
+
+                                            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white">
+                                                <label className="flex items-center space-x-2 cursor-pointer select-none">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedCols.size === columns.length && columns.length > 0}
+                                                        onChange={toggleSelectAll}
+                                                        className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                                                    />
+                                                    <span className="text-sm font-medium text-gray-600">Selecionar Todas ({columns.length})</span>
+                                                </label>
+
+                                                {selectedCols.size > 0 && (
+                                                    <button
+                                                        onClick={handleBulkDelete}
+                                                        className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 border border-red-200 transition-colors text-sm font-bold"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                        Excluir {selectedCols.size} Selecionada(s)
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            <div className="flex-1 overflow-y-auto p-2">
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                    {columns.map((col, idx) => (
+                                                        <label
+                                                            key={idx}
+                                                            className={`flex items-center p-3 rounded border cursor-pointer transition-all ${selectedCols.has(idx) ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100' : 'bg-white border-gray-200 hover:border-gray-300'}`}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedCols.has(idx)}
+                                                                onChange={() => toggleColumnSelection(idx)}
+                                                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 mt-0.5"
+                                                            />
+                                                            <div className="ml-3 flex-1 min-w-0">
+                                                                <p className="text-sm font-bold text-gray-700 truncate">{col.name}</p>
+                                                                <p className="text-xs text-gray-400 truncate">Origem: {col.originalName}</p>
+                                                            </div>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end">
+                                                <button
+                                                    onClick={() => setShowColumnManager(false)}
+                                                    className="px-6 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-900 font-medium"
+                                                >
+                                                    Concluir
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="flex justify-between items-center mb-4">
                                     <div className="flex items-center space-x-4">
                                         <h3 className="text-xl font-bold text-gray-800">Visualizar e Editar Colunas</h3>
@@ -469,8 +579,17 @@ function CsvImporter({ isVisible, connectionName }) {
                                             />
                                         </div>
                                     </div>
-                                    <div className="text-sm text-gray-500">
-                                        Total estimado: <span className="font-bold">{totalRows}</span> linhas
+                                    <div className="flex items-center gap-4">
+                                        <div className="text-sm text-gray-500">
+                                            Total: <span className="font-bold">{totalRows}</span> linhas
+                                        </div>
+                                        <button
+                                            onClick={() => setShowColumnManager(true)}
+                                            className="npx-button flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded shadow-sm hover:bg-gray-50 text-gray-700 font-medium transition-colors"
+                                        >
+                                            <Layout size={16} />
+                                            Gerenciar Colunas ({columns.length})
+                                        </button>
                                     </div>
                                 </div>
 

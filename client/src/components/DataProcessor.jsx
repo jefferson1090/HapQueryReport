@@ -1136,6 +1136,7 @@ const DataProcessor = ({ isVisible, connection }) => {
                         isOpen={showDeParaModal}
                         onClose={() => setShowDeParaModal(false)}
                         data={data}
+                        connection={connection}
                         sourceColIdx={Object.keys(selectedColumns).length === 1 ? parseInt(Object.keys(selectedColumns)[0]) : null}
                         sourceColName={Object.keys(selectedColumns).length === 1 ? data.columns[parseInt(Object.keys(selectedColumns)[0])] : ''}
                         onApply={(newData) => {

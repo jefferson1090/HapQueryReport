@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     X, Plus, Trash2, ArrowRight, Save, FileText,
     Check, AlertCircle, ChevronDown, List as ListIcon,
-    Filter, MoreHorizontal, Binary, FileSpreadsheet
+    Filter, MoreHorizontal, Binary, FileSpreadsheet, Search, Database
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -18,8 +18,8 @@ const OPERATORS = [
     { id: 'in_list', label: 'Está na Lista', type: 'any' }
 ];
 
-const DeParaModal = ({ isOpen, onClose, data, sourceColIdx, sourceColName, onApply }) => {
-    const [mode, setMode] = useState('manual'); // manual | import
+const DeParaModal = ({ isOpen, onClose, data, sourceColIdx, sourceColName, onApply, connection }) => {
+    const [mode, setMode] = useState('manual'); // manual | import | import_db
     const [targetColName, setTargetColName] = useState('');
     const [rules, setRules] = useState([]);
 
@@ -92,6 +92,69 @@ const DeParaModal = ({ isOpen, onClose, data, sourceColIdx, sourceColName, onApp
         targetLookupCol: ''
     });
 
+    // --- DB Import Logic ---
+    const [dbSearchTerm, setDbSearchTerm] = useState('');
+    const [dbTables, setDbTables] = useState([]);
+    const [dbLoading, setDbLoading] = useState(false);
+
+    const handleSearchTables = async () => {
+        if (!connection) return alert("Sem conexão ativa.");
+        setDbLoading(true);
+        try {
+            const res = await fetch(`http://127.0.0.1:3001/api/tables?search=${dbSearchTerm}`, {
+                headers: { 'x-db-connection': JSON.stringify(connection) }
+            });
+            const json = await res.json();
+            // API returns array of strings ["OWNER.TABLE_NAME", ...]
+            setDbTables(json);
+        } catch (e) {
+            alert("Erro ao buscar tabelas: " + e.message);
+        } finally {
+            setDbLoading(false);
+        }
+    };
+
+    const handleSelectTable = async (tableName) => {
+        if (!connection) return;
+        setDbLoading(true);
+        try {
+            // Fetch sample data (500 rows)
+            const res = await fetch('http://127.0.0.1:3001/api/query', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-db-connection': JSON.stringify(connection)
+                },
+                body: JSON.stringify({
+                    sql: `SELECT * FROM ${tableName} FETCH NEXT 1000 ROWS ONLY`, // Increased limit slightly
+                    connection
+                })
+            });
+            const json = await res.json();
+
+            if (json.error) throw new Error(json.error);
+
+            const columns = json.metaData.map(m => m.name);
+            const rows = json.rows; // Already array of arrays if using array mode, or check result format
+
+            setLookupData({ columns, rows });
+            // Reset join params for new data
+            setJoinParams({
+                conditions: [{ sourceCol: sourceColName, lookupCol: columns[0] || '' }],
+                targetLookupCol: columns[1] || columns[0] || ''
+            });
+
+            // Switch to standard import mode which handles the logic now
+            setMode('import');
+
+        } catch (e) {
+            console.error(e);
+            alert("Erro ao importar tabela: " + e.message);
+        } finally {
+            setDbLoading(false);
+        }
+    };
+
     const handleLookupFile = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -115,6 +178,7 @@ const DeParaModal = ({ isOpen, onClose, data, sourceColIdx, sourceColName, onApp
                     conditions: [{ sourceCol: sourceColName, lookupCol: headers[0] || '' }],
                     targetLookupCol: headers[1] || headers[0] || ''
                 });
+                setMode('import'); // Confirm mode
 
             } catch (err) {
                 console.error(err);
@@ -330,6 +394,14 @@ const DeParaModal = ({ isOpen, onClose, data, sourceColIdx, sourceColName, onApp
                         >
                             Importar CSV
                         </button>
+                        <button
+                            onClick={() => setMode('import_db')}
+                            className={`px-4 py-2 rounded-lg text-sm font-bold border ${mode === 'import_db' ? 'bg-purple-50 border-purple-200 text-purple-700' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}
+                            title={!connection ? "Sem conexão com banco" : "Usar tabela do banco"}
+                            disabled={!connection}
+                        >
+                            Importar do Banco
+                        </button>
                     </div>
                 </div>
 
@@ -337,7 +409,53 @@ const DeParaModal = ({ isOpen, onClose, data, sourceColIdx, sourceColName, onApp
                 <div className="flex-1 overflow-hidden flex bg-slate-50">
                     {/* Left: Rules Builder */}
                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                        {mode === 'manual' ? (
+                        {mode === 'import_db' ? (
+                            <div className="space-y-6">
+                                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-center">
+                                    <div className="mx-auto w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mb-4">
+                                        <Database size={24} className="text-purple-600" />
+                                    </div>
+                                    <h3 className="font-bold text-slate-700 text-lg mb-2">Buscar Tabela no Banco</h3>
+                                    <p className="text-sm text-slate-500 mb-6">Conectado a: <span className="font-mono bg-slate-100 px-1 rounded text-xs">{connection?.user || 'Desconhecido'}</span></p>
+
+                                    <div className="flex gap-2 max-w-md mx-auto">
+                                        <input
+                                            value={dbSearchTerm}
+                                            onChange={e => setDbSearchTerm(e.target.value.toUpperCase())}
+                                            onKeyDown={e => e.key === 'Enter' && handleSearchTables()}
+                                            className="flex-1 border border-slate-300 rounded-lg px-4 py-2 outline-none focus:border-purple-500 uppercase font-bold text-slate-700 placeholder:normal-case font-mono"
+                                            placeholder="Nome da Tabela..."
+                                            autoFocus
+                                        />
+                                        <button
+                                            onClick={handleSearchTables}
+                                            disabled={dbLoading}
+                                            className="px-4 py-2 bg-purple-600 text-white rounded-lg font-bold hover:bg-purple-700 disabled:opacity-50"
+                                        >
+                                            {dbLoading ? '...' : <Search size={20} />}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {dbTables.length > 0 && (
+                                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                        <h4 className="font-bold text-slate-600 mb-3 text-sm uppercase">Resultados ({dbTables.length})</h4>
+                                        <div className="max-h-60 overflow-y-auto space-y-1">
+                                            {dbTables.map((tbl) => (
+                                                <button
+                                                    key={tbl}
+                                                    onClick={() => handleSelectTable(tbl)}
+                                                    className="w-full text-left px-4 py-3 hover:bg-purple-50 rounded-lg border border-transparent hover:border-purple-100 transition-all flex items-center justify-between group"
+                                                >
+                                                    <span className="font-mono font-bold text-slate-700">{tbl}</span>
+                                                    <ArrowRight size={16} className="text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : mode === 'manual' ? (
                             <>
                                 {rules.length === 0 && (
                                     <div className="text-center py-10 text-slate-400">
@@ -465,11 +583,11 @@ const DeParaModal = ({ isOpen, onClose, data, sourceColIdx, sourceColName, onApp
                                             <div className="flex items-center gap-3">
                                                 <div className="p-2 bg-emerald-100 rounded-lg text-emerald-600"><FileSpreadsheet size={16} /></div>
                                                 <div>
-                                                    <p className="text-sm font-bold text-emerald-900">Arquivo de Referência Carregado</p>
+                                                    <p className="text-sm font-bold text-emerald-900">Origem de Dados Carregada</p>
                                                     <p className="text-xs text-emerald-600">{lookupData.rows.length} linhas, {lookupData.columns.length} colunas</p>
                                                 </div>
                                             </div>
-                                            <button onClick={() => setLookupData(null)} className="text-xs font-bold text-emerald-700 hover:underline">Alterar Arquivo</button>
+                                            <button onClick={() => setLookupData(null)} className="text-xs font-bold text-emerald-700 hover:underline">Alterar Origem</button>
                                         </div>
 
                                         {/* Join Config */}

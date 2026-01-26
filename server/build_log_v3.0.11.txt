@@ -1,0 +1,72 @@
+
+> hap-query-report-server@3.0.11 predist
+> npm run clean && npm run copy-client
+
+
+> hap-query-report-server@3.0.11 clean
+> node -e "const fs = require('fs'); fs.rmSync('dist', { recursive: true, force: true });"
+
+
+> hap-query-report-server@3.0.11 copy-client
+> powershell -ExecutionPolicy Bypass -File "./scripts/copy_assets.ps1"
+
+Building Client at: C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\scripts\..\..\client
+
+> hap-query-report-client@3.0.11 prebuild
+> npm run clean
+
+
+> hap-query-report-client@3.0.11 clean
+> node -e "const fs = require('fs'); fs.rmSync('dist', { recursive: true, force: true });"
+
+
+> hap-query-report-client@3.0.11 build
+> vite build
+
+[36mvite v7.2.6 [32mbuilding client environment for production...[36m[39m
+transforming...
+[33m[plugin vite:esbuild] src/App.jsx: [33mThis case clause will never be evaluated because it duplicates an earlier case clause[33m
+495 |                  case 'db_structure': prompt = "Exibir estrutura da tabela [NOME_DA_TABELA]"; break;
+496 |                  case 'db_data': prompt = "Ver dados da tabela [NOME_DA_TABELA]"; break;
+497 |                  case 'db_data': prompt = "Ver dados da tabela [NOME_DA_TABELA]"; break;
+    |                       ^
+498 |                  // case 'db_find': prompt = "Buscar o registro onde [CONDIÇÃO] na tabela [NOME_DA_TABELA]"; break; //...
+499 |              }
+[39m
+[32m✓[39m 5161 modules transformed.
+[33mnode_modules/vm-browserify/index.js (110:11): Use of eval in "node_modules/vm-browserify/index.js" is strongly discouraged as it poses security risks and may cause issues with minification.[39m
+rendering chunks...
+computing gzip size...
+[2mdist/[22m[32mindex.html                           [39m[1m[2m    0.47 kB[22m[1m[22m[2m │ gzip:     0.31 kB[22m
+[2mdist/[22m[32massets/hap_logo_v2-CKt1StAR.png      [39m[1m[2m   46.11 kB[22m[1m[22m
+[2mdist/[22m[32massets/hap_logo_v4-CuOd1_Iw.png      [39m[1m[2m   49.80 kB[22m[1m[22m
+[2mdist/[22m[32massets/hap_splash_text-DOYBKtUX.png  [39m[1m[2m   50.32 kB[22m[1m[22m
+[2mdist/[22m[32massets/hap_logo_sql-Bny97A2y.png     [39m[1m[2m  180.23 kB[22m[1m[22m
+[2mdist/[22m[32massets/hap_splash_icon-fIQBhgWE.png  [39m[1m[2m  191.90 kB[22m[1m[22m
+[2mdist/[22m[35massets/index-7wQvJQVB.css            [39m[1m[2m  142.67 kB[22m[1m[22m[2m │ gzip:    21.66 kB[22m
+[2mdist/[22m[36massets/SqlRunner-CiVDzjxh.js         [39m[1m[33m  764.52 kB[39m[22m[2m │ gzip:   229.21 kB[22m
+[2mdist/[22m[36massets/index-BWmoQNGg.js             [39m[1m[33m6,275.79 kB[39m[22m[2m │ gzip: 1,777.27 kB[22m
+[33m
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
+[32m✓ built in 24.66s[39m
+Checking Source: C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\scripts\..\..\client\dist
+Preparing Destination: C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\scripts\..\public
+Copying assets...
+Copy complete.
+
+> hap-query-report-server@3.0.11 dist
+> npx electron-builder
+
+  • electron-builder  version=24.13.3 os=10.0.26200
+  • loaded configuration  file=package.json ("build" field)
+  • description is missed in the package.json  appPackageFile=C:\Users\jeffe\.gemini\antigravity\scratch\oracle-lowcode\server\package.json
+  • @electron/rebuild not required if you use electron-builder, please consider to remove excess dependency from devDependencies
+
+To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
+  • skipped dependencies rebuild  reason=npmRebuild is set to false
+  • packaging       platform=win32 arch=x64 electron=28.3.3 appOutDir=dist\win-unpacked
+  • building        target=nsis file=dist\Hap-Assistente-de-Dados Setup 3.0.11.exe archs=x64 oneClick=false perMachine=false
+  • building block map  blockMapFile=dist\Hap-Assistente-de-Dados Setup 3.0.11.exe.blockmap
