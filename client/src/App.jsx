@@ -392,19 +392,23 @@ function App() {
     }, [updateStatus]); // Added dep updateStatus execution
 
     const checkForUpdates = async (manual = false) => {
-        if (!window.electronAPI) return;
+        if (!window.electronAPI) {
+            if (manual) alert("Funcionalidade indisponível no navegador.");
+            return;
+        }
 
         if (manual) {
             setUpdateStatus('checking');
             setDownloadProgress(0);
 
-            // Failsafe: Reset to idle if no response after 15 seconds (prevents infinite loop)
-            // Failsafe: Reset to idle if no response after 15 seconds (prevents infinite loop)
+            // Failsafe: Reset to idle if no response after 15 seconds
             const timeoutId = setTimeout(() => {
                 setUpdateStatus(prev => {
                     if (prev === 'checking') {
                         console.warn("Update check timed out.");
-                        return 'idle';
+                        // Show visible error instead of silent idle
+                        setUpdateInfo({ notes: 'Tempo limite esgotado. Verifique sua internet.' });
+                        return 'error';
                     }
                     return prev;
                 });
@@ -414,21 +418,23 @@ function App() {
             try {
                 console.log("DEBUG: Invoking manual-check-update...");
                 const result = await window.electronAPI.invoke('manual-check-update');
-                // If update check returns explicitly (e.g. skipped or immediate result), handling it here creates race conditions with events.
-                // But if it's null/undefined (Dev mode skipped), we should reset.
-                if (!result) {
-                    console.log("DEBUG: Update check returned no result (likely Dev mode). Setting up-to-date in 2s...");
-                    // Delay slightly to allow events to fire if they exist
+
+                // If null, it means Dev Mode (or explicit skip)
+                if (result === null) {
+                    clearTimeout(timeoutId);
+                    console.log("DEBUG: Dev Mode detected. Simulating check...");
+
+                    // Simulate "Up to Date" for Dev Mode feedback
                     setTimeout(() => {
-                        console.log("DEBUG: Timeout fired. Setting status to up-to-date.");
                         setUpdateStatus('up-to-date');
-                        // Auto-clear after 4s
-                        setTimeout(() => setUpdateStatus('idle'), 4000);
-                    }, 2000);
+                        setTimeout(() => setUpdateStatus('idle'), 3000);
+                    }, 1000);
                 }
             } catch (error) {
+                clearTimeout(timeoutId);
                 console.error("Update invoke error:", error);
                 setUpdateStatus('error');
+                setUpdateInfo({ notes: 'Erro ao buscar: ' + error.message });
             }
         }
     };
