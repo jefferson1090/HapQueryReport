@@ -846,7 +846,7 @@ function App() {
                                 <div key="view-sql-runner" className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                     <ErrorBoundary>
                                         {!connection ? (
-                                            <ConnectionForm onConnect={handleConnect} />
+                                            <ConnectionForm onConnect={handleConnect} onConnectionsChange={loadSavedConnections} />
                                         ) : (
                                             <React.Suspense fallback={<div className="p-4 flex items-center justify-center">Carregando Editor SQL...</div>}>
                                                 <SqlRunner
@@ -868,7 +868,7 @@ function App() {
                                 <div key="view-query-builder" className={`${activeTab === 'query-builder' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                     <ErrorBoundary>
                                         {!connection ? (
-                                            <ConnectionForm onConnect={handleConnect} />
+                                            <ConnectionForm onConnect={handleConnect} onConnectionsChange={loadSavedConnections} />
                                         ) : (
                                             <AiBuilder
                                                 isVisible={activeTab === 'query-builder'}
@@ -884,7 +884,7 @@ function App() {
                                 <div key="view-csv-importer" className={`${activeTab === 'csv-importer' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                     <ErrorBoundary>
                                         {!connection ? (
-                                            <ConnectionForm onConnect={handleConnect} />
+                                            <ConnectionForm onConnect={handleConnect} onConnectionsChange={loadSavedConnections} />
                                         ) : (
                                             <CsvImporter
                                                 isVisible={activeTab === 'csv-importer'}

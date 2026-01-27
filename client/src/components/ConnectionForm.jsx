@@ -6,7 +6,7 @@ const DEFAULT_CONNECTIONS = [];
 
 import { useApi } from '../context/ApiContext';
 
-function ConnectionForm({ onConnect }) {
+function ConnectionForm({ onConnect, onConnectionsChange }) {
     const [formData, setFormData] = useState({
         user: '',
         password: '',
@@ -106,6 +106,9 @@ function ConnectionForm({ onConnect }) {
             }
 
             setSavedConnections(localConnections);
+
+            // Notify Parent
+            if (onConnectionsChange) onConnectionsChange();
         };
 
         initConnections();
@@ -167,7 +170,9 @@ function ConnectionForm({ onConnect }) {
 
         setSavedConnections(newConnections);
         localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
+        localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
         backupConnections(newConnections); // Sync to server file
+        if (onConnectionsChange) onConnectionsChange();
     };
 
     const handleLoad = (conn) => {
@@ -208,7 +213,9 @@ function ConnectionForm({ onConnect }) {
             const newConnections = savedConnections.filter(c => c.id !== id);
             setSavedConnections(newConnections);
             localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
+            localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
             backupConnections(newConnections); // Sync to server file
+            if (onConnectionsChange) onConnectionsChange();
 
             if (isDefault) {
                 const deletedDefaults = JSON.parse(localStorage.getItem('deleted_defaults') || '[]');

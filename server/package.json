@@ -1,6 +1,6 @@
 {
   "name": "hap-query-report-server",
-  "version": "3.0.19",
+  "version": "3.0.20",
   "main": "electron-main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
