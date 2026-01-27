@@ -20,6 +20,7 @@ import ErrorBoundary from './ErrorBoundary';
 import { motion, AnimatePresence } from 'framer-motion';
 import { decryptPassword } from '../utils/security';
 import ConnectionForm from './ConnectionForm';
+import VariableInputModal from './VariableInputModal';
 
 // --- Standalone Row Component (Prevent Re-creation) ---
 // --- V3.0 Editor Theme ---
@@ -380,6 +381,9 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
     const [aiLoading, setAiLoading] = useState(false);
     const [columnWidths, setColumnWidths] = useState({});
 
+    // Variable Substitution State
+    const [variableRequest, setVariableRequest] = useState({ open: false, variables: [], resolve: null, reject: null });
+
     // Explain Plan State
     const [explainData, setExplainData] = useState(null);
     const [showExplainModal, setShowExplainModal] = useState(false);
@@ -715,9 +719,49 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
         const signal = abortControllerRef.current.signal;
 
         try {
-            const rawSql = getSmartSql();
-            const cleanSql = rawSql.trim().replace(/;+\s*$/, '');
+            let rawSql = getSmartSql();
+            let cleanSql = rawSql.trim().replace(/;+\s*$/, '');
             if (!cleanSql) return showToast("Nenhum comando SQL encontrado.", "warning");
+
+            // --- Variable Substitution Logic ---
+            const variableRegex = /&([a-zA-Z0-9_$#]+)/g;
+            const foundVariables = new Set();
+            let match;
+            while ((match = variableRegex.exec(cleanSql)) !== null) {
+                foundVariables.add(match[1]);
+            }
+
+            if (foundVariables.size > 0) {
+                try {
+                    const values = await new Promise((resolve, reject) => {
+                        setVariableRequest({
+                            open: true,
+                            variables: Array.from(foundVariables),
+                            resolve,
+                            reject
+                        });
+                    });
+
+                    // Perform Substitution
+                    // Sort keys by length descending to prevent prefix collisions (e.g. &id replacing part of &id_aux)
+                    const sortedKeys = Object.keys(values).sort((a, b) => b.length - a.length);
+
+                    sortedKeys.forEach(key => {
+                        const value = values[key];
+                        // Simple global replace for &key (be careful with boundaries if needed, but standard is simple replacement)
+                        // Using split/join to replace all occurrences efficiently
+                        cleanSql = cleanSql.split('&' + key).join(value);
+                    });
+
+                } catch (e) {
+                    // User Cancelled
+                    updateActiveTab({ loading: false });
+                    return; // Stop execution
+                } finally {
+                    setVariableRequest(prev => ({ ...prev, open: false }));
+                }
+            }
+            // -----------------------------------
 
             const conn = activeTab.connection || globalConnection;
 
@@ -1906,6 +1950,13 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                     </div>
                 </div>
             </div>
+            {/* Variable Input Modal */}
+            <VariableInputModal
+                open={variableRequest.open}
+                variables={variableRequest.variables}
+                onSubmit={(values) => variableRequest.resolve && variableRequest.resolve(values)}
+                onClose={() => variableRequest.reject && variableRequest.reject()}
+            />
         </ErrorBoundary >
     );
 };

@@ -293,6 +293,19 @@ app.get('/api/config/info', (req, res) => {
   });
 });
 
+app.get('/api/ai/status', async (req, res) => {
+  try {
+    const status = await aiService.testConnection();
+    res.json({
+      ...status,
+      hasKey: !!aiService.apiKey,
+      model: aiService.modelName
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 
 // --- CHAT SERVICE SETUP ---
 if (chatService.setStatusHandler) {

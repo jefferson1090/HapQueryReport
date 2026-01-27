@@ -73,7 +73,7 @@ class AiService {
 
         let changed = false;
         if (config.groqApiKey && config.groqApiKey !== this.apiKey) {
-            console.log('[AiService] Updating API Key from config...');
+            console.log(`[AiService] Updating API Key from config (Length: ${config.groqApiKey.length})...`);
             this.apiKey = config.groqApiKey;
             this.groq = new Groq({ apiKey: this.apiKey });
             changed = true;
@@ -87,6 +87,29 @@ class AiService {
 
         if (changed) {
             console.log('[AiService] Configuration reloaded successfully.');
+        } else {
+            console.log('[AiService] Config update called but no changes detected.');
+        }
+    }
+
+    async testConnection() {
+        if (!this.groq) {
+            return { success: false, message: 'API Key não configurada (Objeto Groq nulo).' };
+        }
+        try {
+            const completion = await this.groq.chat.completions.create({
+                messages: [{ role: "user", content: "Ping" }],
+                model: this.modelName,
+                max_tokens: 5
+            });
+            return {
+                success: true,
+                model: this.modelName,
+                response: completion.choices[0]?.message?.content
+            };
+        } catch (e) {
+            console.error("[AiService] Test Connection Failed:", e);
+            return { success: false, message: e.message, code: e.code || 'UNKNOWN' };
         }
     }
 
@@ -583,102 +606,7 @@ class AiService {
                 return { text: `Não consegui ler a tabela ${selectedTable}. Tente outra.`, action: 'chat' };
             }
         }
-    }
 
-    // [NEW] Helper for Match Scoring
-    calculateMatchScore(term, tableName) {
-        if (!term || !tableName) return 0;
-        const cleanTerm = term.toUpperCase().replace(/[^A-Z0-9\s]/g, '').trim(); // Keep spaces for tokenization
-        const cleanTable = tableName.toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-        let score = 0.0;
-
-        // 1. Base String Score (Exact or Containment)
-        if (cleanTable === cleanTerm.replace(/\s/g, '')) {
-            score = 1.0;
-        } else if (cleanTable.includes(cleanTerm.replace(/\s/g, ''))) {
-            // Contiguous match (e.g. "PESSOA" in "TB_PESSOA")
-            const ratio = cleanTerm.length / cleanTable.length;
-            score = 0.6 + (ratio * 0.4);
-        } else {
-            // 1.1 Token-Based Matching (New Requirement: "empresa conveniada" -> "TB_EMPRESA_CONVENIADA")
-            const tokens = cleanTerm.split(/\s+/).filter(t => t.length > 2); // Ignore 'da', 'de'
-            if (tokens.length > 1) {
-                let matches = 0;
-                tokens.forEach(token => {
-                    if (cleanTable.includes(token)) matches++;
-                });
-
-                // If ALL tokens match, high confidence
-                if (matches === tokens.length) {
-                    score = 0.95; // Very strong signal
-                } else if (matches > 0) {
-                    // Partial token match
-                    score = 0.5 + (matches / tokens.length * 0.4);
-                }
-            } else if (tokens.length === 1) {
-                // Single word fallback
-                if (cleanTable.includes(tokens[0])) {
-                    score = 0.5;
-                }
-            }
-        }
-
-        // 2. [NEW] Neural Memory Boost
-        try {
-            const activations = neuralService.activate(term);
-            const memoryHit = activations.find(node => node.id === tableName.toUpperCase());
-            if (memoryHit) {
-                console.log(`[NEURAL] Memory Hit: ${term} -> ${tableName} (Weight: ${memoryHit.relevance})`);
-                // Add significant boost
-                score += memoryHit.relevance;
-            }
-        } catch (e) {
-            console.warn("[NEURAL] Validation failed:", e);
-        }
-
-        return Math.min(score, 2.0);
-    }
-
-    // [NEW] Helper for Transitioning to Column Selection
-    async handleTableSelection(userId, tableName, contextData) {
-        // [NEW] Teach Neural Network (Success Memory)
-        if (contextData.initial_input) {
-            // Learn: Initial Term -> Selected Table
-            // Extract the "Concept" from the initial input if possible, or use the whole short phrase
-            // Simple heuristic: If input is short (< 30 chars), treat as Term.
-            const term = contextData.initial_input.trim();
-            if (term.length < 30) {
-                neuralService.addEdge(term, tableName, 1.0, 'user_defined');
-                console.log(`[NEURAL] Learned: "${term}" -> ${tableName}`);
-            }
-        }
-
-        // Fetch Columns
-        const cols = await db.getColumns(tableName);
-
-        chatService.setConversationState(userId, {
-            step: 'AWAITING_COLUMN_OR_VALUE',
-            context: {
-                table: tableName,
-                initial_input: contextData.initial_input,
-                suggested_column: contextData.suggested_column || contextData.column,
-                suggested_value: contextData.suggested_value || contextData.value
-            }
-        });
-
-        let responseText = `Tabela **${tableName}** selecionada.`;
-        if (contextData.column && contextData.value) {
-            responseText += ` Deseja buscar **${contextData.value}** na coluna **${contextData.column}**?`;
-        } else {
-            responseText += ` Qual coluna deseja filtrar?`;
-        }
-
-        return {
-            text: responseText,
-            action: 'column_selection_v2',
-            data: cols.map(c => c.name) // Simple list, deep analysis happens if they select 'Analise a tabela'
-        };
 
         // D. STATE: AWAITING_COLUMN_OR_VALUE
         if (state && state.step === 'AWAITING_COLUMN_OR_VALUE') {
@@ -942,8 +870,25 @@ class AiService {
 
         // System Prompt defining the Persona and Tools
         const systemPrompt = `
-        VOCÊ É UM AGENTE DE DADOS AUTÔNOMO E ESPECIALISTA EM ORACLE (HAPVIDA).
-        SUA MISSÃO: Entender a intenção do usuário, explorar o banco de dados e apresentar a resposta final ou a ferramenta correta.
+        Você é o **Hapvida AI Data Expert**, um assistente de elite especializado em:
+        1.  **Hapvida Business Logic**: Você conhece a diferença entre 'Humaster' (Sigo/Legado) e 'Incorpora' (Repasse/Novos).
+        2.  **Terminologia Médica**: Você entende termos como 'Glosa', 'Sinistralidade', 'Beneficiário', 'Prestador'.
+        3.  **DBA Skills**: Você sabe construir queries Oracle otimizadas e encontrar tabelas ocultas.
+
+        # DIRETRIZ PRIMÁRIA (A MAIS IMPORTANTE)
+        **SE O USUÁRIO PEDIR DADOS, ESTRUTURA OU LISTAGEM: USE UMA FERRAMENTA (JSON).**
+        **NUNCA** responda pedidos de dados apenas com texto ("Eu posso procurar..."). **FAÇA** a busca.
+
+        # RELAÇÕES DE CONHECIMENTO (Hapvida)
+        *   **Beneficiários/Vidas**: Geralmente no schema \`HUMASTER\`. Tabelas: \`USUARIO\`, \`BENEFICIARIO\`.
+        *   **Prestadores/Hospitais**: Tabelas como \`PRESTADOR\`, \`CREDENCIAIS\`.
+        *   **Financeiro/Repasse**: Geralmente no schema \`INCORPORA\`. Tabelas: \`TB_OPE_AJUSTES_DE_PARA_REPASSE\`.
+        *   **Contratos**: \`EMPRESA_CONVENIADA\`, \`CONTRATO\`.
+
+        # PERFIL COMPORTAMENTAL
+        *   Seja direto e técnico quando necessário.
+        *   Se o usuário usar um termo médico/hospitalar, demonstre que você entendeu o contexto.
+        *   Se houver ambiguidade (ex: "Carteirinha"), explique as opções (Sigo vs Incorpora).
 
         ## MAPA MENTAL DO AMBIENTE (HAPVIDA)
         Use este conhecimento para decidir ONDE buscar:
@@ -982,36 +927,58 @@ class AiService {
         2. **describe_table**: Para ver colunas/estrutura.
            JSON: { "action": "describe_table", "tableName": "NOME_TABELA" }
            
-        3. **find_record**: Para buscar dados específicos.
-           JSON: { "action": "find_record", "data": { "table_name": "NOME_TABELA", "value": "VALOR_BUSCADO" } }
+        3. **find_record**: Para buscar dados específicos de um registro único (Ex: por CPF, ID, Carteirinha).
+           **USE ESTA FERRAMENTA PREFERENCIALMENTE para buscas simples, pois eu corrijo o nome das colunas automaticamente (Ex: 'cpf' -> 'NR_CPF').**
+           JSON: { "action": "find_record", "data": { "table_name": "NOME_TABELA", "value": "VALOR_BUSCADO", "column": "NOME_COLUNA_APROXIMADO" } }
            
-        4. **run_sql**: Para consultas complexas ou listagens gerais.
-           JSON: { "action": "run_sql", "sql": "SELECT ...", "limit": 500 }
+        4. **run_sql**: Para consultas complexas, relatórios ou listagens gerais (WHERE com múltiplos filtros).
+           JSON: { "action": "run_sql", "sql": "SELECT ...", "limit": 500 } (Use limit: 0 para trazer TUDO).
         
         5. **draft_table**: Para criar novas tabelas.
            JSON: { "action": "draft_table", "tableName": "NOME", "columns": [{ "name": "ID", "type": "NUMBER" }] }
+
+        6. **conversational_response**: Para responder perguntas gerais, dúvidas ou explicacoes.
+           JSON: { "answer": "Sua resposta explicativa e natural aqui." }
 
         # DATASET DE TREINAMENTO (FEW-SHOT EXAMPLES)
         Use estes exemplos para calibrar suas respostas:
         
         [
           {
-            "contexto": "Card Buscar Registro - Busca Exata",
-            "entrada": "Buscar a credencial 998877 na tabela de ajustes de repasse",
-            "raciocinio_ia": "Contexto: Repasse (Schema INCORPORA). Tabela Alvo: tb_ope_ajustes_de_para_repasse. Coluna: CREDENCIAL.",
-            "saida_esperada": { "action": "run_sql", "sql": "SELECT * FROM incorpora.tb_ope_ajustes_de_para_repasse WHERE credencial = '998877'" }
+            "contexto": "Solicitação de Listagem - Financeiro",
+            "entrada": "Quais são as tabelas do financeiro?",
+            "raciocinio_ia": "Usuário quer explorar metadados. Devo usar list_tables com termo 'financeiro'.",
+            "saida_esperada": { "action": "list_tables", "term": "financeiro" }
           },
           {
-            "contexto": "Chat - Busca Contextual (Sigo)",
-            "entrada": "Quem é o beneficiário da carteirinha 123456 no Sigo?",
-            "raciocinio_ia": "Contexto: Sigo (Schema HUMASTER). Tabela provável: USUARIO ou BENEFICIARIO. Coluna: CD_USUARIO.",
-            "saida_esperada": { "action": "run_sql", "sql": "SELECT * FROM humaster.usuario WHERE cd_usuario = '123456'" }
+            "contexto": "Solicitação de Estrutura - Ver Colunas",
+            "entrada": "Me mostra as colunas da tabela de beneficiários",
+            "raciocinio_ia": "Usuário quer ver a estrutura (describe). Tabela provável: USUARIO.",
+            "saida_esperada": { "action": "describe_table", "tableName": "HUMASTER.USUARIO" }
+          },
+          {
+            "contexto": "Chat - Saudação/Ajuda",
+            "entrada": "Olá, preciso de ajuda com uma query",
+            "raciocinio_ia": "Usuário iniciou conversa. Devo ser solícito e demonstrar expertise.",
+            "saida_esperada": { "answer": "Olá! Sou seu especialista em dados da Hapvida. Posso ajudar você a construir queries, encontrar tabelas ou analisar dados. O que você precisa explorar hoje?" }
+          },
+          {
+            "contexto": "Card Buscar Registro - Busca Exata",
+            "entrada": "Buscar a credencial 998877 na tabela de ajustes de repasse",
+            "raciocinio_ia": "Busca exata por credencial. Devo usar find_record para aproveitar a resolução de colunas.",
+            "saida_esperada": { "action": "find_record", "data": { "table_name": "incorpora.tb_ope_ajustes_de_para_repasse", "value": "998877", "column": "credencial" } }
+          },
+          {
+            "contexto": "Chat - Pergunta Geral",
+            "entrada": "Como acho tabelas de usuários?",
+            "raciocinio_ia": "Dúvida geral. Vou orientar a usar a busca.",
+            "saida_esperada": { "answer": "Para encontrar tabelas, você pode me pedir 'Listar tabelas de usuários' ou simplesmente buscar por 'Usuário'. O schema principal é o HUMASTER." }
           },
           {
             "contexto": "Chat - Ambiguidade (Carteirinha)",
             "entrada": "Localize a carteirinha 5555",
             "raciocinio_ia": "Confiança Baixa. O termo 'Carteirinha' existe no HUMASTER (cd_usuario) e no INCORPORA (carteirinha_sigo).",
-            "saida_esperada": "Encontrei referências para 'Carteirinha' tanto no ambiente SIGO (Humaster) quanto no Repasse (Incorpora). Você deseja buscar no cadastro de beneficiários ou na tabela de ajustes?"
+            "saida_esperada": { "answer": "Encontrei referências para 'Carteirinha' tanto no ambiente SIGO (Humaster) quanto no Repasse (Incorpora). Você quer buscar no cadastro de beneficiários ou nos ajustes?" }
           },
           {
             "contexto": "Card Buscar Registro - Nome Composto",
@@ -1023,13 +990,13 @@ class AiService {
             "contexto": "Segurança - Tentativa de Delete",
             "entrada": "Delete o registro da operadora 22",
             "raciocinio_ia": "Verbo proibido detectado. A aplicação só permite consultas.",
-            "saida_esperada": "Ação não permitida. Eu sou um assistente de busca e visualização. Não posso excluir dados."
+            "saida_esperada": { "answer": "Ação não permitida. Eu sou um assistente de busca e visualização. Não posso excluir dados." }
           },
           {
             "contexto": "Falha de Busca - Termo Desconhecido",
             "entrada": "Liste todos os registros da tabela de abacaxi",
             "raciocinio_ia": "Busca por 'abacaxi' nos metadados retorna 0 resultados. Confiança: 0%.",
-            "saida_esperada": "Não consegui localizar nenhuma tabela ou coluna associada ao termo 'abacaxi' nos ambientes Humaster ou Incorpora. Poderia informar o nome técnico ou a qual módulo isso pertence?"
+            "saida_esperada": { "answer": "Não consegui localizar nenhuma tabela ou coluna associada ao termo 'abacaxi' nos ambientes Humaster ou Incorpora. Poderia informar o nome técnico ou a qual módulo isso pertence?" }
           }
         ]
 
@@ -1056,7 +1023,10 @@ class AiService {
             });
 
             const content = completion.choices[0]?.message?.content || "";
-            console.log("[DEBUG] Groq Raw Content:", content); // Debug Log
+            console.log(">>>>>>>>>> [DEEP DEBUG] RAW AI RESPONSE START <<<<<<<<<<");
+            console.log(content);
+            console.log(">>>>>>>>>> [DEEP DEBUG] RAW AI RESPONSE END <<<<<<<<<<");
+            console.log("[DEBUG] Groq Raw Content First 100:", content.substring(0, 100));
 
             // Try to parse JSON action or contract response
             try {
@@ -1068,7 +1038,8 @@ class AiService {
 
                     // CASE 1: ACTION (Tool Call)
                     if (parsedData.action) {
-                        const payload = parsedData.params || parsedData.data || parsedData.parameters || parsedData.arguments || {};
+                        // FIX: If flat JSON, use parsedData itself as data
+                        const payload = parsedData.params || parsedData.data || parsedData.parameters || parsedData.arguments || parsedData;
 
                         // If model also sent an answer/explanation, keep it
                         let prefixText = parsedData.answer || null;
@@ -1076,23 +1047,29 @@ class AiService {
                         return await this.executeAction({
                             action: parsedData.action,
                             data: payload,
-                            text: prefixText
+                            text: prefixText,
+                            params: payload // Explicitly pass as params just in case
                         }, userId);
                     }
 
                     // CASE 2: CONVERSATION CONTRACT (answer + suggestions)
-                    if (parsedData.answer) {
+                    // Robust check for various keys the LLM might use if it hallucinates the schema
+                    const answerText = parsedData.answer || parsedData.mensagem || parsedData.message || parsedData.text || parsedData.response || parsedData.content;
+
+                    if (answerText) {
                         return {
-                            text: parsedData.answer,
+                            text: answerText,
                             action: 'chat',
-                            options: parsedData.suggestions ? parsedData.suggestions.map(s => s.value || s.label) : null, // Flatten to strings for now or update frontend for objects
-                            // panel: parsedData.panel // Future: Implement panel rendering
+                            options: parsedData.suggestions ? parsedData.suggestions.map(s => s.value || s.label || s) : null,
                         };
                     }
                 }
             } catch (e) {
                 console.error("JSON Parse Error (Attempted recovery):", e);
-                // Fallback to treating content as text
+                // Fallback to treating content as text if it looks like text (not JSON)
+                if (!content.trim().startsWith('{')) {
+                    return { text: content, action: 'chat' };
+                }
             }
 
             return { text: content, action: 'chat' };
@@ -1230,9 +1207,26 @@ class AiService {
 
     async executeAction(aiResponse, userId) {
         let { action, data, text } = aiResponse;
-        data = data || aiResponse.params || {};
+        data = data || aiResponse.params || aiResponse;
 
-        console.log(`[DEBUG] executeAction: action=${action}, data=${JSON.stringify(data)}`);
+        console.log(`[DEBUG] executeAction CALL: action=${action}`);
+        console.log(`[DEBUG] executeAction INPUT passed:`, JSON.stringify(aiResponse));
+
+        // Fix: If 'data' is missing, fallback to 'params' OR 'aiResponse' (root)
+        // But BE CAREFUL: aiResponse contains 'action' and 'text' too. 
+        // If we map aiResponse to data, data.action will exist.
+        if (!data) {
+            if (aiResponse.params) {
+                data = aiResponse.params;
+                console.log("[DEBUG] Used aiResponse.params as data");
+            } else {
+                // Flattened JSON case: { action: "run_sql", sql: "..." }
+                data = aiResponse;
+                console.log("[DEBUG] Used aiResponse (ROOT) as data");
+            }
+        }
+
+        console.log(`[DEBUG] executeAction FINAL DATA:`, JSON.stringify(data));
 
         if (!text && data) {
             text = data.text || data.message || data.response || data.answer || data.content;
@@ -1312,12 +1306,22 @@ class AiService {
                 }
                 if (!columns.length) return { text: `Não consegui acessar **${tableName}**.` };
 
-                const responseData = { tableName, columns };
-                if (columns.viewDefinition) {
-                    responseData.viewDefinition = columns.viewDefinition;
-                    responseData.isView = true;
-                }
-                return { text: text || `Estrutura da **${tableName}**:`, action: 'describe_table', data: responseData };
+                console.log(`[DEBUG] describe_table columns sample:`, JSON.stringify(columns[0]));
+
+                return {
+                    text: text || `Estrutura da **${tableName}**:`,
+                    action: 'describe_table',
+                    data: {
+                        tableName,
+                        columns: columns.map(c => ({
+                            name: c.COLUMN_NAME || c.name,
+                            dataType: c.DATA_TYPE || c.type,
+                            comments: c.COMMENTS || c.comments || '-'
+                        })),
+                        isView: !!columns.viewDefinition,
+                        viewDefinition: columns.viewDefinition
+                    }
+                };
             }
 
             if (action === 'find_record') {
@@ -1433,7 +1437,8 @@ class AiService {
 
             if (action === 'run_sql') {
                 const sql = data.sql || "";
-                const limit = data.limit || 500; // Default buffer to 500, not 50
+                // Support 'all' or explicit high limits, default to 500 if undefined
+                let limit = (data.limit === 'all' || data.limit === 0) ? 50000 : (data.limit || 500);
 
                 // GUARDRAIL: Empty SQL -> Ask Question
                 if (!sql || sql.trim().length === 0) {
@@ -1728,12 +1733,22 @@ class AiService {
                     // Single text column -> Safe to assume
                     targetCol = stringCols[0];
                 } else {
-                    // AMBIGUITY: Multiple possibilities. ASK THE USER.
-                    return {
-                        text: `Encontrei a tabela **${tableName}**, mas há várias colunas possíveis.\nPor favor, selecione onde devo buscar **"${values[0]}"**:`,
-                        action: 'column_selection_v2',
-                        data: columns.map(c => c.name)
-                    };
+                    // AMBIGUITY or NOT FOUND: Default to asking, BUT check if single match via heuristic
+                    // Try to resolve "CPF" -> "NR_CPF" using resolveColumn logic as a fallback
+                    if (columnName) {
+                        const directResolve = this.resolveColumn(columnName, columns);
+                        if (directResolve) {
+                            targetCol = directResolve;
+                        }
+                    }
+
+                    if (!targetCol) {
+                        return {
+                            text: `Encontrei a tabela **${tableName}**, mas preciso saber qual coluna filtrar.${columnName ? ` O campo "${columnName}" não existe exato.` : ''}`,
+                            action: 'column_selection_v2',
+                            data: columns.map(c => ({ name: c.COLUMN_NAME, suggested: false }))
+                        };
+                    }
                 }
             }
 
@@ -2087,6 +2102,102 @@ class AiService {
             console.error("Docs Chat Error:", e);
             return { text: `Erro no chat: ${e.message}`, action: 'error' };
         }
+    }
+
+    // [NEW] Helper for Match Scoring
+    calculateMatchScore(term, tableName) {
+        if (!term || !tableName) return 0;
+        const cleanTerm = term.toUpperCase().replace(/[^A-Z0-9\s]/g, '').trim(); // Keep spaces for tokenization
+        const cleanTable = tableName.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+        let score = 0.0;
+
+        // 1. Base String Score (Exact or Containment)
+        if (cleanTable === cleanTerm.replace(/\s/g, '')) {
+            score = 1.0;
+        } else if (cleanTable.includes(cleanTerm.replace(/\s/g, ''))) {
+            // Contiguous match (e.g. "PESSOA" in "TB_PESSOA")
+            const ratio = cleanTerm.length / cleanTable.length;
+            score = 0.6 + (ratio * 0.4);
+        } else {
+            // 1.1 Token-Based Matching (New Requirement: "empresa conveniada" -> "TB_EMPRESA_CONVENIADA")
+            const tokens = cleanTerm.split(/\s+/).filter(t => t.length > 2); // Ignore 'da', 'de'
+            if (tokens.length > 1) {
+                let matches = 0;
+                tokens.forEach(token => {
+                    if (cleanTable.includes(token)) matches++;
+                });
+
+                // If ALL tokens match, high confidence
+                if (matches === tokens.length) {
+                    score = 0.95; // Very strong signal
+                } else if (matches > 0) {
+                    // Partial token match
+                    score = 0.5 + (matches / tokens.length * 0.4);
+                }
+            } else if (tokens.length === 1) {
+                // Single word fallback
+                if (cleanTable.includes(tokens[0])) {
+                    score = 0.5;
+                }
+            }
+        }
+
+        // 2. [NEW] Neural Memory Boost
+        try {
+            const activations = neuralService.activate(term);
+            const memoryHit = activations.find(node => node.id === tableName.toUpperCase());
+            if (memoryHit) {
+                console.log(`[NEURAL] Memory Hit: ${term} -> ${tableName} (Weight: ${memoryHit.relevance})`);
+                // Add significant boost
+                score += memoryHit.relevance;
+            }
+        } catch (e) {
+            console.warn("[NEURAL] Validation failed:", e);
+        }
+
+        return Math.min(score, 2.0);
+    }
+
+    // [NEW] Helper for Transitioning to Column Selection
+    async handleTableSelection(userId, tableName, contextData) {
+        // [NEW] Teach Neural Network (Success Memory)
+        if (contextData.initial_input) {
+            // Learn: Initial Term -> Selected Table
+            // Extract the "Concept" from the initial input if possible, or use the whole short phrase
+            // Simple heuristic: If input is short (< 30 chars), treat as Term.
+            const term = contextData.initial_input.trim();
+            if (term.length < 30) {
+                neuralService.addEdge(term, tableName, 1.0, 'user_defined');
+                console.log(`[NEURAL] Learned: "${term}" -> ${tableName}`);
+            }
+        }
+
+        // Fetch Columns
+        const cols = await db.getColumns(tableName);
+
+        chatService.setConversationState(userId, {
+            step: 'AWAITING_COLUMN_OR_VALUE',
+            context: {
+                table: tableName,
+                initial_input: contextData.initial_input,
+                suggested_column: contextData.suggested_column || contextData.column,
+                suggested_value: contextData.suggested_value || contextData.value
+            }
+        });
+
+        let responseText = `Tabela **${tableName}** selecionada.`;
+        if (contextData.column && contextData.value) {
+            responseText += ` Deseja buscar **${contextData.value}** na coluna **${contextData.column}**?`;
+        } else {
+            responseText += ` Qual coluna deseja filtrar?`;
+        }
+
+        return {
+            text: responseText,
+            action: 'column_selection_v2',
+            data: cols.map(c => c.name) // Simple list, deep analysis happens if they select 'Analise a tabela'
+        };
     }
 }
 

@@ -284,25 +284,27 @@ async function getColumns(tableNameInput, connectionParams = null) {
             console.error("View check error", e);
         }
 
-        // 1.2 Try to fetch columns (Owner Specific or First Match)
+        // 1.2 Try to fetch columns (Owner Specific or First Match) with COMMENTS
+        // Use aliases to ensure unique names and safer internal mapping
         let columnSql = `
-            SELECT column_name, data_type, data_length, nullable, data_default, owner
-            FROM ALL_TAB_COLUMNS 
-            WHERE UPPER(TABLE_NAME) = UPPER(:tableName)
+            SELECT t.column_name, t.data_type, t.data_length, t.nullable, t.data_default, t.owner, c.comments
+            FROM ALL_TAB_COLUMNS t
+            LEFT JOIN ALL_COL_COMMENTS c ON t.OWNER = c.OWNER AND t.TABLE_NAME = c.TABLE_NAME AND t.COLUMN_NAME = c.COLUMN_NAME
+            WHERE UPPER(t.TABLE_NAME) = UPPER(:tableName)
         `;
         const columnParams = { tableName };
 
         if (owner) {
-            columnSql += ` AND UPPER(OWNER) = UPPER(:owner)`;
+            columnSql += ` AND UPPER(t.OWNER) = UPPER(:owner)`;
             columnParams.owner = owner;
         } else {
             // Prioritize current user if no owner specified, but allow others
             const currentUser = (connectionParams && connectionParams.user) ? connectionParams.user.toUpperCase() : 'USER';
-            columnSql += ` ORDER BY (CASE WHEN UPPER(OWNER) = UPPER('${currentUser}') THEN 0 ELSE 1 END), OWNER, COLUMN_ID`;
+            columnSql += ` ORDER BY (CASE WHEN UPPER(t.OWNER) = UPPER('${currentUser}') THEN 0 ELSE 1 END), t.OWNER, t.COLUMN_ID`;
         }
 
         if (owner) {
-            columnSql += ` ORDER BY COLUMN_ID`;
+            columnSql += ` ORDER BY t.COLUMN_ID`;
         }
 
         const result = await conn.execute(
@@ -321,6 +323,8 @@ async function getColumns(tableNameInput, connectionParams = null) {
 
         if (finalRows.length > 0) {
             console.log("[DB] First Row Sample:", finalRows[0]);
+        } else {
+            console.log("[DB] No columns found for:", tableName);
         }
 
         // Map to ensure uppercase keys (just in case) and add view definition if exists
@@ -332,15 +336,17 @@ async function getColumns(tableNameInput, connectionParams = null) {
                     DATA_TYPE: row[1],
                     DATA_LENGTH: row[2],
                     NULLABLE: row[3],
-                    DATA_DEFAULT: row[4]
+                    DATA_DEFAULT: row[4],
+                    COMMENTS: row[6] // Index 6 is comments
                 };
             }
             return {
-                COLUMN_NAME: row.COLUMN_NAME || row.column_name,
-                DATA_TYPE: row.DATA_TYPE || row.data_type,
+                COLUMN_NAME: row.COLUMN_NAME || row.column_name || row.NAME, // Fallbacks
+                DATA_TYPE: row.DATA_TYPE || row.data_type || row.TYPE,
                 DATA_LENGTH: row.DATA_LENGTH || row.data_length,
                 NULLABLE: row.NULLABLE || row.nullable,
-                DATA_DEFAULT: row.DATA_DEFAULT || row.data_default
+                DATA_DEFAULT: row.DATA_DEFAULT || row.data_default,
+                COMMENTS: row.COMMENTS || row.comments
             };
         });
 

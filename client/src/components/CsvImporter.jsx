@@ -580,6 +580,29 @@ function CsvImporter({ isVisible, connectionName }) {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-4">
+                                        {/* Bulk Actions Interface */}
+                                        <div className="flex items-center gap-2 mr-2 border-r border-gray-300 pr-4">
+                                            <label className="flex items-center space-x-2 cursor-pointer select-none text-sm text-gray-600 hover:text-gray-900">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedCols.size === columns.length && columns.length > 0}
+                                                    onChange={toggleSelectAll}
+                                                    className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                                                />
+                                                <span>Todos</span>
+                                            </label>
+
+                                            {selectedCols.size > 0 && (
+                                                <button
+                                                    onClick={handleBulkDelete}
+                                                    className="flex items-center gap-1 px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 border border-red-200 transition-colors text-xs font-bold animate-in fade-in zoom-in duration-200"
+                                                >
+                                                    <Trash2 size={14} />
+                                                    Excluir ({selectedCols.size})
+                                                </button>
+                                            )}
+                                        </div>
+
                                         <div className="text-sm text-gray-500">
                                             Total: <span className="font-bold">{totalRows}</span> linhas
                                         </div>
@@ -601,7 +624,15 @@ function CsvImporter({ isVisible, connectionName }) {
                                                     <th key={idx} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
                                                         <div className="flex flex-col space-y-2 group">
                                                             <div className="flex items-center justify-between">
-                                                                <span className="text-[10px] text-gray-400 font-normal">Original: {col.originalName}</span>
+                                                                <div className="flex items-center gap-2">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={selectedCols.has(idx)}
+                                                                        onChange={() => toggleColumnSelection(idx)}
+                                                                        className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                                                                    />
+                                                                    <span className="text-[10px] text-gray-400 font-normal">Original: {col.originalName}</span>
+                                                                </div>
                                                                 <button
                                                                     onClick={() => handleDeleteColumn(idx)}
                                                                     className="text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1"

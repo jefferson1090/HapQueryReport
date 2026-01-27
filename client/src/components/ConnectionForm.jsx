@@ -2,24 +2,7 @@ import React, { useState, useEffect } from 'react';
 import hapLogo from '../assets/hap_logo_sql.png';
 import { encryptPassword, decryptPassword } from '../utils/security';
 
-const DEFAULT_CONNECTIONS = [
-    {
-        id: 'default_hml',
-        connectionName: 'Homologação',
-        user: 'c_stenio',
-        password: 'U2FsdGVkX1+diVLEnj1jZvw5sxormGTsBtESRfh/6qI=', // Encrypted 'ste001'
-        connectString: 'U2FsdGVkX19U80G4qXgfVWspNeUM1/u7eLMDucd94oLGmVlBl5jIXGEAgUHAR5qUKaQVNtBWZ215IVNQ7BcUmg==', // Encrypted host
-        isDefault: true
-    },
-    {
-        id: 'default_prod',
-        connectionName: 'Produção',
-        user: 'c_stenio',
-        password: 'U2FsdGVkX18wBXPCBeTyxr4YfqfTum15kjrRFf1vBSc=', // Encrypted 'smr001'
-        connectString: 'U2FsdGVkX1/AUWNk4WMSarytTse8PePFGvDEaKgnRoWRDihwycxMJolWJiZylGcJoHEO/gtgT8cnKI/Ma+5VlQ==', // Encrypted host
-        isDefault: true
-    }
-];
+const DEFAULT_CONNECTIONS = [];
 
 function ConnectionForm({ onConnect }) {
     const [formData, setFormData] = useState({

@@ -184,16 +184,21 @@ const DataView = ({ viewData, dataFilters, setDataFilters, dataSort, setDataSort
 
     const handleRemoteFilter = async (e) => {
         if (e.key === 'Enter') {
-            // Synthesize a prompt for the AI based on active filters
             const activeFilters = Object.entries(dataFilters)
                 .filter(([_, val]) => val && val.trim() !== '')
-                .map(([col, val]) => `${col} = "${val}"`)
-                .join(", ");
+                .map(([col, val]) => `${col} contendo "${val}"`) // Changed to 'contendo' for LIKE behavior
+                .join(" E ");
 
             if (activeFilters.length > 0) {
-                const prompt = `Filtre a tabela ${viewData.tableName} onde: ${activeFilters}`;
-                setInput(prompt); // Show in chat box
-                await onSend(prompt); // Send to AI
+                // Explicitly ask for NO LIMIT / High Limit
+                const prompt = `Filtrar tabela ${viewData.tableName} onde: ${activeFilters}. (Traga TODOS os dados encontrados, use LIKE, sem LIMIT 50)`;
+
+                // Trigger sending
+                // We use a custom event to ensure the chat input is populated and sent properly if onSend isn't enough context
+                // But onSend prop is available here.
+                window.dispatchEvent(new CustomEvent('hap-trigger-chat-input', {
+                    detail: { text: prompt, autoSend: true }
+                }));
             }
         }
     };
@@ -1103,8 +1108,21 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries, user 
             <div className="w-full h-full overflow-auto">
                 {viewData?.tableName && (
                     <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 font-bold text-gray-700 text-sm uppercase tracking-wider sticky top-0 z-10 flex justify-between items-center">
-                        <span>Estrutura: {viewData.tableName}</span>
-                        {viewData.isView && <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">VIEW</span>}
+                        <div className="flex items-center gap-2">
+                            <span>Estrutura: {viewData.tableName}</span>
+                            {viewData.isView && <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">VIEW</span>}
+                        </div>
+                        <button
+                            onClick={() => {
+                                const parts = viewData.tableName.split('.');
+                                const name = parts.length > 1 ? parts[1] : parts[0];
+                                const owner = parts.length > 1 ? parts[0] : 'UNKNOWN'; // API handles it better usually
+                                handleShowData({ owner, name });
+                            }}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs shadow-sm font-bold flex items-center gap-1.5 transition-colors"
+                        >
+                            <span>▶ Exibir Dados</span>
+                        </button>
                     </div>
                 )}
                 {viewData?.viewDefinition && (
@@ -1127,17 +1145,28 @@ const AiBuilder = React.forwardRef(({ isVisible, connection, savedQueries, user 
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nullable</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Default</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Comentário</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                        {columns.map((col, i) => (
-                            <tr key={i} className="hover:bg-gray-50">
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">{col.COLUMN_NAME}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{col.DATA_TYPE}({col.DATA_LENGTH})</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{col.NULLABLE}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{col.DATA_DEFAULT}</td>
-                            </tr>
-                        ))}
+                        {columns.map((col, i) => {
+                            const colName = col.COLUMN_NAME || col.name || col.column_name || 'UNK';
+                            const colType = col.DATA_TYPE || col.type || col.data_type || 'UNK';
+                            const colLen = col.DATA_LENGTH || col.length || col.data_length || '';
+                            const colNull = col.NULLABLE || col.nullable || '';
+                            const colDef = col.DATA_DEFAULT || col.data_default || '';
+                            const colComm = col.COMMENTS || col.comments || '';
+
+                            return (
+                                <tr key={i} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">{colName}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{colType}{colLen ? `(${colLen})` : ''}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{colNull}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 truncate max-w-xs" title={colDef}>{colDef}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 truncate max-w-xs italic" title={colComm}>{colComm}</td>
+                                </tr>
+                            )
+                        })}
                     </tbody>
                 </table>
             </div>

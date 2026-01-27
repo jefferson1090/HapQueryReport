@@ -500,7 +500,7 @@ function App() {
                 case 'db_search': prompt = "Localize a tabela [NOME_DA_TABELA]"; break;
                 case 'db_structure': prompt = "Exibir estrutura da tabela [NOME_DA_TABELA]"; break;
                 case 'db_data': prompt = "Ver dados da tabela [NOME_DA_TABELA]"; break;
-                case 'db_data': prompt = "Ver dados da tabela [NOME_DA_TABELA]"; break;
+
                 // case 'db_find': prompt = "Buscar o registro onde [CONDIÇÃO] na tabela [NOME_DA_TABELA]"; break; // Handled by new UI Flow
             }
             if (tabId === 'db_find') {

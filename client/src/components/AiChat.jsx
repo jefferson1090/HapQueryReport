@@ -15,6 +15,7 @@ const AiChat = ({ isVisible, onClose }) => {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [aiStatus, setAiStatus] = useState({ success: true }); // Optimistic default
 
     const bottomRef = useRef(null);
     const textareaRef = useRef(null);
@@ -48,6 +49,28 @@ const AiChat = ({ isVisible, onClose }) => {
         window.addEventListener('hap-trigger-chat-input', handleTrigger);
         return () => window.removeEventListener('hap-trigger-chat-input', handleTrigger);
     }, []);
+
+    // Check AI Status on Mount
+    useEffect(() => {
+        const checkStatus = async () => {
+            try {
+                const res = await fetch(`${apiUrl}/api/ai/status`);
+                const data = await res.json();
+                setAiStatus(data);
+                if (!data.success) {
+                    setMessages(prev => [...prev, {
+                        role: 'assistant',
+                        content: `⚠️ **Atenção:** A conexão com a IA parece estar offline.\n\n**Erro:** ${data.message || 'Chave API inválida ou rede indisponível.'}\n\nVerifique as configurações.`,
+                        isError: true
+                    }]);
+                }
+            } catch (e) {
+                console.error("Failed to check AI status:", e);
+                setAiStatus({ success: false, message: "Erro de conexão com servidor" });
+            }
+        };
+        checkStatus();
+    }, [apiUrl]);
 
     const handleSend = async (textOverride = null) => {
         const text = typeof textOverride === 'string' ? textOverride : input;
@@ -272,9 +295,9 @@ const AiChat = ({ isVisible, onClose }) => {
                         </div>
                         <div>
                             <h3 className="font-bold text-gray-800 text-base leading-tight">Hap AI</h3>
-                            <button className="text-xs text-gray-400 hover:text-purple-600 transition-colors flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                                Online • Ver Habilidades
+                            <button className="text-xs text-gray-400 hover:text-purple-600 transition-colors flex items-center gap-1" title={aiStatus?.message || "Verificando..."}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${aiStatus?.success ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                                {aiStatus?.success ? 'Online' : 'Offline'} • Ver Habilidades
                             </button>
                         </div>
                     </div>
