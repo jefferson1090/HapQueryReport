@@ -4,6 +4,8 @@ import { encryptPassword, decryptPassword } from '../utils/security';
 
 const DEFAULT_CONNECTIONS = [];
 
+import { useApi } from '../context/ApiContext';
+
 function ConnectionForm({ onConnect }) {
     const [formData, setFormData] = useState({
         user: '',
@@ -18,45 +20,84 @@ function ConnectionForm({ onConnect }) {
     const [showPassword, setShowPassword] = useState(false);
     const [isViewOnly, setIsViewOnly] = useState(false);
 
-    useEffect(() => {
-        const saved = localStorage.getItem('oracle_connections');
-        const deletedDefaults = JSON.parse(localStorage.getItem('deleted_defaults') || '[]');
+    const { apiUrl } = useApi(); // Ensure we have access to API URL context if needed, or assume relative path /api
 
-        let initialConnections = [];
-        if (saved) {
-            try {
-                initialConnections = JSON.parse(saved);
-            } catch (e) {
-                console.error("Failed to parse saved connections", e);
-            }
+    // Helper to backup
+    const backupConnections = async (connections) => {
+        try {
+            await fetch('http://127.0.0.1:3001/api/config/connections/backup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(connections)
+            });
+        } catch (e) {
+            console.error("Backup failed", e);
         }
+    };
 
-        // Conflict Resolution and Merging Defaults
-        let hasChanges = false;
-        const defaultsToAdd = DEFAULT_CONNECTIONS.filter(def => !deletedDefaults.includes(def.id));
+    useEffect(() => {
+        const initConnections = async () => {
+            const saved = localStorage.getItem('oracle_connections');
+            const deletedDefaults = JSON.parse(localStorage.getItem('deleted_defaults') || '[]');
 
-        defaultsToAdd.forEach(def => {
-            // Check if default is already present
-            const alreadyExists = initialConnections.some(c => c.id === def.id);
-            if (!alreadyExists) {
-                // Check for name conflict with existing user connections
-                const nameConflictIndex = initialConnections.findIndex(c => c.connectionName === def.connectionName && !c.isDefault);
-                if (nameConflictIndex !== -1) {
-                    // Rename the existing user connection
-                    initialConnections[nameConflictIndex].connectionName = `${initialConnections[nameConflictIndex].connectionName}_OLD`;
+            let localConnections = [];
+            if (saved) {
+                try {
+                    localConnections = JSON.parse(saved);
+                } catch (e) {
+                    console.error("Failed to parse saved connections", e);
+                }
+            }
+
+            // Restore from Valid Backup
+            try {
+                const res = await fetch('http://127.0.0.1:3001/api/config/connections/restore');
+                const restored = await res.json();
+
+                if (Array.isArray(restored) && restored.length > 0) {
+                    // Merge strategy: Unique IDs. Prioritize Restored if Local is empty.
+                    if (localConnections.length === 0) {
+                        localConnections = restored;
+                        localStorage.setItem('oracle_connections', JSON.stringify(localConnections));
+                    } else {
+                        // Merge unique
+                        const localIds = new Set(localConnections.map(c => c.id));
+                        restored.forEach(rc => {
+                            if (!localIds.has(rc.id)) {
+                                localConnections.push(rc);
+                            }
+                        });
+                        localStorage.setItem('oracle_connections', JSON.stringify(localConnections));
+                    }
+                }
+            } catch (e) {
+                console.error("Restore failed or offline", e);
+            }
+
+            // Conflict Resolution and Merging Defaults (Legacy logic kept)
+            let hasChanges = false;
+            const defaultsToAdd = DEFAULT_CONNECTIONS.filter(def => !deletedDefaults.includes(def.id));
+
+            defaultsToAdd.forEach(def => {
+                const alreadyExists = localConnections.some(c => c.id === def.id);
+                if (!alreadyExists) {
+                    const nameConflictIndex = localConnections.findIndex(c => c.connectionName === def.connectionName && !c.isDefault);
+                    if (nameConflictIndex !== -1) {
+                        localConnections[nameConflictIndex].connectionName = `${localConnections[nameConflictIndex].connectionName}_OLD`;
+                    }
+                    localConnections.unshift(def);
                     hasChanges = true;
                 }
-                // Add the default connection
-                initialConnections.unshift(def); // Add to top
-                hasChanges = true;
+            });
+
+            if (hasChanges) {
+                localStorage.setItem('oracle_connections', JSON.stringify(localConnections));
             }
-        });
 
-        if (hasChanges) {
-            localStorage.setItem('oracle_connections', JSON.stringify(initialConnections));
-        }
+            setSavedConnections(localConnections);
+        };
 
-        setSavedConnections(initialConnections);
+        initConnections();
     }, []);
 
     const handleChange = (e) => {
@@ -115,6 +156,7 @@ function ConnectionForm({ onConnect }) {
 
         setSavedConnections(newConnections);
         localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
+        backupConnections(newConnections); // Sync to server file
     };
 
     const handleLoad = (conn) => {
@@ -155,6 +197,7 @@ function ConnectionForm({ onConnect }) {
             const newConnections = savedConnections.filter(c => c.id !== id);
             setSavedConnections(newConnections);
             localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
+            backupConnections(newConnections); // Sync to server file
 
             if (isDefault) {
                 const deletedDefaults = JSON.parse(localStorage.getItem('deleted_defaults') || '[]');

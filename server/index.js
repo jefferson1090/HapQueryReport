@@ -285,6 +285,45 @@ app.get('/api/chat/history', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// --- BACKUP/RESTORE CONNECTIONS ---
+app.post('/api/config/connections/backup', (req, res) => {
+  try {
+    const connections = req.body;
+    if (!Array.isArray(connections)) throw new Error("Format invalid");
+
+    // Persist to UserData (uploadsDir sibling or inside)
+    // uploadsDir is already safe (AppData/HapQueryReport/uploads)
+    // Let's store in the parent of uploads to keep it clean, or inside uploads/config
+    const backupPath = path.join(path.dirname(uploadsDir), 'connections_backup.json');
+
+    fs.writeFileSync(backupPath, JSON.stringify(connections, null, 2));
+    console.log(`[Backup] Connections saved to ${backupPath}`);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("Backup failed", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/config/connections/restore', (req, res) => {
+  try {
+    const backupPath = path.join(path.dirname(uploadsDir), 'connections_backup.json');
+    if (fs.existsSync(backupPath)) {
+      const data = fs.readFileSync(backupPath, 'utf8');
+      const connections = JSON.parse(data);
+      console.log(`[Restore] Restored ${connections.length} connections from ${backupPath}`);
+      res.json(connections);
+    } else {
+      res.json([]);
+    }
+  } catch (e) {
+    console.error("Restore failed", e);
+    // If corruption, return empty to avoid crash
+    res.json([]);
+  }
+});
+
 // --- SYSTEM ROUTES ---
 app.get('/api/config/info', (req, res) => {
   res.json({
