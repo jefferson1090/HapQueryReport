@@ -6,113 +6,24 @@ const DEFAULT_CONNECTIONS = [];
 
 import { useApi } from '../context/ApiContext';
 
-function ConnectionForm({ onConnect, onConnectionsChange }) {
+function ConnectionForm({ onConnect, savedConnections, onSaveConnection, onDeleteConnection }) {
     const [formData, setFormData] = useState({
         user: '',
         password: '',
         connectString: 'localhost:1521/XEPDB1',
         connectionName: ''
     });
-    const [savedConnections, setSavedConnections] = useState([]);
+    // Removed local state: savedConnections
     const [status, setStatus] = useState({ type: '', message: '' });
     const [isEditing, setIsEditing] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [showPassword, setShowPassword] = useState(false);
     const [isViewOnly, setIsViewOnly] = useState(false);
 
-    const { apiUrl } = useApi(); // Ensure we have access to API URL context if needed, or assume relative path /api
+    const { apiUrl } = useApi();
 
-    // Helper to backup
-    const backupConnections = async (connections) => {
-        try {
-            await fetch('http://127.0.0.1:3001/api/config/connections/backup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(connections)
-            });
-        } catch (e) {
-            console.error("Backup failed", e);
-        }
-    };
-
-    useEffect(() => {
-        const initConnections = async () => {
-            const saved = localStorage.getItem('oracle_connections');
-            const deletedDefaults = JSON.parse(localStorage.getItem('deleted_defaults') || '[]');
-
-            let localConnections = [];
-            if (saved) {
-                try {
-                    localConnections = JSON.parse(saved);
-                } catch (e) {
-                    console.error("Failed to parse saved connections", e);
-                }
-            }
-
-            // Restore from Valid Backup
-            try {
-                const res = await fetch('http://127.0.0.1:3001/api/config/connections/restore');
-                const restored = await res.json();
-
-                if (Array.isArray(restored) && restored.length > 0) {
-                    // Merge strategy: Unique IDs. Prioritize Restored if Local is empty.
-                    if (localConnections.length === 0) {
-                        localConnections = restored;
-                        localStorage.setItem('oracle_connections', JSON.stringify(localConnections));
-                    } else {
-                        // Merge unique
-                        const localIds = new Set(localConnections.map(c => c.id));
-                        restored.forEach(rc => {
-                            if (!localIds.has(rc.id)) {
-                                localConnections.push(rc);
-                            }
-                        });
-                        localStorage.setItem('oracle_connections', JSON.stringify(localConnections));
-                    }
-                }
-            } catch (e) {
-                console.error("Restore failed or offline", e);
-            }
-
-            // --- MIGRATION: Force Removal of Deprecated Defaults (v3.0.18) ---
-            const legacyIds = ['default_hml', 'default_prod'];
-            const originalLength = localConnections.length;
-            localConnections = localConnections.filter(c => !legacyIds.includes(c.id));
-
-            if (localConnections.length !== originalLength) {
-                console.log("Purged legacy default connections.");
-                hasChanges = true;
-            }
-            // ------------------------------------------------------------------
-
-            // Conflict Resolution and Merging Defaults (Legacy logic kept)
-            const defaultsToAdd = DEFAULT_CONNECTIONS.filter(def => !deletedDefaults.includes(def.id));
-
-            defaultsToAdd.forEach(def => {
-                const alreadyExists = localConnections.some(c => c.id === def.id);
-                if (!alreadyExists) {
-                    const nameConflictIndex = localConnections.findIndex(c => c.connectionName === def.connectionName && !c.isDefault);
-                    if (nameConflictIndex !== -1) {
-                        localConnections[nameConflictIndex].connectionName = `${localConnections[nameConflictIndex].connectionName}_OLD`;
-                    }
-                    localConnections.unshift(def);
-                    hasChanges = true;
-                }
-            });
-
-            if (hasChanges) {
-                localStorage.setItem('oracle_connections', JSON.stringify(localConnections));
-                backupConnections(localConnections); // Force sync to purge from backup file
-            }
-
-            setSavedConnections(localConnections);
-
-            // Notify Parent with the FRESH list
-            if (onConnectionsChange) onConnectionsChange(localConnections);
-        };
-
-        initConnections();
-    }, []);
+    // Removed internal backup/restore logic. Relies on props.
+    // Removed useEffect for initConnections.
 
     const handleChange = (e) => {
         setFormData({
@@ -152,27 +63,17 @@ function ConnectionForm({ onConnect, onConnectionsChange }) {
             password: encryptPassword(formData.password)
         };
 
-        let newConnections;
         if (isEditing && editingId) {
-            // Update existing
-            newConnections = savedConnections.map(conn =>
-                conn.id === editingId ? { ...encryptedData, id: editingId } : conn
-            );
+            const updated = { ...encryptedData, id: editingId };
+            onSaveConnection(updated);
             setIsEditing(false);
             setEditingId(null);
             setStatus({ type: 'success', message: 'Conexão atualizada!' });
         } else {
-            // Create new
             const newConn = { ...encryptedData, id: Date.now().toString() };
-            newConnections = [...savedConnections, newConn];
+            onSaveConnection(newConn);
             setStatus({ type: 'success', message: 'Conexão salva!' });
         }
-
-        setSavedConnections(newConnections);
-        localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
-        localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
-        backupConnections(newConnections); // Sync to server file
-        if (onConnectionsChange) onConnectionsChange(newConnections);
     };
 
     const handleLoad = (conn) => {
@@ -210,12 +111,7 @@ function ConnectionForm({ onConnect, onConnectionsChange }) {
     const handleDelete = (id, e, isDefault) => {
         e.stopPropagation();
         if (window.confirm('Tem certeza que deseja excluir esta conexão?')) {
-            const newConnections = savedConnections.filter(c => c.id !== id);
-            setSavedConnections(newConnections);
-            localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
-            localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
-            backupConnections(newConnections); // Sync to server file
-            if (onConnectionsChange) onConnectionsChange(newConnections);
+            onDeleteConnection(id);
 
             if (isDefault) {
                 const deletedDefaults = JSON.parse(localStorage.getItem('deleted_defaults') || '[]');

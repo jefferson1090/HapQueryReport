@@ -194,36 +194,116 @@ function App() {
         };
     }, [connectionBadgeExpanded]);
 
-    const loadSavedConnections = (updatedList) => {
-        // If updatedList is provided directly (from Child), use it!
-        if (updatedList && Array.isArray(updatedList)) {
-            setSavedConnections(updatedList);
-            // Also ensure we save to localStorage if we are the authority? 
-            // Actually ConnectionForm saves it, but to be sure we can persist here too or just trust the child.
-            // Let's rely on child saving for now, but update UI immediately.
-            return;
-        }
+    // --- Centralized Connection Logic ---
+    // Single Source of Truth for all ConnectionForm instances
 
-        // Fallback: Read from LocalStorage
-        const saved = localStorage.getItem('oracle_connections');
-        if (saved) {
-            try {
-                setSavedConnections(JSON.parse(saved));
-            } catch (e) { console.error(e); }
+    // Helper to backup (Server Sync)
+    const backupConnections = async (connections) => {
+        try {
+            if (window.electronAPI) {
+                // Or use fetch if server is running separately, but App.jsx uses context.
+                // Let's reuse the fetch approach from ConnectionForm for consistency with existing backend
+                await fetch(`${apiUrl}/api/config/connections/backup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(connections)
+                });
+            } else {
+                await fetch(`${apiUrl}/api/config/connections/backup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(connections)
+                });
+            }
+        } catch (e) {
+            console.error("Backup failed", e);
         }
     };
 
-    useEffect(() => {
-        loadSavedConnections();
-        // Listen for storage changes in case ConnectionForm updates it
-        const handleStorageChange = (e) => {
-            if (e.key === 'oracle_connections') {
-                loadSavedConnections();
+    const initConnections = async () => {
+        const saved = localStorage.getItem('oracle_connections');
+        // Legacy Cleanup
+        const legacyIds = ['default_hml', 'default_prod', 'c_stenio']; // Added c_stenio explicitly here if needed or rely on ID check
+        let localConnections = [];
+
+        if (saved) {
+            try {
+                localConnections = JSON.parse(saved);
+            } catch (e) { console.error(e); }
+        }
+
+        // Restore from Valid Backup (Server Side)
+        try {
+            const res = await fetch(`${apiUrl}/api/config/connections/restore`);
+            const restored = await res.json();
+
+            if (Array.isArray(restored) && restored.length > 0) {
+                if (localConnections.length === 0) {
+                    localConnections = restored;
+                } else {
+                    // Merge unique
+                    const localIds = new Set(localConnections.map(c => c.id));
+                    restored.forEach(rc => {
+                        if (!localIds.has(rc.id)) {
+                            localConnections.push(rc);
+                        }
+                    });
+                }
             }
-        };
-        window.addEventListener('storage', handleStorageChange);
-        return () => window.removeEventListener('storage', handleStorageChange);
-    }, []);
+        } catch (e) {
+            console.error("Restore failed or offline", e);
+        }
+
+        // --- PURGE LEGACY DEFAULTS (Robust) ---
+        // Filter out any connection that has specific legacy IDs OR specific user/host combos if needed
+        const originalLength = localConnections.length;
+        localConnections = localConnections.filter(c => !legacyIds.includes(c.id));
+
+        // Also strictly filter out c_stenio if it has a dynamic ID but specific user
+        localConnections = localConnections.filter(c => c.user !== 'c_stenio');
+
+        let hasChanges = localConnections.length !== originalLength;
+
+        // Default Connections Logic (if any DEFAULT_CONNECTIONS were defined globally, they should be imported or defined here)
+        // Assuming DEFAULT_CONNECTIONS are empty or not strictly needed given the user request to REMOVE defaults.
+        // We will skip adding defaults to ensure cleanliness.
+
+        if (hasChanges || localConnections.length > 0) {
+            setSavedConnections(localConnections);
+            localStorage.setItem('oracle_connections', JSON.stringify(localConnections));
+            backupConnections(localConnections);
+        } else {
+            setSavedConnections([]);
+        }
+    };
+
+    const handleSaveConnection = (newConnection) => {
+        let newConnections;
+        // Check if update or create
+        const exists = savedConnections.some(c => c.id === newConnection.id);
+        if (exists) {
+            newConnections = savedConnections.map(c => c.id === newConnection.id ? newConnection : c);
+        } else {
+            newConnections = [...savedConnections, newConnection];
+        }
+
+        setSavedConnections(newConnections);
+        localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
+        backupConnections(newConnections);
+    };
+
+    const handleDeleteConnection = (id) => {
+        const newConnections = savedConnections.filter(c => c.id !== id);
+        setSavedConnections(newConnections);
+        localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
+        backupConnections(newConnections);
+    };
+
+    useEffect(() => {
+        if (apiUrl) {
+            initConnections();
+        }
+    }, [apiUrl]);
 
     const handleQuickSwitch = async (conn) => {
         const decryptedConn = {
@@ -856,7 +936,12 @@ function App() {
                                 <div key="view-sql-runner" className={`${activeTab === 'sql-runner' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                     <ErrorBoundary>
                                         {!connection ? (
-                                            <ConnectionForm onConnect={handleConnect} onConnectionsChange={loadSavedConnections} />
+                                            <ConnectionForm
+                                                onConnect={handleConnect}
+                                                savedConnections={savedConnections}
+                                                onSaveConnection={handleSaveConnection}
+                                                onDeleteConnection={handleDeleteConnection}
+                                            />
                                         ) : (
                                             <React.Suspense fallback={<div className="p-4 flex items-center justify-center">Carregando Editor SQL...</div>}>
                                                 <SqlRunner
@@ -878,7 +963,12 @@ function App() {
                                 <div key="view-query-builder" className={`${activeTab === 'query-builder' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                     <ErrorBoundary>
                                         {!connection ? (
-                                            <ConnectionForm onConnect={handleConnect} onConnectionsChange={loadSavedConnections} />
+                                            <ConnectionForm
+                                                onConnect={handleConnect}
+                                                savedConnections={savedConnections}
+                                                onSaveConnection={handleSaveConnection}
+                                                onDeleteConnection={handleDeleteConnection}
+                                            />
                                         ) : (
                                             <AiBuilder
                                                 isVisible={activeTab === 'query-builder'}
@@ -894,7 +984,13 @@ function App() {
                                 <div key="view-csv-importer" className={`${activeTab === 'csv-importer' ? 'block h-full' : 'hidden'} w-full animate-tech-reveal`}>
                                     <ErrorBoundary>
                                         {!connection ? (
-                                            <ConnectionForm onConnect={handleConnect} onConnectionsChange={loadSavedConnections} />
+                                            <ConnectionForm
+                                                onConnect={handleConnect}
+                                                savedConnections={savedConnections}
+                                                onSaveConnection={handleSaveConnection}
+                                                onDeleteConnection={handleDeleteConnection}
+                                                connection={connection}
+                                            />
                                         ) : (
                                             <CsvImporter
                                                 isVisible={activeTab === 'csv-importer'}
