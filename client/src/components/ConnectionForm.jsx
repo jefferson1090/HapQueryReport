@@ -74,8 +74,18 @@ function ConnectionForm({ onConnect }) {
                 console.error("Restore failed or offline", e);
             }
 
+            // --- MIGRATION: Force Removal of Deprecated Defaults (v3.0.18) ---
+            const legacyIds = ['default_hml', 'default_prod'];
+            const originalLength = localConnections.length;
+            localConnections = localConnections.filter(c => !legacyIds.includes(c.id));
+
+            if (localConnections.length !== originalLength) {
+                console.log("Purged legacy default connections.");
+                hasChanges = true;
+            }
+            // ------------------------------------------------------------------
+
             // Conflict Resolution and Merging Defaults (Legacy logic kept)
-            let hasChanges = false;
             const defaultsToAdd = DEFAULT_CONNECTIONS.filter(def => !deletedDefaults.includes(def.id));
 
             defaultsToAdd.forEach(def => {
@@ -92,6 +102,7 @@ function ConnectionForm({ onConnect }) {
 
             if (hasChanges) {
                 localStorage.setItem('oracle_connections', JSON.stringify(localConnections));
+                backupConnections(localConnections); // Force sync to purge from backup file
             }
 
             setSavedConnections(localConnections);
