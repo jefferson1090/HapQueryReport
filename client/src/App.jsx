@@ -228,7 +228,8 @@ function App() {
 
         if (saved) {
             try {
-                localConnections = JSON.parse(saved);
+                const parsed = JSON.parse(saved);
+                localConnections = Array.isArray(parsed) ? parsed : [];
             } catch (e) { console.error(e); }
         }
 
@@ -948,6 +949,7 @@ function App() {
                                                     isVisible={activeTab === 'sql-runner'}
                                                     tabs={sqlTabs}
                                                     setTabs={setSqlTabs}
+                                                    savedConnections={savedConnections}
                                                     activeTabId={activeSqlTabId}
                                                     setActiveTabId={setActiveSqlTabId}
                                                     onDisconnect={handleDisconnect}

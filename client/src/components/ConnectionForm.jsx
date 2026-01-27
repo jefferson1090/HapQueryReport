@@ -6,7 +6,9 @@ const DEFAULT_CONNECTIONS = [];
 
 import { useApi } from '../context/ApiContext';
 
-function ConnectionForm({ onConnect, savedConnections, onSaveConnection, onDeleteConnection }) {
+function ConnectionForm({ onConnect, savedConnections = [], onSaveConnection, onDeleteConnection }) {
+    const safeSavedConnections = Array.isArray(savedConnections) ? savedConnections : [];
+
     const [formData, setFormData] = useState({
         user: '',
         password: '',
@@ -171,14 +173,14 @@ function ConnectionForm({ onConnect, savedConnections, onSaveConnection, onDelet
                     </div>
 
                     <div className="flex-1 overflow-y-auto space-y-3 p-4 custom-scrollbar bg-blue-600">
-                        {savedConnections.length === 0 && (
+                        {safeSavedConnections.length === 0 && (
                             <div className="text-center py-10 px-6 rounded-xl border border-dashed border-blue-400/50 bg-blue-500/30">
                                 <div className="text-3xl mb-2 opacity-50">📭</div>
                                 <p className="text-blue-100 font-medium text-sm">Nenhuma conexão salva.</p>
                                 <p className="text-[10px] text-blue-200/70 mt-1">Crie uma nova conexão ao lado.</p>
                             </div>
                         )}
-                        {savedConnections.map((conn, index) => (
+                        {safeSavedConnections.map((conn, index) => (
                             <div
                                 key={conn.id || index}
                                 onClick={() => handleLoad(conn)}
