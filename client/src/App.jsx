@@ -260,8 +260,7 @@ function App() {
         const originalLength = localConnections.length;
         localConnections = localConnections.filter(c => !legacyIds.includes(c.id));
 
-        // Also strictly filter out c_stenio if it has a dynamic ID but specific user
-        localConnections = localConnections.filter(c => c.user !== 'c_stenio');
+
 
         let hasChanges = localConnections.length !== originalLength;
 
