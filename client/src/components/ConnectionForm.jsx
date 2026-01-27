@@ -107,8 +107,8 @@ function ConnectionForm({ onConnect, onConnectionsChange }) {
 
             setSavedConnections(localConnections);
 
-            // Notify Parent
-            if (onConnectionsChange) onConnectionsChange();
+            // Notify Parent with the FRESH list
+            if (onConnectionsChange) onConnectionsChange(localConnections);
         };
 
         initConnections();
@@ -172,7 +172,7 @@ function ConnectionForm({ onConnect, onConnectionsChange }) {
         localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
         localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
         backupConnections(newConnections); // Sync to server file
-        if (onConnectionsChange) onConnectionsChange();
+        if (onConnectionsChange) onConnectionsChange(newConnections);
     };
 
     const handleLoad = (conn) => {
@@ -215,7 +215,7 @@ function ConnectionForm({ onConnect, onConnectionsChange }) {
             localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
             localStorage.setItem('oracle_connections', JSON.stringify(newConnections));
             backupConnections(newConnections); // Sync to server file
-            if (onConnectionsChange) onConnectionsChange();
+            if (onConnectionsChange) onConnectionsChange(newConnections);
 
             if (isDefault) {
                 const deletedDefaults = JSON.parse(localStorage.getItem('deleted_defaults') || '[]');

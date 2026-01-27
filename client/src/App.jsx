@@ -194,7 +194,17 @@ function App() {
         };
     }, [connectionBadgeExpanded]);
 
-    const loadSavedConnections = () => {
+    const loadSavedConnections = (updatedList) => {
+        // If updatedList is provided directly (from Child), use it!
+        if (updatedList && Array.isArray(updatedList)) {
+            setSavedConnections(updatedList);
+            // Also ensure we save to localStorage if we are the authority? 
+            // Actually ConnectionForm saves it, but to be sure we can persist here too or just trust the child.
+            // Let's rely on child saving for now, but update UI immediately.
+            return;
+        }
+
+        // Fallback: Read from LocalStorage
         const saved = localStorage.getItem('oracle_connections');
         if (saved) {
             try {
