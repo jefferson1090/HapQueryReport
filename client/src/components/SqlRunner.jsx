@@ -353,7 +353,7 @@ const SqlRunnerRow = ({ index, style, data }) => {
 
 // ... SqlRunnerRow component (unchanged)
 
-const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, savedQueries, setSavedQueries, onDisconnect, connection: globalConnection, savedConnections }) => {
+const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, savedQueries, setSavedQueries, onDisconnect, connection: globalConnection, savedConnections, onSaveConnection, onDeleteConnection }) => {
     const { theme } = useContext(ThemeContext);
     const { apiUrl } = useApi();
     const [toast, setToast] = useState(null);
@@ -1306,6 +1306,8 @@ const SqlRunner = ({ isVisible, tabs, setTabs, activeTabId, setActiveTabId, save
                             </button>
                             <ConnectionForm
                                 savedConnections={savedConnections}
+                                onSaveConnection={onSaveConnection}
+                                onDeleteConnection={onDeleteConnection}
                                 onConnect={(connData) => {
                                     updateActiveTab({ connection: connData });
                                     setTempConnection({ ...tempConnection, showFullForm: false });

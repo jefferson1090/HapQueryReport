@@ -950,6 +950,8 @@ function App() {
                                                     tabs={sqlTabs}
                                                     setTabs={setSqlTabs}
                                                     savedConnections={savedConnections}
+                                                    onSaveConnection={handleSaveConnection}
+                                                    onDeleteConnection={handleDeleteConnection}
                                                     activeTabId={activeSqlTabId}
                                                     setActiveTabId={setActiveSqlTabId}
                                                     onDisconnect={handleDisconnect}
