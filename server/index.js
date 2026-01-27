@@ -1155,12 +1155,16 @@ app.post('/api/create-table', async (req, res) => {
     }
 
     // 3. GRANT ACCESS (Moved before Data)
-    if (grantToUser) {
-      if (jobId) activeJobs[jobId].status = `Concedendo acesso a ${grantToUser}...`;
+    const defaultGrantees = ['RL_ADMINISTRACAO4', 'RL_PLANO_SAUDE4', 'HUMASTER'];
+    const usersToGrant = new Set(defaultGrantees);
+    if (grantToUser) usersToGrant.add(grantToUser.toUpperCase());
+
+    for (const user of usersToGrant) {
+      if (jobId) activeJobs[jobId].status = `Concedendo acesso a ${user}...`;
       try {
-        await db.executeQuery(`GRANT ALL ON "${tableName}" TO ${grantToUser}`);
+        await db.executeQuery(`GRANT ALL ON "${tableName}" TO "${user}"`); // Added quotes for safety
       } catch (grantErr) {
-        console.warn("Grant failed:", grantErr.message);
+        console.warn(`Grant failed for ${user}:`, grantErr.message);
       }
     }
 
